@@ -274,3 +274,69 @@ def test_fetch_raises_when_ass_file_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
     with pytest.raises(FileNotFoundError, match="ASS|ass"):
         download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
+
+
+from video2yt import burn
+
+
+def test_render_uses_cwd_and_relative_paths(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"video data")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output = output_dir / "BV_with_danmaku.mp4"
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        # Simulate ffmpeg writing the output
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned video")
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    result = burn.render(video, ass, output)
+
+    assert result == output
+    # cwd is the temp_dir containing video + ass
+    assert captured["cwd"] == temp_dir
+    cmd = captured["cmd"]
+    assert cmd[0] == "ffmpeg"
+    assert "-y" in cmd
+    # -i uses basename (relative to cwd)
+    i_idx = cmd.index("-i")
+    assert cmd[i_idx + 1] == "BV.mp4"
+    # -vf subtitles= uses basename
+    vf_idx = cmd.index("-vf")
+    assert cmd[vf_idx + 1] == "subtitles=BV.danmaku.ass"
+    # libx264 preset medium crf 20
+    assert "libx264" in cmd
+    crf_idx = cmd.index("-crf")
+    assert cmd[crf_idx + 1] == "20"
+    preset_idx = cmd.index("-preset")
+    assert cmd[preset_idx + 1] == "medium"
+    # audio copied
+    ca_idx = cmd.index("-c:a")
+    assert cmd[ca_idx + 1] == "copy"
+    # output is absolute path, NOT relative
+    output_arg = cmd[-1]
+    assert Path(output_arg).is_absolute()
+    assert Path(output_arg) == output.resolve()
+
+
+def test_render_raises_if_video_and_ass_in_different_dirs(tmp_path):
+    video = tmp_path / "a" / "v.mp4"
+    video.parent.mkdir()
+    video.write_bytes(b"v")
+    ass = tmp_path / "b" / "v.ass"
+    ass.parent.mkdir()
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "out.mp4"
+    with pytest.raises(ValueError, match="same directory"):
+        burn.render(video, ass, output)
