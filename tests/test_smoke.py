@@ -366,3 +366,34 @@ def test_extract_bv_raises_on_non_bilibili_url():
 def test_extract_bv_raises_on_empty_string():
     with pytest.raises(ValueError, match="BV"):
         cli.extract_bv_id("")
+
+
+def test_preflight_passes_when_everything_present(monkeypatch):
+    monkeypatch.setattr("video2yt.cli.shutil.which", lambda name: f"/usr/local/bin/{name}")
+    # biliass already installed in dev env; import should succeed
+    cli.preflight()  # should not raise
+
+
+def test_preflight_fails_without_ffmpeg(monkeypatch):
+    def fake_which(name):
+        return None if name == "ffmpeg" else f"/usr/local/bin/{name}"
+    monkeypatch.setattr("video2yt.cli.shutil.which", fake_which)
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        cli.preflight()
+
+
+def test_preflight_fails_without_ffprobe(monkeypatch):
+    def fake_which(name):
+        return None if name == "ffprobe" else f"/usr/local/bin/{name}"
+    monkeypatch.setattr("video2yt.cli.shutil.which", fake_which)
+    with pytest.raises(RuntimeError, match="ffprobe"):
+        cli.preflight()
+
+
+def test_preflight_fails_without_biliass(monkeypatch):
+    monkeypatch.setattr("video2yt.cli.shutil.which", lambda name: f"/usr/local/bin/{name}")
+    import sys
+    # Force biliass import to fail by injecting a sentinel into sys.modules
+    monkeypatch.setitem(sys.modules, "biliass", None)
+    with pytest.raises(RuntimeError, match="yt-dlp-danmaku|biliass"):
+        cli.preflight()
