@@ -10,6 +10,18 @@ from video2yt import burn, download, validate
 
 BV_PATTERN = re.compile(r"/video/(BV[A-Za-z0-9]+)")
 
+# Bilibili's native danmaku scaling: the web/client player renders a standard
+# (nominal size=25) danmaku at ``player_height * 25 / 540`` pixels. This
+# matches what a user sees on bilibili.com, so computing font_size from the
+# real video height reproduces the same on-screen size.
+REFERENCE_PLAYER_HEIGHT = 540
+REFERENCE_STANDARD_SIZE = 25
+
+
+def compute_font_size(video_height: int) -> int:
+    """Compute danmaku font size using Bilibili's native scaling formula."""
+    return round(video_height * REFERENCE_STANDARD_SIZE / REFERENCE_PLAYER_HEIGHT)
+
 
 def extract_bv_id(url: str) -> str:
     """Extract the BV id from a Bilibili video URL."""
@@ -79,8 +91,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--font-size", type=int, default=40,
-        help="Font size in pixels for rendered danmaku (default: 40)",
+        "--font-size", type=int, default=None,
+        help=(
+            "Font size in pixels for standard (size=25) danmaku. "
+            "Default: auto — computed from video height using Bilibili's "
+            "native formula video_height * 25 / 540."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -96,20 +112,37 @@ def run(args: argparse.Namespace) -> Path:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     _log(f"downloading {bv_id} (quality<={args.quality}, browser={args.browser})")
-    video_path, ass_path = download.fetch(
+    video_path, xml_path = download.fetch(
         url=args.url,
         temp_dir=args.temp_dir,
         quality=args.quality,
         browser=args.browser,
         bv_id=bv_id,
-        font_face=args.font_face,
-        font_size=args.font_size,
     )
 
     _log("probing source video")
     source_info = validate.probe(video_path)
     for w in validate.check_source(source_info, args.quality):
         _log(f"warning: {w}")
+
+    font_size = (
+        args.font_size if args.font_size is not None
+        else compute_font_size(source_info.height)
+    )
+    _log(
+        f"danmaku font: face={args.font_face!r} size={font_size}px "
+        f"(video is {source_info.width}x{source_info.height})"
+    )
+
+    ass_path = args.temp_dir / f"{bv_id}.danmaku.ass"
+    download.generate_ass(
+        xml_path=xml_path,
+        ass_path=ass_path,
+        width=source_info.width,
+        height=source_info.height,
+        font_face=args.font_face,
+        font_size=font_size,
+    )
 
     n_danmaku = validate.check_ass(ass_path)
     _log(f"detected {n_danmaku} danmaku lines")
@@ -126,6 +159,7 @@ def run(args: argparse.Namespace) -> Path:
     if not args.keep_temp:
         _log("cleaning up temp files")
         video_path.unlink(missing_ok=True)
+        xml_path.unlink(missing_ok=True)
         ass_path.unlink(missing_ok=True)
 
     return output_path

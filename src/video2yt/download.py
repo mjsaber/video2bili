@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import biliass
+
 
 def fetch(
     url: str,
@@ -8,12 +10,12 @@ def fetch(
     quality: int,
     browser: str,
     bv_id: str,
-    font_face: str = "Hiragino Sans GB",
-    font_size: int = 40,
 ) -> tuple[Path, Path]:
-    """Download video + danmaku ASS via yt-dlp + yt-dlp-danmaku plugin.
+    """Download video and raw danmaku XML via yt-dlp.
 
-    Returns (video_path, ass_path).
+    Returns (video_path, xml_path). The ASS conversion happens separately in
+    ``generate_ass`` so we can supply the real video dimensions (which aren't
+    known until we probe the downloaded file) to biliass.
     """
     temp_dir.mkdir(parents=True, exist_ok=True)
     output_template = str(temp_dir / f"{bv_id}.%(ext)s")
@@ -24,7 +26,7 @@ def fetch(
         "--cookies-from-browser", browser,
         "-f", format_spec,
         "--write-subs",
-        "--use-postprocessor", f"danmaku:font_face={font_face};font_size={font_size}",
+        "--sub-langs", "danmaku",
         "--output", output_template,
         url,
     ]
@@ -42,12 +44,38 @@ def fetch(
         )
     video_path = video_candidates[0]
 
-    # Find the ASS file (plugin decides exact suffix; usually .danmaku.ass)
-    ass_candidates = sorted(temp_dir.glob(f"{bv_id}*.ass"))
-    if not ass_candidates:
+    # Raw danmaku XML written by --write-subs (typically BV.danmaku.xml)
+    xml_candidates = sorted(temp_dir.glob(f"{bv_id}*.xml"))
+    if not xml_candidates:
         raise FileNotFoundError(
-            f"yt-dlp-danmaku did not produce an ASS file for {bv_id} in {temp_dir}"
+            f"yt-dlp did not produce a danmaku XML file for {bv_id} in {temp_dir}"
         )
-    ass_path = ass_candidates[0]
+    xml_path = xml_candidates[0]
 
-    return video_path, ass_path
+    return video_path, xml_path
+
+
+def generate_ass(
+    xml_path: Path,
+    ass_path: Path,
+    width: int,
+    height: int,
+    font_face: str,
+    font_size: int,
+) -> Path:
+    """Convert Bilibili danmaku XML to ASS via biliass.
+
+    The ``font_size`` parameter is what biliass renders a standard
+    (nominal size=25) danmaku as — biliass itself scales non-standard danmaku
+    proportionally.
+    """
+    xml_bytes = xml_path.read_bytes()
+    ass_text = biliass.convert_to_ass(
+        xml_bytes,
+        stage_width=width,
+        stage_height=height,
+        font_face=font_face,
+        font_size=font_size,
+    )
+    ass_path.write_text(ass_text, encoding="utf-8")
+    return ass_path

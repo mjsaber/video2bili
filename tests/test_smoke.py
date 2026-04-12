@@ -195,17 +195,17 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
-        # Simulate yt-dlp producing the output files
+        # Simulate yt-dlp producing the raw video + danmaku XML
         (tmp_path / "BV191DpBmE2t.mp4").write_bytes(b"fake video")
-        (tmp_path / "BV191DpBmE2t.danmaku.ass").write_text(
-            "[Events]\nDialogue: 0,0:00:01.00,0:00:05.00,Default,hi\n",
-            encoding="utf-8",
+        (tmp_path / "BV191DpBmE2t.danmaku.xml").write_bytes(
+            b'<?xml version="1.0" encoding="UTF-8"?><i>'
+            b'<d p="1.0,1,25,16777215,1,0,0,0">hello</d></i>'
         )
         return MagicMock(returncode=0)
 
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
 
-    video, ass = download.fetch(
+    video, xml = download.fetch(
         url="https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x",
         temp_dir=tmp_path,
         quality=1080,
@@ -222,13 +222,13 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
     fmt_idx = cmd.index("-f")
     assert "height<=1080" in cmd[fmt_idx + 1]
     assert cmd[fmt_idx + 1].endswith("/b")  # fallback sentinel
-    # danmaku postprocessor
-    assert "--use-postprocessor" in cmd
-    pp_idx = cmd.index("--use-postprocessor")
-    # With defaults
-    assert cmd[pp_idx + 1] == "danmaku:font_face=Hiragino Sans GB;font_size=40"
-    # write-subs present
+    # raw danmaku XML via --write-subs + --sub-langs
     assert "--write-subs" in cmd
+    assert "--sub-langs" in cmd
+    sl_idx = cmd.index("--sub-langs")
+    assert cmd[sl_idx + 1] == "danmaku"
+    # postprocessor is NOT used anymore — biliass is called from Python
+    assert "--use-postprocessor" not in cmd
     # output template contains BV id and %(ext)s
     out_idx = cmd.index("--output")
     assert "BV191DpBmE2t" in cmd[out_idx + 1]
@@ -237,7 +237,8 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
     assert cmd[-1] == "https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x"
 
     assert video == tmp_path / "BV191DpBmE2t.mp4"
-    assert ass == tmp_path / "BV191DpBmE2t.danmaku.ass"
+    assert xml.suffix == ".xml"
+    assert xml == tmp_path / "BV191DpBmE2t.danmaku.xml"
 
 
 def test_fetch_uses_quality_720(tmp_path, monkeypatch):
@@ -245,8 +246,8 @@ def test_fetch_uses_quality_720(tmp_path, monkeypatch):
         fmt_idx = cmd.index("-f")
         assert "height<=720" in cmd[fmt_idx + 1]
         (tmp_path / "BV.mp4").write_bytes(b"v")
-        (tmp_path / "BV.danmaku.ass").write_text(
-            "[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8",
+        (tmp_path / "BV.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>x</d></i>"
         )
         return MagicMock(returncode=0)
 
@@ -256,9 +257,9 @@ def test_fetch_uses_quality_720(tmp_path, monkeypatch):
 
 def test_fetch_raises_when_video_file_missing(tmp_path, monkeypatch):
     def fake_run(cmd, **kwargs):
-        # Only create the ASS file, skip the video
-        (tmp_path / "BV.danmaku.ass").write_text(
-            "[Events]\nDialogue: x\n", encoding="utf-8",
+        # Only create the XML file, skip the video
+        (tmp_path / "BV.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>x</d></i>"
         )
         return MagicMock(returncode=0)
 
@@ -273,27 +274,46 @@ def test_fetch_raises_when_ass_file_missing(tmp_path, monkeypatch):
         return MagicMock(returncode=0)
 
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
-    with pytest.raises(FileNotFoundError, match="ASS|ass"):
+    with pytest.raises(FileNotFoundError, match="XML|xml|danmaku"):
         download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
 
 
-def test_fetch_uses_custom_font_options(tmp_path, monkeypatch):
-    captured = {}
-    def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        (tmp_path / "BV.mp4").write_bytes(b"v")
-        (tmp_path / "BV.danmaku.ass").write_text(
-            "[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8",
-        )
-        return MagicMock(returncode=0)
-    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
-
-    download.fetch(
-        "https://x/video/BV", tmp_path, 1080, "chrome", "BV",
-        font_face="Noto Sans CJK SC", font_size=32,
+def test_generate_ass_passes_font_params(tmp_path, monkeypatch):
+    """generate_ass calls biliass.convert_to_ass with our stage + font params."""
+    xml = tmp_path / "BV.danmaku.xml"
+    xml.write_bytes(
+        b'<?xml version="1.0" encoding="UTF-8"?><i>'
+        b'<d p="1.0,1,25,16777215,1,0,0,0">hello</d></i>'
     )
-    pp_idx = captured["cmd"].index("--use-postprocessor")
-    assert captured["cmd"][pp_idx + 1] == "danmaku:font_face=Noto Sans CJK SC;font_size=32"
+    ass = tmp_path / "BV.danmaku.ass"
+
+    captured = {}
+
+    def fake_convert(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return "[Script Info]\nTitle: test\n\n[Events]\nDialogue: 0,0,0,Default,hi\n"
+
+    monkeypatch.setattr("video2yt.download.biliass.convert_to_ass", fake_convert)
+
+    from video2yt.download import generate_ass
+    generate_ass(
+        xml_path=xml,
+        ass_path=ass,
+        width=480,
+        height=852,
+        font_face="Hiragino Sans GB",
+        font_size=39,
+    )
+
+    assert ass.exists()
+    # biliass signature: convert_to_ass(inputs, stage_width, stage_height, ...)
+    assert captured["kwargs"].get("font_face") == "Hiragino Sans GB"
+    assert captured["kwargs"].get("font_size") == 39
+    assert captured["kwargs"].get("stage_width") == 480
+    assert captured["kwargs"].get("stage_height") == 852
+    # First positional arg is the XML bytes
+    assert captured["args"][0] == xml.read_bytes()
 
 
 from video2yt import burn
@@ -428,7 +448,23 @@ def test_parse_args_defaults():
     assert args.browser == "chrome"
     assert args.keep_temp is False
     assert args.font_face == "Hiragino Sans GB"
-    assert args.font_size == 40
+    assert args.font_size is None
+
+
+def test_compute_font_size_matches_bilibili_reference():
+    assert cli.compute_font_size(540) == 25  # reference point
+    assert cli.compute_font_size(1080) == 50
+    assert cli.compute_font_size(2160) == 100
+
+
+def test_compute_font_size_for_test_video():
+    # BV191DpBmE2t is 480x852 vertical; height=852 → ~39-40
+    result = cli.compute_font_size(852)
+    assert 38 <= result <= 41
+
+
+def test_compute_font_size_for_720p():
+    assert cli.compute_font_size(720) == 33  # 720/21.6 = 33.33
 
 
 def test_parse_args_custom():
@@ -463,20 +499,25 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
     # Skip dep preflight
     monkeypatch.setattr("video2yt.cli.preflight", lambda: call_log.append("preflight"))
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id, font_face, font_size):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
         call_log.append(f"fetch:{bv_id}:{quality}:{browser}")
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"fakevideo")
-        a = temp_dir / f"{bv_id}.danmaku.ass"
-        a.write_text(
+        x = temp_dir / f"{bv_id}.danmaku.xml"
+        x.write_bytes(b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>")
+        return v, x
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        call_log.append(f"generate_ass:{width}x{height}:{font_face}:{font_size}")
+        ass_path.write_text(
             "[Events]\n"
             "Format: Layer, Start, End, Style, Text\n"
             "Dialogue: 0,0:00:01.00,0:00:05.00,Default,hi\n",
             encoding="utf-8",
         )
-        return v, a
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
 
     probe_calls = []
     source_info = MediaInfo(
@@ -517,7 +558,8 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
     # Verify call order
     assert call_log[0] == "preflight"
     assert call_log[1] == "fetch:BV191DpBmE2t:1080:chrome"
-    assert call_log[2] == "render:BV191DpBmE2t_with_danmaku.mp4"
+    assert call_log[2] == "generate_ass:1920x1080:Hiragino Sans GB:50"
+    assert call_log[3] == "render:BV191DpBmE2t_with_danmaku.mp4"
     # Probe called twice: source then output
     assert len(probe_calls) == 2
 
@@ -525,14 +567,18 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
 def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id, font_face, font_size):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"v")
-        a = temp_dir / f"{bv_id}.danmaku.ass"
-        a.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
-        return v, a
+        x = temp_dir / f"{bv_id}.danmaku.xml"
+        x.write_bytes(b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>")
+        return v, x
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
     monkeypatch.setattr(
         "video2yt.cli.validate.probe",
         lambda p: MediaInfo(
@@ -559,19 +605,24 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
     # Temp files gone
     assert not (tmp_path / "tmp" / "BV1.mp4").exists()
     assert not (tmp_path / "tmp" / "BV1.danmaku.ass").exists()
+    assert not (tmp_path / "tmp" / "BV1.danmaku.xml").exists()
 
 
 def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id, font_face, font_size):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"v")
-        a = temp_dir / f"{bv_id}.danmaku.ass"
-        a.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
-        return v, a
+        x = temp_dir / f"{bv_id}.danmaku.xml"
+        x.write_bytes(b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>")
+        return v, x
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
     monkeypatch.setattr(
         "video2yt.cli.validate.probe",
         lambda p: MediaInfo(
@@ -594,6 +645,112 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     cli.run(args)
     assert (tmp_path / "tmp" / "BV1.mp4").exists()
     assert (tmp_path / "tmp" / "BV1.danmaku.ass").exists()
+    assert (tmp_path / "tmp" / "BV1.danmaku.xml").exists()
+
+
+def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
+    """When --font-size is not specified, run() computes it from probed height."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    captured_font_size = []
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        captured_font_size.append(font_size)
+        ass_path.write_text(
+            "[Events]\nFormat: Layer\nDialogue: 0,0,0,D,hi\n", encoding="utf-8",
+        )
+
+    source_info = MediaInfo(
+        duration=60.0, width=480, height=852,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=480, height=852,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=11_000_000,
+    )
+    probe_calls = []
+
+    def fake_probe(path):
+        probe_calls.append(path)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+    )
+
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV1/",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+    ])
+    cli.run(args)
+    # auto-computed for height=852: 852/21.6 ≈ 39
+    assert 38 <= captured_font_size[0] <= 41
+
+
+def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
+    """When --font-size is explicit, run() bypasses compute_font_size."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    captured_font_size = []
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        captured_font_size.append(font_size)
+        ass_path.write_text(
+            "[Events]\nFormat: Layer\nDialogue: 0,0,0,D,hi\n", encoding="utf-8",
+        )
+
+    source_info = MediaInfo(
+        duration=60.0, width=480, height=852,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=480, height=852,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=11_000_000,
+    )
+    probe_calls = []
+
+    def fake_probe(path):
+        probe_calls.append(path)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+    )
+
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV1/",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--font-size", "60",
+    ])
+    cli.run(args)
+    # Explicit value should be used as-is, bypassing compute_font_size
+    assert captured_font_size == [60]
 
 
 def test_main_returns_1_on_value_error(tmp_path, monkeypatch, capsys):
