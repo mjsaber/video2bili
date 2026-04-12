@@ -223,13 +223,14 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
 
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
 
-    video, xml = download.fetch(
+    video, xml, from_cache = download.fetch(
         url="https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x",
         temp_dir=tmp_path,
         quality=1080,
         browser="chrome",
         bv_id="BV191DpBmE2t",
     )
+    assert from_cache is False
 
     cmd = captured["cmd"]
     assert cmd[0] == "yt-dlp"
@@ -325,6 +326,81 @@ def test_fetch_raises_when_ass_file_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
     with pytest.raises(FileNotFoundError, match="XML|xml|danmaku"):
         download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
+
+
+def test_fetch_uses_cache_when_files_exist(tmp_path, monkeypatch):
+    """When temp_dir already contains both video and xml, fetch skips yt-dlp."""
+    (tmp_path / "BV123.mp4").write_bytes(b"cached video")
+    (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i></i>")
+
+    call_count = {"n": 0}
+    def fake_run(cmd, **kwargs):
+        call_count["n"] += 1
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    video, xml, from_cache = download.fetch(
+        "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
+    )
+    assert call_count["n"] == 0  # yt-dlp NOT invoked
+    assert from_cache is True
+    assert video == tmp_path / "BV123.mp4"
+    assert xml == tmp_path / "BV123.danmaku.xml"
+
+
+def test_fetch_downloads_when_no_cache(tmp_path, monkeypatch):
+    """Empty temp_dir — fetch calls yt-dlp and returns from_cache=False."""
+    call_count = {"n": 0}
+    def fake_run(cmd, **kwargs):
+        call_count["n"] += 1
+        (tmp_path / "BV123.mp4").write_bytes(b"v")
+        (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i></i>")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    video, xml, from_cache = download.fetch(
+        "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
+    )
+    assert call_count["n"] == 1
+    assert from_cache is False
+
+
+def test_fetch_downloads_when_xml_missing_from_cache(tmp_path, monkeypatch):
+    """Partial cache (only video) -> cache miss -> full download."""
+    (tmp_path / "BV123.mp4").write_bytes(b"old video")
+
+    call_count = {"n": 0}
+    def fake_run(cmd, **kwargs):
+        call_count["n"] += 1
+        # Simulate yt-dlp producing both files
+        (tmp_path / "BV123.mp4").write_bytes(b"new video")
+        (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i></i>")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    video, xml, from_cache = download.fetch(
+        "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
+    )
+    assert call_count["n"] == 1
+    assert from_cache is False
+
+
+def test_fetch_downloads_when_video_missing_from_cache(tmp_path, monkeypatch):
+    """Partial cache (only xml) -> cache miss -> full download."""
+    (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i></i>")
+
+    call_count = {"n": 0}
+    def fake_run(cmd, **kwargs):
+        call_count["n"] += 1
+        (tmp_path / "BV123.mp4").write_bytes(b"v")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    video, xml, from_cache = download.fetch(
+        "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
+    )
+    assert call_count["n"] == 1
+    assert from_cache is False
 
 
 def test_generate_ass_passes_font_params(tmp_path, monkeypatch):
@@ -738,7 +814,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
         v.write_bytes(b"fakevideo")
         x = temp_dir / f"{bv_id}.danmaku.xml"
         x.write_bytes(b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>")
-        return v, x
+        return v, x, False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         call_log.append(f"generate_ass:{width}x{height}:{font_face}:{font_size}")
@@ -800,7 +876,8 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
     assert "timings:" in captured_out.err
 
 
-def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
+def test_run_deletes_derived_ass_on_success(tmp_path, monkeypatch):
+    """Default cleanup: derived ASS is removed, raw video+XML preserved for cache."""
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
     monkeypatch.setattr(
         "video2yt.cli.download.get_metadata",
@@ -812,7 +889,7 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
         v.write_bytes(b"v")
         x = temp_dir / f"{bv_id}.danmaku.xml"
         x.write_bytes(b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>")
-        return v, x
+        return v, x, False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
@@ -842,11 +919,141 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
     ])
     cli.run(args)
 
-    # Temp files gone (now under sanitized-title subfolder)
+    # Raw preserved for cache, derived ASS removed
     subdir = tmp_path / "tmp" / "Test Title"
-    assert not (subdir / "BV1.mp4").exists()
+    assert (subdir / "BV1.mp4").exists()
+    assert (subdir / "BV1.danmaku.xml").exists()
     assert not (subdir / "BV1.danmaku.ass").exists()
-    assert not (subdir / "BV1.danmaku.xml").exists()
+
+
+def test_run_cleanup_removes_cut_ass_by_default(tmp_path, monkeypatch):
+    """With --cut, both .danmaku.ass and .danmaku.cut.ass are removed by default (raw kept)."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "T", "uploader": "UP"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(b"<i></i>")
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer, Start, End, Style\n"
+            "Dialogue: 0,0:00:05.00,0:00:10.00,Default,hi\n",
+            encoding="utf-8",
+        )
+
+    info = MediaInfo(
+        duration=200.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    out_info = MediaInfo(
+        duration=170.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=9_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return info if len(probe_calls) == 1 else out_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None, keep_ranges=None: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+    monkeypatch.setattr("video2yt.cli.validate.check_output", lambda s, o, expected_duration=None: [])
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--cut", "30~60",
+    ])
+    cli.run(args)
+
+    subdir = tmp_path / "tmp" / "UP：T"
+    # Raw preserved
+    assert (subdir / "BV1.mp4").exists()
+    assert (subdir / "BV1.danmaku.xml").exists()
+    # Both derived ASS removed
+    assert not (subdir / "BV1.danmaku.ass").exists()
+    assert not (subdir / "BV1.danmaku.cut.ass").exists()
+
+
+def test_run_keep_temp_keeps_all_including_derived(tmp_path, monkeypatch):
+    """With --keep-temp and --cut, all four artifacts are preserved after run()."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "T", "uploader": "UP"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(b"<i></i>")
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer, Start, End, Style\n"
+            "Dialogue: 0,0:00:05.00,0:00:10.00,Default,hi\n",
+            encoding="utf-8",
+        )
+
+    info = MediaInfo(
+        duration=200.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    out_info = MediaInfo(
+        duration=170.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=9_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return info if len(probe_calls) == 1 else out_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None, keep_ranges=None: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+    monkeypatch.setattr("video2yt.cli.validate.check_output", lambda s, o, expected_duration=None: [])
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--cut", "30~60",
+        "--keep-temp",
+    ])
+    cli.run(args)
+
+    subdir = tmp_path / "tmp" / "UP：T"
+    # All four artifacts preserved
+    assert (subdir / "BV1.mp4").exists()
+    assert (subdir / "BV1.danmaku.xml").exists()
+    assert (subdir / "BV1.danmaku.ass").exists()
+    assert (subdir / "BV1.danmaku.cut.ass").exists()
 
 
 def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
@@ -861,7 +1068,7 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
         v.write_bytes(b"v")
         x = temp_dir / f"{bv_id}.danmaku.xml"
         x.write_bytes(b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>")
-        return v, x
+        return v, x, False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
@@ -908,7 +1115,7 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         captured_font_size.append(font_size)
@@ -964,7 +1171,7 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         captured_font_size.append(font_size)
@@ -1030,7 +1237,7 @@ def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
@@ -1092,7 +1299,7 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
@@ -1151,7 +1358,7 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text(
@@ -1217,7 +1424,7 @@ def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text(
@@ -1565,7 +1772,7 @@ def test_run_passes_keep_ranges_and_rewrites_ass(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text(
@@ -1642,7 +1849,7 @@ def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
         )
-        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False
 
     def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
         ass_path.write_text(

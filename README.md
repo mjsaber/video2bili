@@ -33,7 +33,7 @@ uv run video2yt <url> [options]
 |---|---|---|
 | `url` (positional) | — | Bilibili video URL (must contain a `BV...` id) |
 | `-o, --output-dir` | `./output` | Where the final MP4 goes (under a per-video subfolder) |
-| `-t, --temp-dir` | `./temp` | Intermediate files (deleted on success unless `--keep-temp`) |
+| `-t, --temp-dir` | `./temp` | Intermediate files. Raw downloads (video + XML) are always kept here for caching; derived ASS files are removed on success unless `--keep-temp` is set. |
 | `-q, --quality` | `1080` | Max video quality, one of `{480, 720, 1080}` |
 | `-b, --browser` | `chrome` | Browser to read cookies from |
 | `--codec` | `h264` | Video codec preference, one of `{h264, h265, auto}`. `h264` is most compatible / preferred by YouTube; `h265` produces smaller files; `auto` lets yt-dlp pick. |
@@ -41,7 +41,7 @@ uv run video2yt <url> [options]
 | `--font-size` | `auto` | Pixel size for a standard (nominal=25) danmaku. Default `auto` uses Bilibili's native formula `video_height * 25 / 540` (≈ `height / 21.6`). |
 | `--preview-seconds` | none | If set, cap the burned output to the first N seconds (`ffmpeg -t N`). Useful for fast style/codec iteration. |
 | `--cut START~END` | none | Remove a time range from the output. Repeatable. See [Time format for `--cut`](#time-format-for---cut). |
-| `--keep-temp` | off | Keep intermediate files (raw video, XML, ASS) after success |
+| `--keep-temp` | off | Also keep derived ASS files after success. Raw downloads (video + danmaku XML) are ALWAYS kept regardless, to enable caching. |
 
 ## Output layout
 
@@ -93,6 +93,18 @@ Fractional seconds are allowed in any form. `--cut` is repeatable; ranges are au
 
 `--cut` and `--preview-seconds` interact in this order: cut is applied first on the source timeline, then preview clamps the resulting (shorter) timeline. So `--cut 30~60 --preview-seconds 60` on a 5-minute source produces a 60-second output containing source `[0, 30) ∪ [60, 90)`.
 
+## Caching
+
+video2yt caches raw downloads (the yt-dlp `<bv>.mp4` and `<bv>.danmaku.xml`) in `temp/<title_subfolder>/`. Subsequent runs of the same video reuse the cached mp4 and XML without re-downloading — `download.fetch` checks for both files and, if present, skips yt-dlp entirely and logs `using cached download from …`.
+
+To force a fresh download, delete the cached files manually:
+
+```bash
+rm -rf temp/<title_subfolder>/
+```
+
+Only delete the specific subfolder you want to re-fetch; wiping `temp/` wholesale throws away the cache for every other video too.
+
 ## Notes
 
 - Chrome must be quit before running so `--cookies-from-browser` can read the cookie database (it requires an exclusive lock).
@@ -103,5 +115,5 @@ Fractional seconds are allowed in any form. `--cut` is repeatable; ranges are au
 ## Development
 
 ```bash
-uv run pytest    # currently 114 tests; everything mocked at the subprocess boundary
+uv run pytest    # currently 120 tests; everything mocked at the subprocess boundary
 ```

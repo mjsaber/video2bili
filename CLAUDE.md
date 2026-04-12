@@ -14,7 +14,7 @@ uv run video2yt "<url>" --preview-seconds 60               # first 60s
 uv run video2yt "<url>" --cut 30~60 --cut 2:15~2:45        # remove ranges
 uv run video2yt "<url>" --font-size 48 --codec h265        # style overrides
 uv run python -m video2yt "<url>"                          # run as module
-uv run pytest                                              # run tests (114)
+uv run pytest                                              # run tests (120)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
 
@@ -31,6 +31,8 @@ uv add <pkg>                                               # add a dep (NEVER ed
 - **Chrome cookie DB lock**: `--cookies-from-browser chrome` requires Chrome to not be holding the cookie database lock. If it fails, close Chrome first.
 - **Cut boundary dialogues are dropped, not clipped**: when a danmaku dialogue intersects a `--cut` range (even by a single frame), the whole dialogue is dropped. Rationale: simpler semantics, avoids partial-display weirdness. See `src/video2yt/cuts.py::rewrite_ass_for_cuts`.
 - **Filter_complex path for cuts**: when `--cut` is used, `burn.render` builds a `filter_complex` with `trim`/`atrim`/`concat`/`subtitles` and uses `-c:a aac` (can't `copy` after `atrim`). No-cut runs use the simple `-vf subtitles=` path with `-c:a copy`.
+- **Raw download caching**: `download.fetch` checks `temp_dir` for `<bv>.{mp4,mkv,webm}` AND `<bv>*.xml` before invoking yt-dlp; if both are present, it skips yt-dlp entirely and returns `from_cache=True` (cli logs `using cached download from …`). Default cleanup in `cli.run` removes only the derived ASS files (`<bv>.danmaku.ass`, `<bv>.danmaku.cut.ass`) and INTENTIONALLY leaves the raw mp4 + XML on disk so the next run hits the cache. `--keep-temp` additionally preserves the derived ASS files. To force a fresh download, delete the specific subfolder under `temp/` by hand.
+- **Agent E2E test rule**: DO NOT run `rm -rf output/` or `rm -rf temp/` during E2E tests — that wipes every cached raw download and the outputs of unrelated videos. Clean only the specific `temp/<subfolder>/` under test, or just let the cache hit on the next run. This is a workflow rule, not a code invariant.
 
 ## Architecture
 
@@ -38,15 +40,15 @@ uv add <pkg>                                               # add a dep (NEVER ed
 src/video2yt/
 ├── cli.py            # arg parsing, run() orchestration, per-phase timing,
 │                     # subfolder naming (<uploader[:4]>：<title>), font_size auto
-├── download.py       # yt-dlp wrapper (fetch + get_metadata + generate_ass via biliass)
+├── download.py       # yt-dlp wrapper (fetch with raw-download cache + get_metadata + generate_ass via biliass)
 ├── burn.py           # ffmpeg wrapper (simple -vf path + filter_complex path for cuts)
 ├── validate.py       # ffprobe + source/ASS/output validators
 └── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ```
 
-Tests live in `tests/test_smoke.py` (114 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
+Tests live in `tests/test_smoke.py` (120 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
 
-`run()` flow: preflight → extract BV → fetch metadata → build per-video subfolder → download video + XML → probe source → compute auto font size → `biliass.convert_to_ass` → parse/normalize `--cut` → rewrite ASS for cuts → `burn.render` → probe output and validate against `expected_duration` → optional cleanup. Each phase is timed and logged.
+`run()` flow: preflight → extract BV → fetch metadata → build per-video subfolder → `download.fetch` (cache-hit if raw files present, else yt-dlp) → probe source → compute auto font size → `biliass.convert_to_ass` → parse/normalize `--cut` → rewrite ASS for cuts → `burn.render` → probe output and validate against `expected_duration` → cleanup (derived ASS only by default, plus keep everything with `--keep-temp`; raw mp4+xml always preserved). Each phase is timed and logged.
 
 ## Feature flags quick reference
 
@@ -57,5 +59,5 @@ Tests live in `tests/test_smoke.py` (114 tests). Everything is mocked at the `su
 --font-size N:           Dialogue font size (default auto: video_height * 25/540 per Bilibili native)
 --preview-seconds N:     ffmpeg -t clamp on output
 --cut START~END:         remove time ranges, repeatable, ~ separator, SS/MM:SS/HH:MM:SS
---keep-temp:             retain intermediate files in temp/<title_subfolder>/
+--keep-temp:             also retain derived ASS files (raw mp4+xml are ALWAYS kept for caching)
 ```

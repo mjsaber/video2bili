@@ -50,14 +50,32 @@ def fetch(
     browser: str,
     bv_id: str,
     codec: str = "h264",
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, bool]:
     """Download video and raw danmaku XML via yt-dlp.
 
-    Returns (video_path, xml_path). The ASS conversion happens separately in
-    ``generate_ass`` so we can supply the real video dimensions (which aren't
-    known until we probe the downloaded file) to biliass.
+    Returns ``(video_path, xml_path, from_cache)``. If both the video file
+    and danmaku XML for this ``bv_id`` already exist in ``temp_dir``, skip
+    the yt-dlp invocation entirely and return the cached paths with
+    ``from_cache=True``. Otherwise run yt-dlp (which will overwrite any
+    partial artifacts) and return ``from_cache=False``.
+
+    The ASS conversion happens separately in ``generate_ass`` so we can
+    supply the real video dimensions (known only after probing the
+    downloaded file) to biliass.
     """
     temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Cache probe: both raw files already present -> skip yt-dlp entirely.
+    cached_video_candidates = (
+        sorted(temp_dir.glob(f"{bv_id}.mp4"))
+        + sorted(temp_dir.glob(f"{bv_id}.mkv"))
+        + sorted(temp_dir.glob(f"{bv_id}.webm"))
+    )
+    cached_xml_candidates = sorted(temp_dir.glob(f"{bv_id}*.xml"))
+    if cached_video_candidates and cached_xml_candidates:
+        return cached_video_candidates[0], cached_xml_candidates[0], True
+
+    # Cache miss — invoke yt-dlp.
     output_template = str(temp_dir / f"{bv_id}.%(ext)s")
     format_spec = _build_format_spec(quality, codec)
 
@@ -92,7 +110,7 @@ def fetch(
         )
     xml_path = xml_candidates[0]
 
-    return video_path, xml_path
+    return video_path, xml_path, False
 
 
 def generate_ass(

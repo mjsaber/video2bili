@@ -133,7 +133,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--keep-temp", action="store_true",
-        help="Keep intermediate files after success",
+        help=(
+            "Also keep derived ASS files after success. Raw downloads "
+            "(video + danmaku XML) are ALWAYS kept for caching."
+        ),
     )
     parser.add_argument(
         "--font-face", default="Hiragino Sans GB",
@@ -213,7 +216,7 @@ def run(args: argparse.Namespace) -> Path:
         f"codec={args.codec}, browser={args.browser})"
     )
     t0 = time.monotonic()
-    video_path, xml_path = download.fetch(
+    video_path, xml_path, from_cache = download.fetch(
         url=args.url,
         temp_dir=temp_subdir,
         quality=args.quality,
@@ -221,6 +224,8 @@ def run(args: argparse.Namespace) -> Path:
         bv_id=bv_id,
         codec=args.codec,
     )
+    if from_cache:
+        _log(f"using cached download from {temp_subdir}")
     timings["download"] = time.monotonic() - t0
 
     _log("probing source video")
@@ -317,17 +322,11 @@ def run(args: argparse.Namespace) -> Path:
     timings["validate_output"] = time.monotonic() - t0
 
     if not args.keep_temp:
-        _log("cleaning up temp files")
-        video_path.unlink(missing_ok=True)
-        xml_path.unlink(missing_ok=True)
+        _log("cleaning up derived ASS files (keeping raw download for cache)")
         ass_path.unlink(missing_ok=True)
         if ass_path_for_burn != ass_path:
             ass_path_for_burn.unlink(missing_ok=True)
-        # Best-effort: remove the subdir if empty
-        try:
-            temp_subdir.rmdir()
-        except OSError:
-            pass  # subdir not empty or doesn't exist
+        # raw video_path and xml_path are preserved intentionally for caching
 
     total = time.monotonic() - t_start
     _log(
