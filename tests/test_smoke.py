@@ -225,7 +225,8 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
     # danmaku postprocessor
     assert "--use-postprocessor" in cmd
     pp_idx = cmd.index("--use-postprocessor")
-    assert cmd[pp_idx + 1] == "danmaku"
+    # With defaults
+    assert cmd[pp_idx + 1] == "danmaku:font_face=PingFang SC;font_size=40"
     # write-subs present
     assert "--write-subs" in cmd
     # output template contains BV id and %(ext)s
@@ -274,6 +275,25 @@ def test_fetch_raises_when_ass_file_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
     with pytest.raises(FileNotFoundError, match="ASS|ass"):
         download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
+
+
+def test_fetch_uses_custom_font_options(tmp_path, monkeypatch):
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        (tmp_path / "BV.mp4").write_bytes(b"v")
+        (tmp_path / "BV.danmaku.ass").write_text(
+            "[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8",
+        )
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    download.fetch(
+        "https://x/video/BV", tmp_path, 1080, "chrome", "BV",
+        font_face="Noto Sans CJK SC", font_size=32,
+    )
+    pp_idx = captured["cmd"].index("--use-postprocessor")
+    assert captured["cmd"][pp_idx + 1] == "danmaku:font_face=Noto Sans CJK SC;font_size=32"
 
 
 from video2yt import burn
@@ -407,6 +427,8 @@ def test_parse_args_defaults():
     assert args.quality == 1080
     assert args.browser == "chrome"
     assert args.keep_temp is False
+    assert args.font_face == "PingFang SC"
+    assert args.font_size == 40
 
 
 def test_parse_args_custom():
@@ -417,12 +439,16 @@ def test_parse_args_custom():
         "-q", "720",
         "-b", "firefox",
         "--keep-temp",
+        "--font-face", "Hiragino Sans GB",
+        "--font-size", "32",
     ])
     assert args.output_dir == Path("/tmp/out")
     assert args.temp_dir == Path("/tmp/tmp")
     assert args.quality == 720
     assert args.browser == "firefox"
     assert args.keep_temp is True
+    assert args.font_face == "Hiragino Sans GB"
+    assert args.font_size == 32
 
 
 def test_parse_args_rejects_bad_quality():
@@ -437,7 +463,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
     # Skip dep preflight
     monkeypatch.setattr("video2yt.cli.preflight", lambda: call_log.append("preflight"))
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, font_face, font_size):
         call_log.append(f"fetch:{bv_id}:{quality}:{browser}")
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"fakevideo")
@@ -499,7 +525,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
 def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, font_face, font_size):
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"v")
         a = temp_dir / f"{bv_id}.danmaku.ass"
@@ -538,7 +564,7 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
 def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, font_face, font_size):
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"v")
         a = temp_dir / f"{bv_id}.danmaku.ass"

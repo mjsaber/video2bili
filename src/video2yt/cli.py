@@ -69,6 +69,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--keep-temp", action="store_true",
         help="Keep intermediate files after success",
     )
+    parser.add_argument(
+        "--font-face", default="PingFang SC",
+        help="Font family for rendered danmaku (default: PingFang SC — macOS CJK)",
+    )
+    parser.add_argument(
+        "--font-size", type=int, default=40,
+        help="Font size in pixels for rendered danmaku (default: 40)",
+    )
     return parser.parse_args(argv)
 
 
@@ -89,6 +97,8 @@ def run(args: argparse.Namespace) -> Path:
         quality=args.quality,
         browser=args.browser,
         bv_id=bv_id,
+        font_face=args.font_face,
+        font_size=args.font_size,
     )
 
     _log("probing source video")

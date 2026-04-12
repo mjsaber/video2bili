@@ -8,6 +8,8 @@ def fetch(
     quality: int,
     browser: str,
     bv_id: str,
+    font_face: str = "PingFang SC",
+    font_size: int = 40,
 ) -> tuple[Path, Path]:
     """Download video + danmaku ASS via yt-dlp + yt-dlp-danmaku plugin.
 
@@ -22,7 +24,7 @@ def fetch(
         "--cookies-from-browser", browser,
         "-f", format_spec,
         "--write-subs",
-        "--use-postprocessor", "danmaku",
+        "--use-postprocessor", f"danmaku:font_face={font_face};font_size={font_size}",
         "--output", output_template,
         url,
     ]
