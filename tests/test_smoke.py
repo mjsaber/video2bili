@@ -314,7 +314,7 @@ def test_render_uses_cwd_and_relative_paths(tmp_path, monkeypatch):
     assert cmd[i_idx + 1] == "BV.mp4"
     # -vf subtitles= uses basename
     vf_idx = cmd.index("-vf")
-    assert cmd[vf_idx + 1] == "subtitles=BV.danmaku.ass"
+    assert cmd[vf_idx + 1] == "subtitles=f='BV.danmaku.ass'"
     # libx264 preset medium crf 20
     assert "libx264" in cmd
     crf_idx = cmd.index("-crf")

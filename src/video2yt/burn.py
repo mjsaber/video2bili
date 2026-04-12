@@ -21,7 +21,7 @@ def render(video_path: Path, ass_path: Path, output_path: Path) -> Path:
     cmd = [
         "ffmpeg", "-y",
         "-i", video_path.name,
-        "-vf", f"subtitles={ass_path.name}",
+        "-vf", f"subtitles=f='{ass_path.name}'",
         "-c:a", "copy",
         "-c:v", "libx264",
         "-preset", "medium",
