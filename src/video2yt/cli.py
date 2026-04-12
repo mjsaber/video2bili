@@ -191,7 +191,14 @@ def run(args: argparse.Namespace) -> Path:
     _log("validating output")
     t0 = time.monotonic()
     output_info = validate.probe(output_path)
-    for w in validate.check_output(source_info, output_info):
+    expected_duration = (
+        float(args.preview_seconds)
+        if args.preview_seconds is not None
+        else source_info.duration
+    )
+    for w in validate.check_output(
+        source_info, output_info, expected_duration=expected_duration
+    ):
         _log(f"warning: {w}")
     timings["validate_output"] = time.monotonic() - t0
 

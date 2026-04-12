@@ -186,6 +186,24 @@ def test_check_output_warns_on_huge_output():
     assert any("size" in w.lower() for w in warnings)
 
 
+def test_check_output_accepts_preview_duration():
+    """With expected_duration, output can be much shorter than source."""
+    source = _mk_info(duration=1260.0, size_bytes=371_000_000)
+    output = _mk_info(duration=60.0, size_bytes=26_000_000)
+    warnings = validate.check_output(source, output, expected_duration=60.0)
+    # Size check: scaled expected = 371M * (60/1260) = ~17.7M; actual 26M
+    # is ~1.47x which is within [0.3, 5.0] -> no size warning.
+    assert warnings == []
+
+
+def test_check_output_fails_preview_duration_mismatch():
+    """With expected_duration, output mismatch against expected still fails."""
+    source = _mk_info(duration=1260.0)
+    output = _mk_info(duration=55.0)  # expected 60 but got 55 -> >1s diff
+    with pytest.raises(ValueError, match="duration"):
+        validate.check_output(source, output, expected_duration=60.0)
+
+
 from video2yt import download
 
 
@@ -857,3 +875,118 @@ def test_main_returns_1_on_value_error(tmp_path, monkeypatch, capsys):
     assert rc == 1
     out = capsys.readouterr()
     assert "BV" in out.err or "error" in out.err.lower()
+
+
+def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
+    """With --preview-seconds N, cli.run should pass expected_duration=N to check_output."""
+    captured = {}
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
+
+    source_info = MediaInfo(
+        duration=1260.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=371_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=26_000_000,
+    )
+    probe_calls = []
+
+    def fake_probe(p):
+        probe_calls.append(p)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    def fake_check_output(source, output, expected_duration=None):
+        captured["expected_duration"] = expected_duration
+        return []
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--preview-seconds", "60",
+    ])
+    cli.run(args)
+    assert captured["expected_duration"] == 60.0
+
+
+def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
+    """Without --preview-seconds, expected_duration defaults to source.duration."""
+    captured = {}
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
+
+    source_info = MediaInfo(
+        duration=1260.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=371_000_000,
+    )
+    output_info = MediaInfo(
+        duration=1260.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=371_000_000,
+    )
+    probe_calls = []
+
+    def fake_probe(p):
+        probe_calls.append(p)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    def fake_check_output(source, output, expected_duration=None):
+        captured["expected_duration"] = expected_duration
+        return []
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+    ])
+    cli.run(args)
+    assert captured["expected_duration"] == 1260.0

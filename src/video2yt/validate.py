@@ -89,8 +89,17 @@ def check_ass(path: Path) -> int:
     return dialogue_count
 
 
-def check_output(source: MediaInfo, output: MediaInfo) -> list[str]:
-    """Validate burned output against source. Raises on hard failures; returns warnings."""
+def check_output(
+    source: MediaInfo,
+    output: MediaInfo,
+    expected_duration: float | None = None,
+) -> list[str]:
+    """Validate burned output against source. Raises on hard failures; returns warnings.
+
+    expected_duration overrides the source duration for the +/-1s duration check.
+    Pass the preview duration (seconds) when using preview mode, otherwise leave
+    as None to compare against source duration.
+    """
     if output.size_bytes == 0:
         raise ValueError("output file is empty")
     if not output.has_video:
@@ -102,10 +111,11 @@ def check_output(source: MediaInfo, output: MediaInfo) -> list[str]:
             f"output vcodec is {output.vcodec!r}, expected 'h264' "
             f"(libx264 encode params did not take effect)"
         )
-    if abs(output.duration - source.duration) >= 1.0:
+    expected = expected_duration if expected_duration is not None else source.duration
+    if abs(output.duration - expected) >= 1.0:
         raise ValueError(
-            f"output duration {output.duration:.2f}s differs from source "
-            f"{source.duration:.2f}s by more than 1 second (possible truncation)"
+            f"output duration {output.duration:.2f}s differs from expected "
+            f"{expected:.2f}s by more than 1 second (possible truncation)"
         )
     if output.width != source.width or output.height != source.height:
         raise ValueError(
@@ -114,11 +124,16 @@ def check_output(source: MediaInfo, output: MediaInfo) -> list[str]:
         )
     warnings: list[str] = []
     if source.size_bytes > 0:
-        ratio = output.size_bytes / source.size_bytes
+        if expected_duration is not None and source.duration > 0:
+            # Scale expected size proportionally to preview duration
+            duration_ratio = expected_duration / source.duration
+            expected_size = source.size_bytes * duration_ratio
+        else:
+            expected_size = float(source.size_bytes)
+        ratio = output.size_bytes / expected_size if expected_size > 0 else 1.0
         if ratio < 0.3 or ratio > 5.0:
             warnings.append(
-                f"output size is {ratio:.2f}x source "
-                f"({output.size_bytes} vs {source.size_bytes} bytes); "
-                f"may indicate encoding issue"
+                f"output size is {ratio:.2f}x expected ({output.size_bytes} vs "
+                f"{int(expected_size)} bytes); may indicate encoding issue"
             )
     return warnings
