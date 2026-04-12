@@ -397,3 +397,183 @@ def test_preflight_fails_without_biliass(monkeypatch):
     monkeypatch.setitem(sys.modules, "biliass", None)
     with pytest.raises(RuntimeError, match="yt-dlp-danmaku|biliass"):
         cli.preflight()
+
+
+def test_parse_args_defaults():
+    args = cli.parse_args(["https://www.bilibili.com/video/BV1"])
+    assert args.url == "https://www.bilibili.com/video/BV1"
+    assert args.output_dir == Path("./output")
+    assert args.temp_dir == Path("./temp")
+    assert args.quality == 1080
+    assert args.browser == "chrome"
+    assert args.keep_temp is False
+
+
+def test_parse_args_custom():
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV1",
+        "-o", "/tmp/out",
+        "-t", "/tmp/tmp",
+        "-q", "720",
+        "-b", "firefox",
+        "--keep-temp",
+    ])
+    assert args.output_dir == Path("/tmp/out")
+    assert args.temp_dir == Path("/tmp/tmp")
+    assert args.quality == 720
+    assert args.browser == "firefox"
+    assert args.keep_temp is True
+
+
+def test_parse_args_rejects_bad_quality():
+    with pytest.raises(SystemExit):
+        cli.parse_args(["https://x", "-q", "4320"])
+
+
+def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
+    """Full pipeline with all subprocess boundaries mocked; verifies call order."""
+    call_log = []
+
+    # Skip dep preflight
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: call_log.append("preflight"))
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+        call_log.append(f"fetch:{bv_id}:{quality}:{browser}")
+        v = temp_dir / f"{bv_id}.mp4"
+        v.write_bytes(b"fakevideo")
+        a = temp_dir / f"{bv_id}.danmaku.ass"
+        a.write_text(
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Text\n"
+            "Dialogue: 0,0:00:01.00,0:00:05.00,Default,hi\n",
+            encoding="utf-8",
+        )
+        return v, a
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+
+    probe_calls = []
+    source_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=11_000_000,
+    )
+
+    def fake_probe(path):
+        probe_calls.append(path)
+        # First call = source, second call = output
+        return source_info if len(probe_calls) == 1 else output_info
+
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+
+    def fake_render(video_path, ass_path, output_path):
+        call_log.append(f"render:{output_path.name}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"burnedoutput")
+        return output_path
+
+    monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
+
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV191DpBmE2t/",
+        "-o", str(tmp_path / "output"),
+        "-t", str(tmp_path / "temp"),
+    ])
+    result = cli.run(args)
+
+    assert result == tmp_path / "output" / "BV191DpBmE2t_with_danmaku.mp4"
+    assert result.exists()
+    # Verify call order
+    assert call_log[0] == "preflight"
+    assert call_log[1] == "fetch:BV191DpBmE2t:1080:chrome"
+    assert call_log[2] == "render:BV191DpBmE2t_with_danmaku.mp4"
+    # Probe called twice: source then output
+    assert len(probe_calls) == 2
+
+
+def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+        v = temp_dir / f"{bv_id}.mp4"
+        v.write_bytes(b"v")
+        a = temp_dir / f"{bv_id}.danmaku.ass"
+        a.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
+        return v, a
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr(
+        "video2yt.cli.validate.probe",
+        lambda p: MediaInfo(
+            duration=60.0, width=1920, height=1080,
+            has_video=True, has_audio=True,
+            vcodec="h264", acodec="aac", size_bytes=1000,
+        ),
+    )
+
+    def fake_render(v, a, o):
+        o.parent.mkdir(parents=True, exist_ok=True)
+        o.write_bytes(b"x")
+        return o
+
+    monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+    ])
+    cli.run(args)
+
+    # Temp files gone
+    assert not (tmp_path / "tmp" / "BV1.mp4").exists()
+    assert not (tmp_path / "tmp" / "BV1.danmaku.ass").exists()
+
+
+def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+        v = temp_dir / f"{bv_id}.mp4"
+        v.write_bytes(b"v")
+        a = temp_dir / f"{bv_id}.danmaku.ass"
+        a.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
+        return v, a
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr(
+        "video2yt.cli.validate.probe",
+        lambda p: MediaInfo(
+            duration=60.0, width=1920, height=1080,
+            has_video=True, has_audio=True,
+            vcodec="h264", acodec="aac", size_bytes=1000,
+        ),
+    )
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+    )
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--keep-temp",
+    ])
+    cli.run(args)
+    assert (tmp_path / "tmp" / "BV1.mp4").exists()
+    assert (tmp_path / "tmp" / "BV1.danmaku.ass").exists()
+
+
+def test_main_returns_1_on_value_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    # Make extract_bv_id fail via non-bilibili URL
+    rc = cli.main(["https://www.youtube.com/x"])
+    assert rc == 1
+    out = capsys.readouterr()
+    assert "BV" in out.err or "error" in out.err.lower()
