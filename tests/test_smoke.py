@@ -45,3 +45,44 @@ def test_probe_parses_ffprobe_output(tmp_path, monkeypatch):
 def test_probe_raises_on_missing_file(tmp_path):
     with pytest.raises(FileNotFoundError):
         validate.probe(tmp_path / "does_not_exist.mp4")
+
+
+def _mk_info(**kw):
+    defaults = dict(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac",
+        size_bytes=10_000_000,
+    )
+    defaults.update(kw)
+    return MediaInfo(**defaults)
+
+
+def test_check_source_raises_without_video_stream():
+    info = _mk_info(has_video=False, width=0, height=0, vcodec="")
+    with pytest.raises(ValueError, match="no video stream"):
+        validate.check_source(info, 1080)
+
+
+def test_check_source_raises_on_zero_duration():
+    info = _mk_info(duration=0)
+    with pytest.raises(ValueError, match="duration"):
+        validate.check_source(info, 1080)
+
+
+def test_check_source_warns_on_missing_audio():
+    info = _mk_info(has_audio=False, acodec=None)
+    warnings = validate.check_source(info, 1080)
+    assert any("audio" in w.lower() for w in warnings)
+
+
+def test_check_source_warns_on_low_resolution():
+    info = _mk_info(width=1280, height=720)
+    warnings = validate.check_source(info, 1080)
+    assert any("resolution" in w.lower() or "720" in w for w in warnings)
+
+
+def test_check_source_no_warnings_for_exact_match():
+    info = _mk_info()
+    warnings = validate.check_source(info, 1080)
+    assert warnings == []

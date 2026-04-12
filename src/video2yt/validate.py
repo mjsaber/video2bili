@@ -49,3 +49,21 @@ def probe(path: Path) -> MediaInfo:
         acodec=acodec,
         size_bytes=path.stat().st_size,
     )
+
+
+def check_source(info: MediaInfo, requested_quality: int) -> list[str]:
+    """Validate a downloaded source video. Raises on hard failures; returns warnings."""
+    if not info.has_video:
+        raise ValueError("source has no video stream")
+    if info.duration <= 0:
+        raise ValueError(f"source has zero or unknown duration ({info.duration})")
+    warnings: list[str] = []
+    if not info.has_audio:
+        warnings.append("source has no audio stream (uncommon but allowed)")
+    if info.height < requested_quality:
+        warnings.append(
+            f"source resolution {info.width}x{info.height} is lower than "
+            f"requested {requested_quality}p — cookie may not be working "
+            f"or this video has no higher-quality variant"
+        )
+    return warnings
