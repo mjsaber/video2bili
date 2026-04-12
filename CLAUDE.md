@@ -20,7 +20,8 @@ A local CLI that takes a Bilibili video URL and produces an MP4 with danmaku bur
 
 ## Known gotchas
 
-- **ffmpeg `subtitles=` filter path escaping**: The `subtitles=<path>` filter in `-vf` chokes on absolute paths containing spaces, colons, or parentheses. The project-wide workaround is in `burn.py`: run `subprocess` with `cwd=temp_dir` and pass the ASS filename as a basename (relative path). The `-i` input is also a basename. Only the output path is absolute (ffmpeg output args do not go through filters).
+- **ffmpeg `subtitles=` filter path escaping**: The `subtitles=<path>` filter in `-vf` chokes on absolute paths containing spaces, colons, or parentheses. Workaround in `burn.py`: run `subprocess` with `cwd=temp_dir` and pass the ASS filename as a basename; the `-i` input is also a basename (only the output path is absolute). ffmpeg 8+ is stricter and requires the explicit `subtitles=f='<name>'` quoted form (see the `-vf` line and docstring in `src/video2yt/burn.py`).
+- **ffmpeg must be built with libass**: the default `brew install ffmpeg` bottle does NOT always include libass, so the `subtitles` filter we rely on is missing. Symptom: ffmpeg emits `No option name near '<filename.ass>'` or `No such filter: 'subtitles'` — it looks like a quoting bug but isn't. Fix: `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg`. Pre-flight check: `ffmpeg -filters | grep subtitles` must list the filter.
 - **yt-dlp release cadence**: yt-dlp updates frequently because Bilibili's extractor rules shift. If downloads suddenly break, first try `uv lock --upgrade-package yt-dlp`.
 - **Chrome cookie DB lock**: `--cookies-from-browser chrome` requires Chrome to not be holding the cookie database lock. If it fails, close Chrome first.
 
