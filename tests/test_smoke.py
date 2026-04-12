@@ -340,3 +340,29 @@ def test_render_raises_if_video_and_ass_in_different_dirs(tmp_path):
     output = tmp_path / "out.mp4"
     with pytest.raises(ValueError, match="same directory"):
         burn.render(video, ass, output)
+
+
+from video2yt import cli
+
+
+def test_extract_bv_from_full_url_with_query():
+    url = "https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=333.337&vd_source=xxx"
+    assert cli.extract_bv_id(url) == "BV191DpBmE2t"
+
+
+def test_extract_bv_from_plain_url():
+    assert cli.extract_bv_id("https://www.bilibili.com/video/BV1Sm4y1N78J") == "BV1Sm4y1N78J"
+
+
+def test_extract_bv_from_url_with_trailing_slash():
+    assert cli.extract_bv_id("https://www.bilibili.com/video/BV1Sm4y1N78J/") == "BV1Sm4y1N78J"
+
+
+def test_extract_bv_raises_on_non_bilibili_url():
+    with pytest.raises(ValueError, match="BV"):
+        cli.extract_bv_id("https://www.youtube.com/watch?v=abc123")
+
+
+def test_extract_bv_raises_on_empty_string():
+    with pytest.raises(ValueError, match="BV"):
+        cli.extract_bv_id("")
