@@ -5,6 +5,7 @@ description = "Download a Bilibili video and burn danmaku into the output MP4"
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
+    "whisperx>=3.8.5",
     "yt-dlp>=2025.1.1",
     "yt-dlp-danmaku>=0.2.0",
 ]
@@ -17,6 +18,7 @@ dev = [
 [project.scripts]
 video2yt = "video2yt.cli:main"
 video2yt-compose = "video2yt.compose_cli:main"
+video2yt-transcribe = "video2yt.transcribe_cli:main"
 
 [build-system]
 requires = ["hatchling"]

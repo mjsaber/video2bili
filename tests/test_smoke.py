@@ -2716,3 +2716,225 @@ def test_compose_cli_run_rejects_audio_with_no_audio_stream(tmp_path, monkeypatc
     ])
     with pytest.raises(ValueError, match="no audio stream"):
         compose_cli.run(args)
+
+
+# ---------------------------------------------------------------------------
+# transcribe: script-to-audio forced alignment
+# ---------------------------------------------------------------------------
+
+
+def test_strip_markdown_removes_headings():
+    from video2yt.transcribe import strip_markdown
+    md = "# Title\n\nSome text.\n\n## Subtitle\n\nMore text."
+    result = strip_markdown(md)
+    assert "#" not in result
+    assert "Title" in result
+    assert "Some text" in result
+
+
+def test_strip_markdown_removes_list_markers():
+    from video2yt.transcribe import strip_markdown
+    md = "- item one\n- item two\n1. first\n2. second"
+    result = strip_markdown(md)
+    assert "- " not in result
+    assert "1. " not in result
+    assert "item one" in result
+    assert "first" in result
+
+
+def test_strip_markdown_removes_emphasis():
+    from video2yt.transcribe import strip_markdown
+    md = "This is **bold** and *italic* and __also bold__."
+    result = strip_markdown(md)
+    assert "*" not in result
+    assert "_" not in result
+    assert "bold" in result
+    assert "italic" in result
+
+
+def test_strip_markdown_removes_code_fences_and_inline_code():
+    from video2yt.transcribe import strip_markdown
+    md = "Before ```python\nprint('x')\n``` after `inline` end."
+    result = strip_markdown(md)
+    assert "```" not in result
+    assert "print" not in result
+    assert "inline" not in result
+    assert "Before" in result
+    assert "after" in result
+    assert "end" in result
+
+
+def test_split_into_sentences_chinese():
+    from video2yt.transcribe import split_into_sentences
+    text = "第一句。第二句！第三句？"
+    result = split_into_sentences(text)
+    assert len(result) == 3
+    assert result[0] == "第一句。"
+    assert result[1] == "第二句！"
+    assert result[2] == "第三句？"
+
+
+def test_split_into_sentences_mixed():
+    from video2yt.transcribe import split_into_sentences
+    text = "Hello world. 你好世界。"
+    result = split_into_sentences(text)
+    assert len(result) == 2
+
+
+def test_split_into_sentences_no_terminal_punctuation():
+    from video2yt.transcribe import split_into_sentences
+    text = "A sentence without ending"
+    result = split_into_sentences(text)
+    assert result == ["A sentence without ending"]
+
+
+def test_align_script_to_words_proportional():
+    from video2yt.transcribe import align_script_to_words
+    sentences = ["短句。", "中等长度的句子。", "这是一个明显更长更长更长的句子。"]
+    word_timestamps = [("x", 0.0, 0.5), ("y", 29.5, 30.0)]
+    segments = align_script_to_words(sentences, word_timestamps)
+    assert len(segments) == 3
+    assert segments[0].start == 0.0
+    assert segments[-1].end == pytest.approx(30.0)
+    assert segments[1].start == segments[0].end
+    assert segments[2].start == segments[1].end
+    dur0 = segments[0].end - segments[0].start
+    dur2 = segments[2].end - segments[2].start
+    assert dur2 > dur0
+
+
+def test_align_script_to_words_empty_timestamps_raises():
+    from video2yt.transcribe import align_script_to_words
+    with pytest.raises(ValueError, match="no word timestamps"):
+        align_script_to_words(["a."], [])
+
+
+def test_align_script_to_words_empty_sentences_raises():
+    from video2yt.transcribe import align_script_to_words
+    with pytest.raises(ValueError, match="no script sentences"):
+        align_script_to_words([], [("x", 0.0, 1.0)])
+
+
+def test_align_script_to_words_zero_duration_raises():
+    from video2yt.transcribe import align_script_to_words
+    with pytest.raises(ValueError, match="zero duration"):
+        align_script_to_words(["a。"], [("x", 5.0, 5.0)])
+
+
+def test_format_srt_time():
+    from video2yt.transcribe import _format_srt_time
+    assert _format_srt_time(0.0) == "00:00:00,000"
+    assert _format_srt_time(1.5) == "00:00:01,500"
+    assert _format_srt_time(61.25) == "00:01:01,250"
+    assert _format_srt_time(3661.999) == "01:01:01,999"
+
+
+def test_segments_to_srt_basic():
+    from video2yt.transcribe import segments_to_srt, AlignedSegment
+    segs = [
+        AlignedSegment(text="Hello.", start=0.0, end=2.0),
+        AlignedSegment(text="World.", start=2.0, end=4.0),
+    ]
+    srt = segments_to_srt(segs)
+    assert "1\n00:00:00,000 --> 00:00:02,000\nHello." in srt
+    assert "2\n00:00:02,000 --> 00:00:04,000\nWorld." in srt
+
+
+def test_transcribe_script_end_to_end_mocked(monkeypatch):
+    from video2yt import transcribe
+    fake_words = [("你", 0.0, 0.5), ("好", 0.5, 1.0), ("世", 1.0, 1.5), ("界", 1.5, 2.0)]
+    monkeypatch.setattr(
+        "video2yt.transcribe.run_whisperx_alignment",
+        lambda audio_path, language, model_name, device: fake_words,
+    )
+    srt = transcribe.transcribe_script(
+        audio_path=Path("fake.mp3"),
+        script_text="你好。世界。",
+    )
+    assert "你好。" in srt
+    assert "世界。" in srt
+    assert "00:00:00,000" in srt
+    assert srt.count("\n\n") >= 1
+
+
+def test_transcribe_cli_parse_args_defaults():
+    from video2yt import transcribe_cli
+    args = transcribe_cli.parse_args([
+        "--audio", "a.mp3",
+        "--script", "s.md",
+    ])
+    assert args.audio == Path("a.mp3")
+    assert args.script == Path("s.md")
+    assert args.output is None
+    assert args.language == "zh"
+    assert args.model == "small"
+    assert args.device == "cpu"
+
+
+def test_transcribe_cli_run_happy_path(tmp_path, monkeypatch):
+    from video2yt import transcribe_cli
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake")
+    script = tmp_path / "script.md"
+    script.write_text("第一句。第二句。\n", encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.transcribe_cli.preflight", lambda: None)
+    audio_info = MediaInfo(
+        duration=30.0, width=0, height=0,
+        has_video=False, has_audio=True,
+        vcodec="", acodec="mp3", size_bytes=1000,
+    )
+    monkeypatch.setattr("video2yt.transcribe_cli.validate.probe", lambda p: audio_info)
+    monkeypatch.setattr(
+        "video2yt.transcribe_cli.transcribe.transcribe_script",
+        lambda **kwargs: (
+            "1\n00:00:00,000 --> 00:00:05,000\n第一句。\n\n"
+            "2\n00:00:05,000 --> 00:00:10,000\n第二句。\n"
+        ),
+    )
+
+    args = transcribe_cli.parse_args([
+        "--audio", str(audio),
+        "--script", str(script),
+    ])
+    result = transcribe_cli.run(args)
+    assert result == audio.with_suffix(".srt")
+    assert result.exists()
+    assert "第一句" in result.read_text(encoding="utf-8")
+
+
+def test_transcribe_cli_run_rejects_missing_audio(tmp_path, monkeypatch):
+    from video2yt import transcribe_cli
+    script = tmp_path / "s.md"
+    script.write_text("text", encoding="utf-8")
+    monkeypatch.setattr("video2yt.transcribe_cli.preflight", lambda: None)
+
+    args = transcribe_cli.parse_args([
+        "--audio", str(tmp_path / "missing.mp3"),
+        "--script", str(script),
+    ])
+    with pytest.raises(FileNotFoundError, match="audio"):
+        transcribe_cli.run(args)
+
+
+def test_transcribe_cli_run_rejects_audio_without_audio_stream(tmp_path, monkeypatch):
+    from video2yt import transcribe_cli
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake")
+    script = tmp_path / "s.md"
+    script.write_text("text。", encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.transcribe_cli.preflight", lambda: None)
+    bad_info = MediaInfo(
+        duration=30.0, width=0, height=0,
+        has_video=False, has_audio=False,
+        vcodec="", acodec=None, size_bytes=1000,
+    )
+    monkeypatch.setattr("video2yt.transcribe_cli.validate.probe", lambda p: bad_info)
+
+    args = transcribe_cli.parse_args([
+        "--audio", str(audio),
+        "--script", str(script),
+    ])
+    with pytest.raises(ValueError, match="no audio stream"):
+        transcribe_cli.run(args)
