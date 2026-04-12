@@ -771,7 +771,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
 
-    def fake_render(video_path, ass_path, output_path, max_duration=None):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None):
         call_log.append(f"render:{output_path.name}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"burnedoutput")
@@ -828,7 +828,7 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_render(v, a, o, max_duration=None):
+    def fake_render(v, a, o, max_duration=None, keep_ranges=None):
         o.parent.mkdir(parents=True, exist_ok=True)
         o.write_bytes(b"x")
         return o
@@ -878,7 +878,7 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -937,7 +937,7 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -993,7 +993,7 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -1061,7 +1061,7 @@ def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1123,7 +1123,7 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1179,7 +1179,7 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1240,7 +1240,7 @@ def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1258,3 +1258,444 @@ def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
     assert (tmp_path / "tmp" / expected_dir).is_dir()
     assert (tmp_path / "out" / expected_dir).is_dir()
     assert result == tmp_path / "out" / expected_dir / "BV1_with_danmaku.mp4"
+
+
+# =============================================================================
+# --cut feature tests
+# =============================================================================
+
+from video2yt import cuts
+
+
+# ---- parse_time ----
+
+def test_parse_time_seconds():
+    assert cuts.parse_time("30") == 30.0
+    assert cuts.parse_time("30.5") == 30.5
+
+
+def test_parse_time_mm_ss():
+    assert cuts.parse_time("1:30") == 90.0
+    assert cuts.parse_time("0:05") == 5.0
+    assert cuts.parse_time("2:15.5") == 135.5
+
+
+def test_parse_time_hh_mm_ss():
+    assert cuts.parse_time("0:00:30") == 30.0
+    assert cuts.parse_time("1:05:30") == 3930.0
+    assert cuts.parse_time("1:05:30.75") == 3930.75
+
+
+def test_parse_time_rejects_invalid():
+    with pytest.raises(ValueError):
+        cuts.parse_time("abc")
+    with pytest.raises(ValueError):
+        cuts.parse_time("-30")
+    with pytest.raises(ValueError):
+        cuts.parse_time("1:2:3:4")
+
+
+def test_parse_cut_range_seconds():
+    assert cuts.parse_cut_range("30~60") == (30.0, 60.0)
+
+
+def test_parse_cut_range_mm_ss():
+    assert cuts.parse_cut_range("0:30~1:00") == (30.0, 60.0)
+
+
+def test_parse_cut_range_hh_mm_ss():
+    assert cuts.parse_cut_range("00:01:30~00:02:00") == (90.0, 120.0)
+
+
+def test_parse_cut_range_rejects_no_separator():
+    with pytest.raises(ValueError, match="~"):
+        cuts.parse_cut_range("30,60")
+
+
+# ---- normalize_cuts ----
+
+def test_normalize_cuts_swaps_reversed():
+    result = cuts.normalize_cuts([(60.0, 30.0)], 100.0)
+    assert result == [(30.0, 60.0)]
+
+
+def test_normalize_cuts_drops_zero_width():
+    result = cuts.normalize_cuts([(30.0, 30.0), (40.0, 50.0)], 100.0)
+    assert result == [(40.0, 50.0)]
+
+
+def test_normalize_cuts_clips_to_duration():
+    result = cuts.normalize_cuts([(90.0, 120.0)], 100.0)
+    assert result == [(90.0, 100.0)]
+
+
+def test_normalize_cuts_drops_fully_outside():
+    result = cuts.normalize_cuts([(150.0, 200.0), (30.0, 50.0)], 100.0)
+    assert result == [(30.0, 50.0)]
+
+
+def test_normalize_cuts_sorts():
+    result = cuts.normalize_cuts([(60.0, 80.0), (10.0, 30.0)], 100.0)
+    assert result == [(10.0, 30.0), (60.0, 80.0)]
+
+
+def test_normalize_cuts_merges_overlapping():
+    result = cuts.normalize_cuts([(10.0, 30.0), (20.0, 40.0)], 100.0)
+    assert result == [(10.0, 40.0)]
+
+
+def test_normalize_cuts_merges_abutting():
+    result = cuts.normalize_cuts([(10.0, 20.0), (20.0, 30.0)], 100.0)
+    assert result == [(10.0, 30.0)]
+
+
+def test_normalize_cuts_raises_on_full_coverage():
+    with pytest.raises(ValueError, match="entire"):
+        cuts.normalize_cuts([(0.0, 100.0)], 100.0)
+
+
+# ---- keep_ranges_from_cuts ----
+
+def test_keep_ranges_empty_cuts():
+    assert cuts.keep_ranges_from_cuts([], 100.0) == [(0.0, 100.0)]
+
+
+def test_keep_ranges_middle_cut():
+    assert cuts.keep_ranges_from_cuts([(30.0, 60.0)], 100.0) == [(0.0, 30.0), (60.0, 100.0)]
+
+
+def test_keep_ranges_cut_at_start():
+    assert cuts.keep_ranges_from_cuts([(0.0, 30.0)], 100.0) == [(30.0, 100.0)]
+
+
+def test_keep_ranges_cut_at_end():
+    assert cuts.keep_ranges_from_cuts([(70.0, 100.0)], 100.0) == [(0.0, 70.0)]
+
+
+def test_keep_ranges_multiple_cuts():
+    assert cuts.keep_ranges_from_cuts(
+        [(30.0, 60.0), (135.0, 165.0)], 300.0
+    ) == [(0.0, 30.0), (60.0, 135.0), (165.0, 300.0)]
+
+
+# ---- ASS rewrite ----
+
+_ASS_HEADER = "\n".join([
+    "[Script Info]",
+    "Title: test",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize",
+    "Style: Default,Arial,40",
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+]) + "\n"
+
+
+def _ass_with_dialogues(dialogues: list[str]) -> str:
+    return _ASS_HEADER + "\n".join(f"Dialogue: {d}" for d in dialogues) + "\n"
+
+
+def test_rewrite_ass_no_cuts_is_noop():
+    ass_in = _ass_with_dialogues([
+        "0,0:00:10.00,0:00:15.00,Default,,0,0,0,,hello",
+    ])
+    assert cuts.rewrite_ass_for_cuts(ass_in, []) == ass_in
+
+
+def test_rewrite_ass_drops_dialogue_inside_cut():
+    ass_in = _ass_with_dialogues([
+        "0,0:00:40.00,0:00:50.00,Default,,0,0,0,,inside",
+        "0,0:00:05.00,0:00:10.00,Default,,0,0,0,,before",
+    ])
+    out = cuts.rewrite_ass_for_cuts(ass_in, [(30.0, 60.0)])
+    assert "inside" not in out
+    assert "before" in out
+
+
+def test_rewrite_ass_drops_straddling_dialogue():
+    ass_in = _ass_with_dialogues([
+        "0,0:00:25.00,0:00:35.00,Default,,0,0,0,,straddle_start",
+        "0,0:00:55.00,0:00:65.00,Default,,0,0,0,,straddle_end",
+        "0,0:00:20.00,0:00:70.00,Default,,0,0,0,,spanning",
+    ])
+    out = cuts.rewrite_ass_for_cuts(ass_in, [(30.0, 60.0)])
+    assert "straddle_start" not in out
+    assert "straddle_end" not in out
+    assert "spanning" not in out
+
+
+def test_rewrite_ass_shifts_after_cut():
+    # Cut: 30~60 (30s removed). A dialogue at 70-75 in source should move to 40-45 in output.
+    ass_in = _ass_with_dialogues([
+        "0,0:01:10.00,0:01:15.00,Default,,0,0,0,,after",
+    ])
+    out = cuts.rewrite_ass_for_cuts(ass_in, [(30.0, 60.0)])
+    assert "0:00:40.00" in out
+    assert "0:00:45.00" in out
+    assert "after" in out
+
+
+def test_rewrite_ass_multiple_cuts_cumulative_shift():
+    # Cuts: 10~20 (10s) and 30~40 (10s). A dialogue at 50-55 -> shift by 20 -> 30-35
+    ass_in = _ass_with_dialogues([
+        "0,0:00:50.00,0:00:55.00,Default,,0,0,0,,later",
+    ])
+    out = cuts.rewrite_ass_for_cuts(ass_in, [(10.0, 20.0), (30.0, 40.0)])
+    assert "0:00:30.00" in out
+    assert "0:00:35.00" in out
+
+
+def test_rewrite_ass_preserves_headers():
+    ass_in = _ass_with_dialogues(["0,0:00:10.00,0:00:15.00,Default,,0,0,0,,a"])
+    out = cuts.rewrite_ass_for_cuts(ass_in, [(100.0, 200.0)])
+    assert "[Script Info]" in out
+    assert "[V4+ Styles]" in out
+    assert "[Events]" in out
+    assert "Style: Default,Arial,40" in out
+
+
+# ---- burn filter_complex ----
+
+def test_build_filter_complex_single_keep_range():
+    from video2yt.burn import _build_filter_complex
+    s = _build_filter_complex([(0.0, 100.0)], "x.ass")
+    assert "trim=0" in s or "trim=start=0" in s
+    assert "concat=n=1" in s
+    assert "subtitles=f='x.ass'" in s
+
+
+def test_build_filter_complex_multiple_keep_ranges():
+    from video2yt.burn import _build_filter_complex
+    s = _build_filter_complex([(0.0, 30.0), (60.0, 100.0)], "x.ass")
+    assert "concat=n=2" in s
+    assert "atrim=0" in s or "atrim=start=0" in s
+    assert "atrim=60" in s or "atrim=start=60" in s
+    assert "subtitles=f='x.ass'" in s
+
+
+def test_render_with_cut_ranges_uses_filter_complex(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"v")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "output" / "BV_out.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    burn.render(video, ass, output, keep_ranges=[(0.0, 30.0), (60.0, 100.0)])
+
+    cmd = captured["cmd"]
+    assert "-filter_complex" in cmd
+    assert "-c:a" in cmd
+    ca_idx = cmd.index("-c:a")
+    assert cmd[ca_idx + 1] == "aac"
+    assert "-vf" not in cmd
+    assert any("outv" in a for a in cmd)
+    assert any("ca" in a for a in cmd)
+
+
+def test_render_without_cut_ranges_uses_simple_path(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"v")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "output" / "BV_out.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    burn.render(video, ass, output)  # no keep_ranges
+
+    cmd = captured["cmd"]
+    assert "-vf" in cmd
+    assert "-filter_complex" not in cmd
+    ca_idx = cmd.index("-c:a")
+    assert cmd[ca_idx + 1] == "copy"
+
+
+# ---- CLI integration ----
+
+def test_parse_args_cut_empty_default():
+    args = cli.parse_args(["https://x/video/BV1"])
+    assert args.cut == []
+
+
+def test_parse_args_cut_single():
+    args = cli.parse_args(["https://x/video/BV1", "--cut", "30~60"])
+    assert args.cut == ["30~60"]
+
+
+def test_parse_args_cut_multiple():
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "--cut", "30~60",
+        "--cut", "2:15~2:45",
+    ])
+    assert args.cut == ["30~60", "2:15~2:45"]
+
+
+def test_run_passes_keep_ranges_and_rewrites_ass(tmp_path, monkeypatch):
+    """End-to-end mock: --cut should cause keep_ranges to reach burn.render and
+    the ASS to be rewritten before burn."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test", "uploader": "TestUp"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            _ass_with_dialogues([
+                "0,0:00:10.00,0:00:15.00,Default,,0,0,0,,keep1",
+                "0,0:00:40.00,0:00:50.00,Default,,0,0,0,,cut",
+                "0,0:01:10.00,0:01:15.00,Default,,0,0,0,,keep2",
+            ]),
+            encoding="utf-8",
+        )
+
+    info = MediaInfo(
+        duration=200.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    out_info = MediaInfo(
+        duration=170.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=9_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return info if len(probe_calls) == 1 else out_info
+
+    captured_render = {}
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None):
+        captured_render["keep_ranges"] = keep_ranges
+        captured_render["ass_path"] = ass_path
+        captured_render["ass_text"] = ass_path.read_text(encoding="utf-8")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"x")
+        return output_path
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
+    monkeypatch.setattr("video2yt.cli.validate.check_output", lambda s, o, expected_duration=None: [])
+
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--cut", "30~60",
+        "--keep-temp",
+    ])
+    cli.run(args)
+
+    assert captured_render["keep_ranges"] == [(0.0, 30.0), (60.0, 200.0)]
+    ass = captured_render["ass_text"]
+    # keep1 unchanged (before cut)
+    assert "0:00:10.00" in ass
+    assert "0:00:15.00" in ass
+    # keep2 shifted by 30s: 70-75 -> 40-45
+    assert "0:00:40.00" in ass
+    assert "0:00:45.00" in ass
+    # "cut" line at 40-50 should be dropped entirely
+    assert "cut" not in ass
+
+
+def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
+    """When both --cut and --preview-seconds are set: cut first, then preview clamps."""
+    captured = {}
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            _ass_with_dialogues([
+                "0,0:00:05.00,0:00:08.00,Default,,0,0,0,,a",
+            ]),
+            encoding="utf-8",
+        )
+
+    source_info = MediaInfo(
+        duration=200.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=5_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    def fake_check_output(source, output, expected_duration=None):
+        captured["expected_duration"] = expected_duration
+        return []
+
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None):
+        captured["keep_ranges"] = keep_ranges
+        captured["max_duration"] = max_duration
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"x")
+        return output_path
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
+    monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
+
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--cut", "30~60",
+        "--preview-seconds", "60",
+        "--keep-temp",
+    ])
+    cli.run(args)
+
+    # Cut 30~60 (30s removed) on 200s source -> kept_duration = 170
+    # preview = 60 -> expected_duration = min(60, 170) = 60
+    assert captured["expected_duration"] == 60.0
+    assert captured["keep_ranges"] == [(0.0, 30.0), (60.0, 200.0)]
+    assert captured["max_duration"] == 60

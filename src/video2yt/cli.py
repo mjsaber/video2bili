@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from video2yt import burn, download, validate
+from video2yt import burn, cuts, download, validate
 
 BV_PATTERN = re.compile(r"/video/(BV[A-Za-z0-9]+)")
 
@@ -168,6 +168,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "without re-encoding the whole video."
         ),
     )
+    parser.add_argument(
+        "--cut", action="append", default=[], metavar="START~END",
+        help=(
+            "Time range to REMOVE from the output. Repeatable. "
+            "START/END accept SS, MM:SS, or HH:MM:SS with optional "
+            "fractional seconds. Examples: "
+            "--cut 30~60, --cut 0:30~1:00, --cut 00:01:30~00:02:00."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -246,23 +255,60 @@ def run(args: argparse.Namespace) -> Path:
     _log(f"detected {n_danmaku} danmaku lines")
     timings["generate_ass"] = time.monotonic() - t0
 
+    # Parse --cut arguments (if any), normalize, and compute keep ranges.
+    raw_cuts = [cuts.parse_cut_range(s) for s in args.cut]
+    cut_ranges: list[tuple[float, float]] = []
+    keep_ranges: list[tuple[float, float]] | None = None
+    ass_path_for_burn = ass_path
+    if raw_cuts:
+        cut_ranges = cuts.normalize_cuts(
+            raw_cuts, total_duration=source_info.duration
+        )
+        keep_ranges = cuts.keep_ranges_from_cuts(
+            cut_ranges, total_duration=source_info.duration
+        )
+        total_removed = sum(end - start for start, end in cut_ranges)
+        _log(
+            f"cut ranges (raw): {raw_cuts} -> normalized: {cut_ranges} "
+            f"-> keep: {keep_ranges} (removed {total_removed:.2f}s)"
+        )
+        # Rewrite the ASS file so dialogues inside cut ranges are dropped
+        # and dialogues after cuts are shifted onto the new timeline.
+        # Keep the original ASS on disk for debugging.
+        cut_ass_path = temp_subdir / f"{bv_id}.danmaku.cut.ass"
+        original_ass_text = ass_path.read_text(encoding="utf-8")
+        rewritten = cuts.rewrite_ass_for_cuts(original_ass_text, cut_ranges)
+        cut_ass_path.write_text(rewritten, encoding="utf-8")
+        ass_path_for_burn = cut_ass_path
+
     output_path = output_subdir / f"{bv_id}_with_danmaku.mp4"
     preview_tag = (
         f" (preview first {args.preview_seconds}s)"
         if args.preview_seconds else ""
     )
-    _log(f"burning danmaku into {output_path.name}{preview_tag}")
+    cut_tag = f" (cuts applied: {len(cut_ranges)})" if cut_ranges else ""
+    _log(f"burning danmaku into {output_path.name}{preview_tag}{cut_tag}")
     t0 = time.monotonic()
-    burn.render(video_path, ass_path, output_path, max_duration=args.preview_seconds)
+    burn.render(
+        video_path,
+        ass_path_for_burn,
+        output_path,
+        max_duration=args.preview_seconds,
+        keep_ranges=keep_ranges,
+    )
     timings["burn"] = time.monotonic() - t0
 
     _log("validating output")
     t0 = time.monotonic()
     output_info = validate.probe(output_path)
+    if keep_ranges is not None:
+        kept_duration = sum(end - start for start, end in keep_ranges)
+    else:
+        kept_duration = source_info.duration
     expected_duration = (
-        float(args.preview_seconds)
+        min(float(args.preview_seconds), kept_duration)
         if args.preview_seconds is not None
-        else source_info.duration
+        else kept_duration
     )
     for w in validate.check_output(
         source_info, output_info, expected_duration=expected_duration
@@ -275,6 +321,8 @@ def run(args: argparse.Namespace) -> Path:
         video_path.unlink(missing_ok=True)
         xml_path.unlink(missing_ok=True)
         ass_path.unlink(missing_ok=True)
+        if ass_path_for_burn != ass_path:
+            ass_path_for_burn.unlink(missing_ok=True)
         # Best-effort: remove the subdir if empty
         try:
             temp_subdir.rmdir()
