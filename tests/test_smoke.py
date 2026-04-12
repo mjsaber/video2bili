@@ -2202,3 +2202,223 @@ def test_run_speed_with_cut_scales_kept_duration(tmp_path, monkeypatch):
     # source 120s, cut 30~60 removes 30s -> kept = 90s, 90/1.5 = 60s
     assert captured["speed"] == 1.5
     assert abs(captured["expected_duration"] - 60.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Output filename suffixes: _cut, _<speed>x, _preview
+# ---------------------------------------------------------------------------
+
+def test_build_output_filename_default():
+    assert cli._build_output_filename("BV1", False, 1.0, False) == "BV1_with_danmaku.mp4"
+
+
+def test_build_output_filename_cut_only():
+    assert cli._build_output_filename("BV1", True, 1.0, False) == "BV1_with_danmaku_cut.mp4"
+
+
+def test_build_output_filename_speed_only():
+    assert cli._build_output_filename("BV1", False, 1.5, False) == "BV1_with_danmaku_1.5x.mp4"
+
+
+def test_build_output_filename_integer_speed():
+    assert cli._build_output_filename("BV1", False, 2.0, False) == "BV1_with_danmaku_2x.mp4"
+
+
+def test_build_output_filename_fractional_speed():
+    assert cli._build_output_filename("BV1", False, 1.25, False) == "BV1_with_danmaku_1.25x.mp4"
+
+
+def test_build_output_filename_preview_only():
+    assert cli._build_output_filename("BV1", False, 1.0, True) == "BV1_with_danmaku_preview.mp4"
+
+
+def test_build_output_filename_cut_and_speed():
+    assert cli._build_output_filename("BV1", True, 1.5, False) == "BV1_with_danmaku_cut_1.5x.mp4"
+
+
+def test_build_output_filename_all_three():
+    assert cli._build_output_filename("BV1", True, 1.25, True) == "BV1_with_danmaku_cut_1.25x_preview.mp4"
+
+
+def test_build_output_filename_cut_and_preview():
+    assert cli._build_output_filename("BV1", True, 1.0, True) == "BV1_with_danmaku_cut_preview.mp4"
+
+
+def test_build_output_filename_speed_and_preview():
+    assert cli._build_output_filename("BV1", False, 1.5, True) == "BV1_with_danmaku_1.5x_preview.mp4"
+
+
+def test_run_output_filename_includes_cut_suffix(tmp_path, monkeypatch):
+    """With --cut, output filename gets _cut suffix."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "T", "uploader": "UP"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(b"<i></i>")
+        return (temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False)
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer, Start, End, Style\n"
+            "Dialogue: 0,0:00:05.00,0:00:10.00,Default,hi\n",
+            encoding="utf-8",
+        )
+
+    info = MediaInfo(
+        duration=120.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    out_info = MediaInfo(
+        duration=90.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=9_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return info if len(probe_calls) == 1 else out_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+    monkeypatch.setattr("video2yt.cli.validate.check_output", lambda s, o, expected_duration=None: [])
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--cut", "30~60",
+    ])
+    result = cli.run(args)
+    assert result.name == "BV1_with_danmaku_cut.mp4"
+
+
+def test_run_output_filename_includes_speed_suffix(tmp_path, monkeypatch):
+    """With --speed 1.25, output filename gets _1.25x suffix."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "T", "uploader": "UP"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(b"<i></i>")
+        return (temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False)
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer, Start, End, Style\n"
+            "Dialogue: 0,0:00:05.00,0:00:10.00,Default,hi\n",
+            encoding="utf-8",
+        )
+
+    info = MediaInfo(
+        duration=120.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    out_info = MediaInfo(
+        duration=96.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=9_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return info if len(probe_calls) == 1 else out_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+    monkeypatch.setattr("video2yt.cli.validate.check_output", lambda s, o, expected_duration=None: [])
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--speed", "1.25",
+    ])
+    result = cli.run(args)
+    assert result.name == "BV1_with_danmaku_1.25x.mp4"
+
+
+def test_run_output_filename_combines_cut_speed_preview(tmp_path, monkeypatch):
+    """All three: --cut, --speed 1.5, --preview-seconds 30."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "T", "uploader": "UP"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(b"<i></i>")
+        return (temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False)
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer, Start, End, Style\n"
+            "Dialogue: 0,0:00:05.00,0:00:10.00,Default,hi\n",
+            encoding="utf-8",
+        )
+
+    info = MediaInfo(
+        duration=120.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    out_info = MediaInfo(
+        duration=30.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=3_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return info if len(probe_calls) == 1 else out_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+    monkeypatch.setattr("video2yt.cli.validate.check_output", lambda s, o, expected_duration=None: [])
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--cut", "30~60",
+        "--speed", "1.5",
+        "--preview-seconds", "30",
+    ])
+    result = cli.run(args)
+    assert result.name == "BV1_with_danmaku_cut_1.5x_preview.mp4"

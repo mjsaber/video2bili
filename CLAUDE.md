@@ -15,7 +15,7 @@ uv run video2yt "<url>" --cut 30~60 --cut 2:15~2:45        # remove ranges
 uv run video2yt "<url>" --speed 1.5                        # 1.5x playback
 uv run video2yt "<url>" --font-size 48 --codec h265        # style overrides
 uv run python -m video2yt "<url>"                          # run as module
-uv run pytest                                              # run tests (134)
+uv run pytest                                              # run tests (147)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
 
@@ -35,6 +35,7 @@ uv add <pkg>                                               # add a dep (NEVER ed
 - **Speed forces filter_complex**: any non-1.0 `--speed` value routes through the `filter_complex` path (`atempo` can't coexist with `-c:a copy`). `_build_filter_complex` emits uniform `[outv]`/`[outa]` final labels and uses `null`/`anull` passthrough filters to keep the graph shape consistent whether cut, speed, both, or neither are present. Subtitles are burned BEFORE `setpts` so danmaku are baked in at the original timeline and then time-scaled along with the rest of the frame.
 - **Raw download caching**: `download.fetch` checks `temp_dir` for `<bv>.{mp4,mkv,webm}` AND `<bv>*.xml` before invoking yt-dlp; if both are present, it skips yt-dlp entirely and returns `from_cache=True` (cli logs `using cached download from …`). Default cleanup in `cli.run` removes only the derived ASS files (`<bv>.danmaku.ass`, `<bv>.danmaku.cut.ass`) and INTENTIONALLY leaves the raw mp4 + XML on disk so the next run hits the cache. `--keep-temp` additionally preserves the derived ASS files. To force a fresh download, delete the specific subfolder under `temp/` by hand.
 - **Agent E2E test rule**: DO NOT run `rm -rf output/` or `rm -rf temp/` during E2E tests — that wipes every cached raw download and the outputs of unrelated videos. Clean only the specific `temp/<subfolder>/` under test, or just let the cache hit on the next run. This is a workflow rule, not a code invariant.
+- **Output filename suffixes**: `_cut`, `_<speed>x`, `_preview` get appended to `<bv>_with_danmaku.mp4` based on flags, so different parameter combos coexist. Default (no modifiers) keeps the original filename. See `cli._build_output_filename`.
 
 ## Architecture
 
@@ -48,7 +49,7 @@ src/video2yt/
 └── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ```
 
-Tests live in `tests/test_smoke.py` (134 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
+Tests live in `tests/test_smoke.py` (147 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
 
 `run()` flow: preflight → extract BV → fetch metadata → build per-video subfolder → `download.fetch` (cache-hit if raw files present, else yt-dlp) → probe source → compute auto font size → `biliass.convert_to_ass` → parse/normalize `--cut` → rewrite ASS for cuts → `burn.render` → probe output and validate against `expected_duration` → cleanup (derived ASS only by default, plus keep everything with `--keep-temp`; raw mp4+xml always preserved). Each phase is timed and logged.
 

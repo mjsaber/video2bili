@@ -56,6 +56,30 @@ output/
 
 If the uploader is missing the subfolder is just `<title>`; if both are missing it falls back to the BV id.
 
+## Output filenames
+
+The output MP4 is named `<bv_id>_with_danmaku[_<suffix>].mp4`, where the suffix encodes which non-default options were used. This is a backward-compatible addition: a plain run with no modifiers still produces `<bv_id>_with_danmaku.mp4`, matching pre-feature behavior.
+
+Suffix parts (in fixed order):
+
+- `_cut` if any `--cut` ranges were provided
+- `_<speed>x` if `--speed != 1.0` (e.g. `_1.5x`, `_1.25x`, `_2x`)
+- `_preview` if `--preview-seconds` was provided
+
+Because the order is fixed, a given parameter combination always produces the same filename — so different combinations coexist on disk and re-running the same settings overwrites the previous output deterministically.
+
+| `--cut` | `--speed` | `--preview-seconds` | filename |
+|---|---|---|---|
+| no  | 1.0  | no  | `BV_with_danmaku.mp4` |
+| no  | 1.5  | no  | `BV_with_danmaku_1.5x.mp4` |
+| yes | 1.0  | no  | `BV_with_danmaku_cut.mp4` |
+| yes | 1.5  | no  | `BV_with_danmaku_cut_1.5x.mp4` |
+| no  | 1.25 | yes | `BV_with_danmaku_1.25x_preview.mp4` |
+| yes | 1.0  | yes | `BV_with_danmaku_cut_preview.mp4` |
+| yes | 1.5  | yes | `BV_with_danmaku_cut_1.5x_preview.mp4` |
+
+Note: the preview duration is intentionally NOT encoded in the filename. Preview is for iteration, so different preview lengths overwrite each other by design; if you need to keep multiple previews, rename them manually.
+
 ## Examples
 
 ```bash
@@ -126,5 +150,5 @@ Only delete the specific subfolder you want to re-fetch; wiping `temp/` wholesal
 ## Development
 
 ```bash
-uv run pytest    # currently 134 tests; everything mocked at the subprocess boundary
+uv run pytest    # currently 147 tests; everything mocked at the subprocess boundary
 ```

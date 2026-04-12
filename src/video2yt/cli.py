@@ -77,6 +77,31 @@ def compute_font_size(video_height: int) -> int:
     return round(video_height * REFERENCE_STANDARD_SIZE / REFERENCE_PLAYER_HEIGHT)
 
 
+def _build_output_filename(
+    bv_id: str,
+    has_cut: bool,
+    speed: float,
+    has_preview: bool,
+) -> str:
+    """Build the per-run output filename with suffixes indicating non-default settings.
+
+    Format: ``<bv_id>_with_danmaku[_cut][_<speed>x][_preview].mp4``.
+
+    The suffix order is fixed (cut, speed, preview) so a given parameter
+    combination always produces the same filename. Default filename
+    (no modifiers) is ``<bv_id>_with_danmaku.mp4`` for backward compatibility.
+    """
+    parts = []
+    if has_cut:
+        parts.append("cut")
+    if speed != 1.0:
+        parts.append(f"{speed:g}x")
+    if has_preview:
+        parts.append("preview")
+    suffix = ("_" + "_".join(parts)) if parts else ""
+    return f"{bv_id}_with_danmaku{suffix}.mp4"
+
+
 def extract_bv_id(url: str) -> str:
     """Extract the BV id from a Bilibili video URL."""
     m = BV_PATTERN.search(url)
@@ -299,7 +324,15 @@ def run(args: argparse.Namespace) -> Path:
         cut_ass_path.write_text(rewritten, encoding="utf-8")
         ass_path_for_burn = cut_ass_path
 
-    output_path = output_subdir / f"{bv_id}_with_danmaku.mp4"
+    has_cut = len(args.cut) > 0
+    has_preview = args.preview_seconds is not None
+    output_filename = _build_output_filename(
+        bv_id=bv_id,
+        has_cut=has_cut,
+        speed=args.speed,
+        has_preview=has_preview,
+    )
+    output_path = output_subdir / output_filename
     preview_tag = (
         f" (preview first {args.preview_seconds}s)"
         if args.preview_seconds else ""
