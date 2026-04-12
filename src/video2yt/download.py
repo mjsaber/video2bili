@@ -1,7 +1,25 @@
+import json
 import subprocess
 from pathlib import Path
 
 import biliass
+
+
+def get_metadata(url: str, browser: str) -> dict:
+    """Fetch video metadata via `yt-dlp --dump-json --skip-download`.
+
+    Returns the parsed JSON dict (title, duration, uploader, etc.).
+    Fast operation — only metadata, no video bytes transferred.
+    """
+    cmd = [
+        "yt-dlp",
+        "--cookies-from-browser", browser,
+        "--dump-json",
+        "--skip-download",
+        url,
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return json.loads(result.stdout)
 
 
 def _build_format_spec(quality: int, codec: str) -> str:

@@ -18,6 +18,37 @@ BV_PATTERN = re.compile(r"/video/(BV[A-Za-z0-9]+)")
 REFERENCE_PLAYER_HEIGHT = 540
 REFERENCE_STANDARD_SIZE = 25
 
+MAX_TITLE_DIR_LENGTH = 60
+
+
+def _sanitize_title(title: str, max_length: int = MAX_TITLE_DIR_LENGTH) -> str:
+    """Sanitize a video title for use as a directory name.
+
+    - Replace filesystem-unsafe characters with ``_``
+    - Collapse whitespace
+    - Strip leading/trailing whitespace and dots
+    - Truncate to ``max_length`` characters
+    - Return ``"unnamed"`` if result would be empty
+
+    The max_length is in characters, not bytes. On macOS and Linux the
+    per-component byte limit is 255; at max_length=60 even all-CJK
+    titles (3 bytes per char in UTF-8) fit in 180 bytes, leaving safe
+    headroom.
+    """
+    # Replace characters disallowed on common filesystems (Windows-safe set):
+    #   < > : " / \ | ? *  and control chars 0x00-0x1f
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title)
+    # Collapse whitespace (including newlines, tabs) to a single space
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    # Collapse runs of underscores produced by the replace above
+    cleaned = re.sub(r'_+', '_', cleaned)
+    # Strip leading/trailing whitespace, dots, and underscores
+    cleaned = cleaned.strip(' ._')
+    # Truncate to max_length characters (not bytes)
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length].rstrip(' ._')
+    return cleaned or "unnamed"
+
 
 def compute_font_size(video_height: int) -> int:
     """Compute danmaku font size using Bilibili's native scaling formula."""
@@ -128,8 +159,20 @@ def run(args: argparse.Namespace) -> Path:
 
     preflight()
     bv_id = extract_bv_id(args.url)
-    args.temp_dir.mkdir(parents=True, exist_ok=True)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Metadata + subfolder setup BEFORE creating any temp files
+    t0 = time.monotonic()
+    _log(f"fetching metadata for {bv_id}")
+    metadata = download.get_metadata(args.url, args.browser)
+    title = metadata.get("title") or bv_id
+    safe_title = _sanitize_title(title)
+    _log(f"title: {title!r} -> dir: {safe_title!r}")
+    timings["metadata"] = time.monotonic() - t0
+
+    temp_subdir = args.temp_dir / safe_title
+    output_subdir = args.output_dir / safe_title
+    temp_subdir.mkdir(parents=True, exist_ok=True)
+    output_subdir.mkdir(parents=True, exist_ok=True)
 
     _log(
         f"downloading {bv_id} (quality<={args.quality}, "
@@ -138,7 +181,7 @@ def run(args: argparse.Namespace) -> Path:
     t0 = time.monotonic()
     video_path, xml_path = download.fetch(
         url=args.url,
-        temp_dir=args.temp_dir,
+        temp_dir=temp_subdir,
         quality=args.quality,
         browser=args.browser,
         bv_id=bv_id,
@@ -164,7 +207,7 @@ def run(args: argparse.Namespace) -> Path:
     )
 
     t0 = time.monotonic()
-    ass_path = args.temp_dir / f"{bv_id}.danmaku.ass"
+    ass_path = temp_subdir / f"{bv_id}.danmaku.ass"
     download.generate_ass(
         xml_path=xml_path,
         ass_path=ass_path,
@@ -178,7 +221,7 @@ def run(args: argparse.Namespace) -> Path:
     _log(f"detected {n_danmaku} danmaku lines")
     timings["generate_ass"] = time.monotonic() - t0
 
-    output_path = args.output_dir / f"{bv_id}_with_danmaku.mp4"
+    output_path = output_subdir / f"{bv_id}_with_danmaku.mp4"
     preview_tag = (
         f" (preview first {args.preview_seconds}s)"
         if args.preview_seconds else ""
@@ -207,10 +250,16 @@ def run(args: argparse.Namespace) -> Path:
         video_path.unlink(missing_ok=True)
         xml_path.unlink(missing_ok=True)
         ass_path.unlink(missing_ok=True)
+        # Best-effort: remove the subdir if empty
+        try:
+            temp_subdir.rmdir()
+        except OSError:
+            pass  # subdir not empty or doesn't exist
 
     total = time.monotonic() - t_start
     _log(
-        f"timings: download={timings['download']:.1f}s "
+        f"timings: metadata={timings['metadata']:.2f}s "
+        f"download={timings['download']:.1f}s "
         f"probe_src={timings['probe_source']:.2f}s "
         f"gen_ass={timings['generate_ass']:.2f}s "
         f"burn={timings['burn']:.1f}s "

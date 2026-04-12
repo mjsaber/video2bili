@@ -604,12 +604,80 @@ def test_parse_args_rejects_bad_codec():
         cli.parse_args(["https://x", "--codec", "av1"])
 
 
+def test_sanitize_title_basic():
+    assert cli._sanitize_title("Hello World") == "Hello World"
+
+
+def test_sanitize_title_chinese():
+    t = "恶魔必选沙德沃克！饲料暴风吸入！"
+    result = cli._sanitize_title(t)
+    assert result == t  # Chinese chars and ！ are allowed (not in forbidden set)
+
+
+def test_sanitize_title_strips_forbidden_chars():
+    assert cli._sanitize_title('foo/bar:baz?qux*.mp4') == "foo_bar_baz_qux_.mp4"
+
+
+def test_sanitize_title_collapses_whitespace():
+    # Control chars (\n, \t) are replaced with '_' first, then whitespace is
+    # collapsed, then '_+' is collapsed. So "foo\n\t  bar" becomes "foo_ bar".
+    assert cli._sanitize_title("foo\n\t  bar") == "foo_ bar"
+
+
+def test_sanitize_title_truncates_long_title():
+    long = "a" * 200
+    result = cli._sanitize_title(long)
+    assert len(result) == 60
+
+
+def test_sanitize_title_truncates_long_chinese_title():
+    long = "恶" * 200
+    result = cli._sanitize_title(long)
+    # Chinese chars count as 1 char each, max 60 chars
+    assert len(result) == 60
+
+
+def test_sanitize_title_empty_falls_back_to_unnamed():
+    assert cli._sanitize_title("") == "unnamed"
+    assert cli._sanitize_title("   ") == "unnamed"
+    assert cli._sanitize_title("...") == "unnamed"
+
+
+def test_sanitize_title_strips_leading_trailing_dots():
+    assert cli._sanitize_title("  foo.  ") == "foo"
+
+
+def test_get_metadata_calls_yt_dlp(monkeypatch):
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        result = MagicMock()
+        result.stdout = '{"title": "Test Video", "duration": 60, "id": "BV123"}'
+        result.returncode = 0
+        return result
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    meta = download.get_metadata("https://www.bilibili.com/video/BV123", "chrome")
+    assert meta["title"] == "Test Video"
+    assert meta["duration"] == 60
+    cmd = captured["cmd"]
+    assert cmd[0] == "yt-dlp"
+    assert "--cookies-from-browser" in cmd
+    assert "chrome" in cmd
+    assert "--dump-json" in cmd
+    assert "--skip-download" in cmd
+    assert cmd[-1] == "https://www.bilibili.com/video/BV123"
+
+
 def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
     """Full pipeline with all subprocess boundaries mocked; verifies call order."""
     call_log = []
 
     # Skip dep preflight
     monkeypatch.setattr("video2yt.cli.preflight", lambda: call_log.append("preflight"))
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test Title"},
+    )
 
     def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         call_log.append(f"fetch:{bv_id}:{quality}:{browser}:{codec}")
@@ -666,7 +734,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
     result = cli.run(args)
     captured_out = capsys.readouterr()
 
-    assert result == tmp_path / "output" / "BV191DpBmE2t_with_danmaku.mp4"
+    assert result == tmp_path / "output" / "Test Title" / "BV191DpBmE2t_with_danmaku.mp4"
     assert result.exists()
     # Verify call order
     assert call_log[0] == "preflight"
@@ -681,6 +749,10 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
 
 def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test Title"},
+    )
 
     def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         v = temp_dir / f"{bv_id}.mp4"
@@ -717,14 +789,19 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
     ])
     cli.run(args)
 
-    # Temp files gone
-    assert not (tmp_path / "tmp" / "BV1.mp4").exists()
-    assert not (tmp_path / "tmp" / "BV1.danmaku.ass").exists()
-    assert not (tmp_path / "tmp" / "BV1.danmaku.xml").exists()
+    # Temp files gone (now under sanitized-title subfolder)
+    subdir = tmp_path / "tmp" / "Test Title"
+    assert not (subdir / "BV1.mp4").exists()
+    assert not (subdir / "BV1.danmaku.ass").exists()
+    assert not (subdir / "BV1.danmaku.xml").exists()
 
 
 def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test Title"},
+    )
 
     def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         v = temp_dir / f"{bv_id}.mp4"
@@ -758,14 +835,19 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
         "--keep-temp",
     ])
     cli.run(args)
-    assert (tmp_path / "tmp" / "BV1.mp4").exists()
-    assert (tmp_path / "tmp" / "BV1.danmaku.ass").exists()
-    assert (tmp_path / "tmp" / "BV1.danmaku.xml").exists()
+    subdir = tmp_path / "tmp" / "Test Title"
+    assert (subdir / "BV1.mp4").exists()
+    assert (subdir / "BV1.danmaku.ass").exists()
+    assert (subdir / "BV1.danmaku.xml").exists()
 
 
 def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
     """When --font-size is not specified, run() computes it from probed height."""
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test Title"},
+    )
     captured_font_size = []
 
     def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
@@ -818,6 +900,10 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
 def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
     """When --font-size is explicit, run() bypasses compute_font_size."""
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test Title"},
+    )
     captured_font_size = []
 
     def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
@@ -881,6 +967,10 @@ def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
     """With --preview-seconds N, cli.run should pass expected_duration=N to check_output."""
     captured = {}
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test Title"},
+    )
 
     def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
@@ -939,6 +1029,10 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
     """Without --preview-seconds, expected_duration defaults to source.duration."""
     captured = {}
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "Test Title"},
+    )
 
     def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
@@ -990,3 +1084,69 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
     ])
     cli.run(args)
     assert captured["expected_duration"] == 1260.0
+
+
+def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "我 的/视频: Test"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer\nDialogue: 0,0,0,D,hi\n", encoding="utf-8",
+        )
+
+    source_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=11_000_000,
+    )
+    probe_calls = []
+
+    def fake_probe(p):
+        probe_calls.append(p)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--keep-temp",
+    ])
+    result = cli.run(args)
+
+    # Sanitizer behavior: "我 的/视频: Test"
+    #   1. '/' -> '_', ':' -> '_'  => "我 的_视频_ Test"
+    #   2. whitespace collapse: already single spaces
+    #   3. '_+' collapse: already single
+    #   4. strip leading/trailing ._ and spaces: unchanged
+    expected_dir = "我 的_视频_ Test"
+    assert (tmp_path / "tmp" / expected_dir).is_dir()
+    assert (tmp_path / "out" / expected_dir).is_dir()
+    assert result == tmp_path / "out" / expected_dir / "BV1_with_danmaku.mp4"
