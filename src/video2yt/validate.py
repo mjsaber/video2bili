@@ -67,3 +67,23 @@ def check_source(info: MediaInfo, requested_quality: int) -> list[str]:
             f"or this video has no higher-quality variant"
         )
     return warnings
+
+
+def check_ass(path: Path) -> int:
+    """Validate an ASS subtitle file. Returns Dialogue line count."""
+    if not path.exists():
+        raise ValueError(f"ASS file not found: {path}")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"ASS file is not valid UTF-8: {path}") from e
+    if "[Events]" not in text:
+        raise ValueError(f"ASS file missing [Events] section: {path}")
+    dialogue_count = sum(
+        1 for line in text.splitlines() if line.startswith("Dialogue:")
+    )
+    if dialogue_count == 0:
+        raise ValueError(
+            f"ASS file has no Dialogue lines (no danmaku available): {path}"
+        )
+    return dialogue_count

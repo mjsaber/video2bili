@@ -86,3 +86,38 @@ def test_check_source_no_warnings_for_exact_match():
     info = _mk_info()
     warnings = validate.check_source(info, 1080)
     assert warnings == []
+
+
+def test_check_ass_raises_on_missing_file(tmp_path):
+    with pytest.raises(ValueError, match="not found"):
+        validate.check_ass(tmp_path / "missing.ass")
+
+
+def test_check_ass_raises_without_events_section(tmp_path):
+    f = tmp_path / "no_events.ass"
+    f.write_text("[Script Info]\nTitle: foo\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\[Events\]"):
+        validate.check_ass(f)
+
+
+def test_check_ass_raises_on_zero_dialogue(tmp_path):
+    f = tmp_path / "empty.ass"
+    f.write_text(
+        "[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Text\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Dialogue|danmaku"):
+        validate.check_ass(f)
+
+
+def test_check_ass_returns_dialogue_count(tmp_path):
+    f = tmp_path / "ok.ass"
+    f.write_text(
+        "[Script Info]\n\n[Events]\n"
+        "Format: Layer, Start, End, Style, Text\n"
+        "Dialogue: 0,0:00:01.00,0:00:05.00,Default,hello\n"
+        "Dialogue: 0,0:00:02.00,0:00:06.00,Default,world\n"
+        "Dialogue: 0,0:00:03.00,0:00:07.00,Default,foo\n",
+        encoding="utf-8",
+    )
+    assert validate.check_ass(f) == 3
