@@ -70,8 +70,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Keep intermediate files after success",
     )
     parser.add_argument(
-        "--font-face", default="PingFang SC",
-        help="Font family for rendered danmaku (default: PingFang SC — macOS CJK)",
+        "--font-face", default="Hiragino Sans GB",
+        help=(
+            "Font family for rendered danmaku (default: Hiragino Sans GB). "
+            "This font is preinstalled on macOS and visible to Homebrew "
+            "fontconfig, so libass can actually find it. PingFang SC lives "
+            "inside a SIP-protected .ttc that libass cannot open."
+        ),
     )
     parser.add_argument(
         "--font-size", type=int, default=40,

@@ -8,7 +8,7 @@ def fetch(
     quality: int,
     browser: str,
     bv_id: str,
-    font_face: str = "PingFang SC",
+    font_face: str = "Hiragino Sans GB",
     font_size: int = 40,
 ) -> tuple[Path, Path]:
     """Download video + danmaku ASS via yt-dlp + yt-dlp-danmaku plugin.

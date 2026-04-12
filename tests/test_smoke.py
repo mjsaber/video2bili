@@ -226,7 +226,7 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
     assert "--use-postprocessor" in cmd
     pp_idx = cmd.index("--use-postprocessor")
     # With defaults
-    assert cmd[pp_idx + 1] == "danmaku:font_face=PingFang SC;font_size=40"
+    assert cmd[pp_idx + 1] == "danmaku:font_face=Hiragino Sans GB;font_size=40"
     # write-subs present
     assert "--write-subs" in cmd
     # output template contains BV id and %(ext)s
@@ -427,7 +427,7 @@ def test_parse_args_defaults():
     assert args.quality == 1080
     assert args.browser == "chrome"
     assert args.keep_temp is False
-    assert args.font_face == "PingFang SC"
+    assert args.font_face == "Hiragino Sans GB"
     assert args.font_size == 40
 
 
@@ -439,7 +439,7 @@ def test_parse_args_custom():
         "-q", "720",
         "-b", "firefox",
         "--keep-temp",
-        "--font-face", "Hiragino Sans GB",
+        "--font-face", "Noto Sans CJK SC",
         "--font-size", "32",
     ])
     assert args.output_dir == Path("/tmp/out")
@@ -447,7 +447,7 @@ def test_parse_args_custom():
     assert args.quality == 720
     assert args.browser == "firefox"
     assert args.keep_temp is True
-    assert args.font_face == "Hiragino Sans GB"
+    assert args.font_face == "Noto Sans CJK SC"
     assert args.font_size == 32
 
 
