@@ -4,19 +4,24 @@ Project context for Claude agents working in this repo.
 
 ## Purpose
 
-A local CLI that takes a Bilibili video URL and produces an MP4 with danmaku burned in. Pipeline: `yt-dlp` (with `yt-dlp-danmaku` plugin) → `.danmaku.ass` → `ffmpeg subtitles=` filter → output MP4.
+A local CLI that takes a Bilibili video URL and produces an MP4 with danmaku burned in. Pipeline: `yt-dlp` (video + raw danmaku XML) → `biliass.convert_to_ass` (in-process) → `ffmpeg` (`subtitles=` filter, optionally inside a `filter_complex` cut/concat chain) → output MP4. Supports `--preview-seconds` for fast iteration, `--cut START~END` to remove time ranges from the output, `--codec` to pick h264/h265, and Bilibili-accurate font sizing.
 
 ## Commands
 
-- Run: `uv run video2yt "<url>"`
-- Run as module: `uv run python -m video2yt "<url>"`
-- Test: `uv run pytest`
-- Add a dep: `uv add <pkg>` (NEVER edit `pyproject.toml` dependencies by hand)
+```bash
+uv run video2yt "<url>"                                    # full video
+uv run video2yt "<url>" --preview-seconds 60               # first 60s
+uv run video2yt "<url>" --cut 30~60 --cut 2:15~2:45        # remove ranges
+uv run video2yt "<url>" --font-size 48 --codec h265        # style overrides
+uv run python -m video2yt "<url>"                          # run as module
+uv run pytest                                              # run tests (114)
+uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
+```
 
 ## External dependencies
 
 - `ffmpeg` and `ffprobe` must be in PATH (system install, not Python package). Check with `shutil.which('ffmpeg')`.
-- `yt-dlp-danmaku` is a yt-dlp postprocessor plugin. It is invoked via `yt-dlp --use-postprocessor danmaku`. Its runtime module is `biliass`; check installation with `import biliass`.
+- video2yt downloads the raw danmaku XML via `yt-dlp --write-subs --sub-langs danmaku` and converts to ASS in-process using `biliass.convert_to_ass`, so the height and font_size are known before conversion. The `yt-dlp-danmaku` plugin is no longer used as a postprocessor (refactored away in `aa1d91c`); we still depend on the `biliass` Python package that ships with it.
 
 ## Known gotchas
 
@@ -24,14 +29,33 @@ A local CLI that takes a Bilibili video URL and produces an MP4 with danmaku bur
 - **ffmpeg must be built with libass**: the default `brew install ffmpeg` bottle does NOT always include libass, so the `subtitles` filter we rely on is missing. Symptom: ffmpeg emits `No option name near '<filename.ass>'` or `No such filter: 'subtitles'` — it looks like a quoting bug but isn't. Fix: `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg`. Pre-flight check: `ffmpeg -filters | grep subtitles` must list the filter.
 - **yt-dlp release cadence**: yt-dlp updates frequently because Bilibili's extractor rules shift. If downloads suddenly break, first try `uv lock --upgrade-package yt-dlp`.
 - **Chrome cookie DB lock**: `--cookies-from-browser chrome` requires Chrome to not be holding the cookie database lock. If it fails, close Chrome first.
+- **Cut boundary dialogues are dropped, not clipped**: when a danmaku dialogue intersects a `--cut` range (even by a single frame), the whole dialogue is dropped. Rationale: simpler semantics, avoids partial-display weirdness. See `src/video2yt/cuts.py::rewrite_ass_for_cuts`.
+- **Filter_complex path for cuts**: when `--cut` is used, `burn.render` builds a `filter_complex` with `trim`/`atrim`/`concat`/`subtitles` and uses `-c:a aac` (can't `copy` after `atrim`). No-cut runs use the simple `-vf subtitles=` path with `-c:a copy`.
 
 ## Architecture
 
-4 modules in `src/video2yt/`:
+```
+src/video2yt/
+├── cli.py            # arg parsing, run() orchestration, per-phase timing,
+│                     # subfolder naming (<uploader[:4]>：<title>), font_size auto
+├── download.py       # yt-dlp wrapper (fetch + get_metadata + generate_ass via biliass)
+├── burn.py           # ffmpeg wrapper (simple -vf path + filter_complex path for cuts)
+├── validate.py       # ffprobe + source/ASS/output validators
+└── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
+```
 
-- `cli.py` — arg parsing, URL parsing (BV regex), dependency preflight, orchestration
-- `download.py` — single public function `fetch(url, temp_dir, quality, browser, bv_id) -> (video_path, ass_path)`
-- `burn.py` — single public function `render(video_path, ass_path, output_path) -> Path`
-- `validate.py` — `MediaInfo` dataclass + `probe`, `check_source`, `check_ass`, `check_output`
+Tests live in `tests/test_smoke.py` (114 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
 
-Tests live in `tests/test_smoke.py`. Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
+`run()` flow: preflight → extract BV → fetch metadata → build per-video subfolder → download video + XML → probe source → compute auto font size → `biliass.convert_to_ass` → parse/normalize `--cut` → rewrite ASS for cuts → `burn.render` → probe output and validate against `expected_duration` → optional cleanup. Each phase is timed and logged.
+
+## Feature flags quick reference
+
+```
+--quality {480,720,1080}: yt-dlp format height cap
+--codec {h264,h265,auto}: format codec preference (default h264 for YouTube)
+--font-face NAME:        ASS font family (default "Hiragino Sans GB", macOS-accessible CJK)
+--font-size N:           Dialogue font size (default auto: video_height * 25/540 per Bilibili native)
+--preview-seconds N:     ffmpeg -t clamp on output
+--cut START~END:         remove time ranges, repeatable, ~ separator, SS/MM:SS/HH:MM:SS
+--keep-temp:             retain intermediate files in temp/<title_subfolder>/
+```

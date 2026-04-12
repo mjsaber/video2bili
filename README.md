@@ -1,12 +1,12 @@
 # video2yt
 
-Download a Bilibili video and burn danmaku (bullet comments) into the output MP4.
+Download a Bilibili video and burn its danmaku (bullet comments) into a YouTube-ready MP4. Supports preview clips, time-range cuts, codec selection, and Bilibili-accurate danmaku sizing.
 
 ## Requirements
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/)
-- `ffmpeg` and `ffprobe` in PATH (macOS: `brew install ffmpeg`)
+- `ffmpeg` and `ffprobe` in PATH, built with libass (macOS: `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg`)
 - Chrome browser installed (for cookie-based login to access 1080p content)
 
 ## Install
@@ -15,24 +15,93 @@ Download a Bilibili video and burn danmaku (bullet comments) into the output MP4
 uv sync
 ```
 
+## Quick start
+
+```bash
+uv run video2yt "https://www.bilibili.com/video/BVxxxxxxxxxx/"
+```
+
+The tool fetches metadata, downloads the video and raw danmaku XML, converts the danmaku to ASS in-process via `biliass`, and burns the result into an MP4 under `./output/<uploader>：<title>/`.
+
 ## Usage
 
 ```bash
-uv run video2yt "https://www.bilibili.com/video/BVxxxxxxxxxx/" --quality 1080
+uv run video2yt <url> [options]
 ```
-
-Options:
 
 | Flag | Default | Description |
 |---|---|---|
-| `-o, --output-dir` | `./output` | Where the final MP4 goes |
-| `-t, --temp-dir` | `./temp` | Intermediate files (deleted on success) |
-| `-q, --quality` | `1080` | Max quality (1080 / 720 / 480) |
+| `url` (positional) | — | Bilibili video URL (must contain a `BV...` id) |
+| `-o, --output-dir` | `./output` | Where the final MP4 goes (under a per-video subfolder) |
+| `-t, --temp-dir` | `./temp` | Intermediate files (deleted on success unless `--keep-temp`) |
+| `-q, --quality` | `1080` | Max video quality, one of `{480, 720, 1080}` |
 | `-b, --browser` | `chrome` | Browser to read cookies from |
-| `--keep-temp` | off | Keep intermediate files after success |
+| `--codec` | `h264` | Video codec preference, one of `{h264, h265, auto}`. `h264` is most compatible / preferred by YouTube; `h265` produces smaller files; `auto` lets yt-dlp pick. |
+| `--font-face` | `Hiragino Sans GB` | ASS font family. The default is preinstalled on macOS and visible to libass via fontconfig. |
+| `--font-size` | `auto` | Pixel size for a standard (nominal=25) danmaku. Default `auto` uses Bilibili's native formula `video_height * 25 / 540` (≈ `height / 21.6`). |
+| `--preview-seconds` | none | If set, cap the burned output to the first N seconds (`ffmpeg -t N`). Useful for fast style/codec iteration. |
+| `--cut START~END` | none | Remove a time range from the output. Repeatable. See [Time format for `--cut`](#time-format-for---cut). |
+| `--keep-temp` | off | Keep intermediate files (raw video, XML, ASS) after success |
+
+## Output layout
+
+For each run video2yt creates a per-video subfolder named `<uploader[:4]>：<title>` (using the fullwidth colon U+FF1A) under both `--output-dir` and `--temp-dir`. The title is sanitized for filesystem safety and truncated to 60 characters.
+
+```
+output/
+└── 哈哈：某个搞笑视频的标题/
+    └── BV1xxxxxxxxx_with_danmaku.mp4
+```
+
+If the uploader is missing the subfolder is just `<title>`; if both are missing it falls back to the BV id.
+
+## Examples
+
+```bash
+# Simple full-video run
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/"
+
+# Preview the first 60 seconds (fast iteration on style/codec)
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" --preview-seconds 60
+
+# Remove a single time range
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" --cut 37~59
+
+# Remove multiple ranges
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" \
+    --cut 0:30~1:00 --cut 2:15~2:45
+
+# 720p h265 for smaller files
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" -q 720 --codec h265
+
+# Custom font face and explicit font size
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" \
+    --font-face "Noto Sans CJK SC" --font-size 48
+```
+
+## Time format for `--cut`
+
+Each `--cut` value is `START~END` (separator is `~`, U+007E). Both sides accept three formats, disambiguated by the number of `:` delimiters:
+
+| Form | Example | Seconds |
+|---|---|---|
+| `SS` | `30`, `90.5` | 30, 90.5 |
+| `MM:SS` | `0:30`, `5:12.5` | 30, 312.5 |
+| `HH:MM:SS` | `0:00:30`, `1:10:05.25` | 30, 4205.25 |
+
+Fractional seconds are allowed in any form. `--cut` is repeatable; ranges are auto-swapped if `start > end`, zero-width ranges are dropped, overlapping/touching ranges are merged. The cut list may not cover the entire video.
+
+`--cut` and `--preview-seconds` interact in this order: cut is applied first on the source timeline, then preview clamps the resulting (shorter) timeline. So `--cut 30~60 --preview-seconds 60` on a 5-minute source produces a 60-second output containing source `[0, 30) ∪ [60, 90)`.
+
+## Notes
+
+- Chrome must be quit before running so `--cookies-from-browser` can read the cookie database (it requires an exclusive lock).
+- Preview mode still downloads the full video; only the burn step is clamped. Future optimization could trim during download.
+- When `--cut` is in play the burn step uses an `ffmpeg filter_complex` chain (`trim`/`atrim`/`concat`/`subtitles`) — a single encode pass over the whole timeline.
+- Danmaku that straddle a cut boundary are dropped entirely rather than clipped or shifted in fragments. This keeps the rules simple and avoids partial-display weirdness; in practice few dialogues happen to span a cut.
 
 ## Development
 
 ```bash
-uv run pytest
+uv run pytest    # currently 114 tests; everything mocked at the subprocess boundary
 ```
