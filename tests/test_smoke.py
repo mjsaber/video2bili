@@ -121,3 +121,66 @@ def test_check_ass_returns_dialogue_count(tmp_path):
         encoding="utf-8",
     )
     assert validate.check_ass(f) == 3
+
+
+def test_check_output_raises_on_empty_file():
+    source = _mk_info()
+    output = _mk_info(size_bytes=0)
+    with pytest.raises(ValueError, match="empty"):
+        validate.check_output(source, output)
+
+
+def test_check_output_raises_on_missing_video_stream():
+    source = _mk_info()
+    output = _mk_info(has_video=False, vcodec="")
+    with pytest.raises(ValueError, match="video stream"):
+        validate.check_output(source, output)
+
+
+def test_check_output_raises_when_audio_lost():
+    source = _mk_info(has_audio=True)
+    output = _mk_info(has_audio=False, acodec=None)
+    with pytest.raises(ValueError, match="audio"):
+        validate.check_output(source, output)
+
+
+def test_check_output_raises_on_wrong_vcodec():
+    source = _mk_info()
+    output = _mk_info(vcodec="hevc")
+    with pytest.raises(ValueError, match="vcodec|h264"):
+        validate.check_output(source, output)
+
+
+def test_check_output_raises_on_duration_mismatch():
+    source = _mk_info(duration=60.0)
+    output = _mk_info(duration=58.5)
+    with pytest.raises(ValueError, match="duration"):
+        validate.check_output(source, output)
+
+
+def test_check_output_allows_small_duration_drift():
+    source = _mk_info(duration=60.0)
+    output = _mk_info(duration=60.3)
+    warnings = validate.check_output(source, output)
+    assert warnings == []
+
+
+def test_check_output_raises_on_resolution_mismatch():
+    source = _mk_info(width=1920, height=1080)
+    output = _mk_info(width=1280, height=720)
+    with pytest.raises(ValueError, match="resolution"):
+        validate.check_output(source, output)
+
+
+def test_check_output_warns_on_tiny_output():
+    source = _mk_info(size_bytes=10_000_000)
+    output = _mk_info(size_bytes=100_000)  # 0.01x
+    warnings = validate.check_output(source, output)
+    assert any("size" in w.lower() for w in warnings)
+
+
+def test_check_output_warns_on_huge_output():
+    source = _mk_info(size_bytes=10_000_000)
+    output = _mk_info(size_bytes=100_000_000)  # 10x
+    warnings = validate.check_output(source, output)
+    assert any("size" in w.lower() for w in warnings)

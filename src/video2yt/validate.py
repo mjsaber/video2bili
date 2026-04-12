@@ -87,3 +87,38 @@ def check_ass(path: Path) -> int:
             f"ASS file has no Dialogue lines (no danmaku available): {path}"
         )
     return dialogue_count
+
+
+def check_output(source: MediaInfo, output: MediaInfo) -> list[str]:
+    """Validate burned output against source. Raises on hard failures; returns warnings."""
+    if output.size_bytes == 0:
+        raise ValueError("output file is empty")
+    if not output.has_video:
+        raise ValueError("output has no video stream")
+    if source.has_audio and not output.has_audio:
+        raise ValueError("source had audio but output lost it")
+    if output.vcodec != "h264":
+        raise ValueError(
+            f"output vcodec is {output.vcodec!r}, expected 'h264' "
+            f"(libx264 encode params did not take effect)"
+        )
+    if abs(output.duration - source.duration) >= 1.0:
+        raise ValueError(
+            f"output duration {output.duration:.2f}s differs from source "
+            f"{source.duration:.2f}s by more than 1 second (possible truncation)"
+        )
+    if output.width != source.width or output.height != source.height:
+        raise ValueError(
+            f"output resolution {output.width}x{output.height} differs from "
+            f"source {source.width}x{source.height}"
+        )
+    warnings: list[str] = []
+    if source.size_bytes > 0:
+        ratio = output.size_bytes / source.size_bytes
+        if ratio < 0.3 or ratio > 5.0:
+            warnings.append(
+                f"output size is {ratio:.2f}x source "
+                f"({output.size_bytes} vs {source.size_bytes} bytes); "
+                f"may indicate encoding issue"
+            )
+    return warnings
