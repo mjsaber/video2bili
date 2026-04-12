@@ -1,0 +1,16 @@
+# uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+
+# runtime
+temp/
+output/
+logs/
+
+# macOS
+.DS_Store
