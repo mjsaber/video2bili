@@ -647,6 +647,59 @@ def test_sanitize_title_strips_leading_trailing_dots():
     assert cli._sanitize_title("  foo.  ") == "foo"
 
 
+def test_build_dir_name_with_long_uploader():
+    meta = {"uploader": "炉石郭枫荷", "title": "恶魔必选沙德沃克"}
+    assert cli._build_dir_name(meta, "BV1") == "炉石郭枫：恶魔必选沙德沃克"
+
+
+def test_build_dir_name_with_short_uploader():
+    meta = {"uploader": "abc", "title": "Hello"}
+    assert cli._build_dir_name(meta, "BV1") == "abc：Hello"
+
+
+def test_build_dir_name_with_exactly_4_char_uploader():
+    meta = {"uploader": "abcd", "title": "Hello"}
+    assert cli._build_dir_name(meta, "BV1") == "abcd：Hello"
+
+
+def test_build_dir_name_missing_uploader():
+    meta = {"title": "只有标题"}
+    assert cli._build_dir_name(meta, "BV1") == "只有标题"
+
+
+def test_build_dir_name_empty_uploader():
+    meta = {"uploader": "", "title": "只有标题"}
+    assert cli._build_dir_name(meta, "BV1") == "只有标题"
+
+
+def test_build_dir_name_falls_back_to_channel():
+    meta = {"channel": "another channel", "title": "Hello"}
+    assert cli._build_dir_name(meta, "BV1") == "anot：Hello"
+
+
+def test_build_dir_name_missing_title_uses_bv_id():
+    meta = {"uploader": "炉石郭枫荷"}
+    assert cli._build_dir_name(meta, "BV191DpBmE2t") == "炉石郭枫：BV191DpBmE2t"
+
+
+def test_build_dir_name_truncation_applies():
+    meta = {"uploader": "炉石郭枫荷", "title": "a" * 100}
+    result = cli._build_dir_name(meta, "BV1")
+    assert len(result) == 60  # _sanitize_title truncates to MAX_TITLE_DIR_LENGTH
+    assert result.startswith("炉石郭枫：")
+
+
+def test_build_dir_name_sanitizes_forbidden_chars_in_both():
+    meta = {"uploader": "a/b/c/d", "title": "foo:bar"}
+    # uploader[:4] = "a/b/", combined = "a/b/：foo:bar" → sanitized
+    result = cli._build_dir_name(meta, "BV1")
+    # Forbidden halfwidth : and / should be replaced with _
+    assert "/" not in result
+    assert ":" not in result.replace("：", "")  # strip fullwidth, then no halfwidth
+    # "：" fullwidth separator should survive
+    assert "：" in result
+
+
 def test_get_metadata_calls_yt_dlp(monkeypatch):
     captured = {}
     def fake_run(cmd, **kwargs):
@@ -1147,6 +1200,61 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
     #   3. '_+' collapse: already single
     #   4. strip leading/trailing ._ and spaces: unchanged
     expected_dir = "我 的_视频_ Test"
+    assert (tmp_path / "tmp" / expected_dir).is_dir()
+    assert (tmp_path / "out" / expected_dir).is_dir()
+    assert result == tmp_path / "out" / expected_dir / "BV1_with_danmaku.mp4"
+
+
+def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"uploader": "炉石郭枫荷", "title": "恶魔必选"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml"
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer\nDialogue: 0,0,0,D,hi\n", encoding="utf-8",
+        )
+
+    info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    probe_calls = []
+
+    def fake_probe(p):
+        probe_calls.append(p)
+        return info
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr(
+        "video2yt.cli.burn.render",
+        lambda v, a, o, max_duration=None: (
+            o.parent.mkdir(parents=True, exist_ok=True),
+            o.write_bytes(b"x"),
+            o,
+        )[-1],
+    )
+
+    args = cli.parse_args([
+        "https://www.bilibili.com/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--keep-temp",
+    ])
+    result = cli.run(args)
+    expected_dir = "炉石郭枫：恶魔必选"
     assert (tmp_path / "tmp" / expected_dir).is_dir()
     assert (tmp_path / "out" / expected_dir).is_dir()
     assert result == tmp_path / "out" / expected_dir / "BV1_with_danmaku.mp4"

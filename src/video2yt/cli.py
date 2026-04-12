@@ -19,6 +19,28 @@ REFERENCE_PLAYER_HEIGHT = 540
 REFERENCE_STANDARD_SIZE = 25
 
 MAX_TITLE_DIR_LENGTH = 60
+UPLOADER_PREFIX_LENGTH = 4
+UPLOADER_TITLE_SEPARATOR = "："  # U+FF1A fullwidth colon (safe on all filesystems)
+
+
+def _build_dir_name(
+    metadata: dict,
+    bv_id: str,
+    uploader_prefix_length: int = UPLOADER_PREFIX_LENGTH,
+) -> str:
+    """Build the per-video subfolder name: ``<uploader_prefix>：<title>``, sanitized.
+
+    Falls back to just the title if uploader is missing or empty. Falls back
+    to the BV id if title is also missing.
+    """
+    uploader = metadata.get("uploader") or metadata.get("channel") or ""
+    uploader_prefix = uploader[:uploader_prefix_length]
+    title = metadata.get("title") or bv_id
+    if uploader_prefix:
+        combined = f"{uploader_prefix}{UPLOADER_TITLE_SEPARATOR}{title}"
+    else:
+        combined = title
+    return _sanitize_title(combined)
 
 
 def _sanitize_title(title: str, max_length: int = MAX_TITLE_DIR_LENGTH) -> str:
@@ -165,8 +187,11 @@ def run(args: argparse.Namespace) -> Path:
     _log(f"fetching metadata for {bv_id}")
     metadata = download.get_metadata(args.url, args.browser)
     title = metadata.get("title") or bv_id
-    safe_title = _sanitize_title(title)
-    _log(f"title: {title!r} -> dir: {safe_title!r}")
+    uploader = metadata.get("uploader") or metadata.get("channel") or ""
+    safe_title = _build_dir_name(metadata, bv_id)
+    _log(
+        f"title: {title!r} uploader: {uploader!r} -> subfolder: {safe_title!r}"
+    )
     timings["metadata"] = time.monotonic() - t0
 
     temp_subdir = args.temp_dir / safe_title
