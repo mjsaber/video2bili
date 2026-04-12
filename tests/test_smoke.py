@@ -2422,3 +2422,297 @@ def test_run_output_filename_combines_cut_speed_preview(tmp_path, monkeypatch):
     ])
     result = cli.run(args)
     assert result.name == "BV1_with_danmaku_cut_1.5x_preview.mp4"
+
+
+# ---------------------------------------------------------------------------
+# video2yt-compose tests
+# ---------------------------------------------------------------------------
+
+from video2yt import compose, compose_cli  # noqa: E402
+
+
+def test_check_srt_basic_count(tmp_path):
+    srt = tmp_path / "test.srt"
+    srt.write_text(
+        "1\n"
+        "00:00:01,000 --> 00:00:05,000\n"
+        "Hello world\n"
+        "\n"
+        "2\n"
+        "00:00:06,000 --> 00:00:10,000\n"
+        "Second line\n",
+        encoding="utf-8",
+    )
+    assert compose.check_srt(srt) == 2
+
+
+def test_check_srt_chinese(tmp_path):
+    srt = tmp_path / "test.srt"
+    srt.write_text(
+        "1\n"
+        "00:00:01,000 --> 00:00:05,000\n"
+        "你好世界\n"
+        "\n",
+        encoding="utf-8",
+    )
+    assert compose.check_srt(srt) == 1
+
+
+def test_check_srt_raises_on_missing_file(tmp_path):
+    with pytest.raises(ValueError, match="not found"):
+        compose.check_srt(tmp_path / "missing.srt")
+
+
+def test_check_srt_raises_on_no_timecodes(tmp_path):
+    srt = tmp_path / "test.srt"
+    srt.write_text("Just some text\nNo timecodes here\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no subtitle blocks"):
+        compose.check_srt(srt)
+
+
+def test_check_srt_handles_dot_separator(tmp_path):
+    """Some SRT dialects use `.` instead of `,` in timecodes."""
+    srt = tmp_path / "test.srt"
+    srt.write_text(
+        "1\n"
+        "00:00:01.000 --> 00:00:05.000\n"
+        "Hello\n",
+        encoding="utf-8",
+    )
+    assert compose.check_srt(srt) == 1
+
+
+def test_check_srt_gbk_fallback(tmp_path):
+    """If UTF-8 decode fails, try GBK."""
+    srt = tmp_path / "test.srt"
+    content = (
+        "1\n"
+        "00:00:01,000 --> 00:00:05,000\n"
+        "你好\n"
+    )
+    srt.write_bytes(content.encode("gbk"))
+    assert compose.check_srt(srt) == 1
+
+
+def test_build_subtitles_filter_includes_style():
+    from video2yt.compose import _build_subtitles_filter
+    f = _build_subtitles_filter("test.srt", "Hiragino Sans GB", 42)
+    assert "subtitles=f='test.srt'" in f
+    assert "FontName=Hiragino Sans GB" in f
+    assert "FontSize=42" in f
+    assert "PrimaryColour=&HFFFFFF" in f
+    assert "Alignment=2" in f
+
+
+def test_build_filter_complex_includes_scale_pad_subtitles():
+    from video2yt.compose import _build_filter_complex
+    fc = _build_filter_complex("test.srt", "Hiragino Sans GB", 42)
+    assert "scale=1920:1080:force_original_aspect_ratio=decrease" in fc
+    assert "pad=1920:1080" in fc
+    assert "subtitles=f='test.srt'" in fc
+    assert "[bg]" in fc
+    assert "[outv]" in fc
+
+
+def test_render_builds_correct_ffmpeg_command(tmp_path, monkeypatch):
+    work_dir = tmp_path / "srt_dir"
+    work_dir.mkdir()
+    srt = work_dir / "subs.srt"
+    srt.write_text(
+        "1\n00:00:01,000 --> 00:00:05,000\nhi\n", encoding="utf-8",
+    )
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake audio")
+    image = tmp_path / "bg.jpg"
+    image.write_bytes(b"fake image")
+    output = tmp_path / "out" / "test.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"composed")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.compose.subprocess.run", fake_run)
+
+    inputs = compose.ComposeInputs(
+        audio_path=audio,
+        image_path=image,
+        srt_path=srt,
+        title="Test",
+        output_dir=tmp_path / "out",
+        font_face="Hiragino Sans GB",
+        font_size=42,
+    )
+    compose.render(inputs, output)
+
+    cmd = captured["cmd"]
+    assert cmd[0] == "ffmpeg"
+    assert "-loop" in cmd
+    loop_idx = cmd.index("-loop")
+    assert cmd[loop_idx + 1] == "1"
+    # Two -i inputs: image first, then audio
+    i_indexes = [i for i, a in enumerate(cmd) if a == "-i"]
+    assert len(i_indexes) == 2
+    assert str(image.resolve()) == cmd[i_indexes[0] + 1]
+    assert str(audio.resolve()) == cmd[i_indexes[1] + 1]
+    # filter_complex present
+    assert "-filter_complex" in cmd
+    fc_idx = cmd.index("-filter_complex")
+    assert "subtitles=f='subs.srt'" in cmd[fc_idx + 1]
+    assert "FontName=Hiragino Sans GB" in cmd[fc_idx + 1]
+    assert "scale=1920:1080" in cmd[fc_idx + 1]
+    # Maps
+    assert "-map" in cmd
+    map_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
+    assert "[outv]" in map_values
+    assert "1:a" in map_values
+    # Codecs and tune
+    assert "libx264" in cmd
+    assert "-tune" in cmd
+    tune_idx = cmd.index("-tune")
+    assert cmd[tune_idx + 1] == "stillimage"
+    assert "-pix_fmt" in cmd
+    pix_idx = cmd.index("-pix_fmt")
+    assert cmd[pix_idx + 1] == "yuv420p"
+    assert "aac" in cmd
+    assert "-shortest" in cmd
+    # cwd is the srt's parent
+    assert captured["kwargs"]["cwd"] == work_dir
+
+
+def test_compose_cli_parse_args_required_fields():
+    with pytest.raises(SystemExit):
+        compose_cli.parse_args([])
+
+
+def test_compose_cli_parse_args_defaults(tmp_path):
+    args = compose_cli.parse_args([
+        "--audio", "a.mp3",
+        "--image", "b.jpg",
+        "--srt", "c.srt",
+        "--title", "My Title",
+    ])
+    assert args.audio == Path("a.mp3")
+    assert args.image == Path("b.jpg")
+    assert args.srt == Path("c.srt")
+    assert args.title == "My Title"
+    assert args.output_dir == Path("./output")
+    assert args.font_face == "Hiragino Sans GB"
+    assert args.font_size == 42
+
+
+def test_compose_cli_run_happy_path(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake")
+    image = tmp_path / "bg.jpg"
+    image.write_bytes(b"fake")
+    srt = tmp_path / "subs.srt"
+    srt.write_text(
+        "1\n00:00:01,000 --> 00:00:05,000\nhello\n", encoding="utf-8",
+    )
+
+    monkeypatch.setattr("video2yt.compose_cli.preflight", lambda: None)
+
+    audio_info = MediaInfo(
+        duration=120.0, width=0, height=0,
+        has_video=False, has_audio=True,
+        vcodec="", acodec="aac", size_bytes=1000,
+    )
+    output_info = MediaInfo(
+        duration=120.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=5_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return audio_info if len(probe_calls) == 1 else output_info
+    monkeypatch.setattr("video2yt.compose_cli.validate.probe", fake_probe)
+
+    def fake_render(inputs, output_path):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"composed")
+        return output_path
+    monkeypatch.setattr("video2yt.compose_cli.compose.render", fake_render)
+
+    args = compose_cli.parse_args([
+        "--audio", str(audio),
+        "--image", str(image),
+        "--srt", str(srt),
+        "--title", "Test Title",
+        "-o", str(tmp_path / "out"),
+    ])
+    result = compose_cli.run(args)
+    assert result == tmp_path / "out" / "Test Title" / "Test Title.mp4"
+    assert result.exists()
+
+
+def test_compose_cli_run_rejects_missing_audio(tmp_path, monkeypatch):
+    image = tmp_path / "bg.jpg"
+    image.write_bytes(b"fake")
+    srt = tmp_path / "subs.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:05,000\nhi\n", encoding="utf-8")
+    monkeypatch.setattr("video2yt.compose_cli.preflight", lambda: None)
+
+    args = compose_cli.parse_args([
+        "--audio", str(tmp_path / "missing.mp3"),
+        "--image", str(image),
+        "--srt", str(srt),
+        "--title", "T",
+    ])
+    with pytest.raises(FileNotFoundError, match="audio"):
+        compose_cli.run(args)
+
+
+def test_compose_cli_run_rejects_empty_srt(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake")
+    image = tmp_path / "bg.jpg"
+    image.write_bytes(b"fake")
+    srt = tmp_path / "subs.srt"
+    srt.write_text("no timecodes here\n", encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.compose_cli.preflight", lambda: None)
+    audio_info = MediaInfo(
+        duration=120.0, width=0, height=0,
+        has_video=False, has_audio=True,
+        vcodec="", acodec="aac", size_bytes=1000,
+    )
+    monkeypatch.setattr("video2yt.compose_cli.validate.probe", lambda p: audio_info)
+
+    args = compose_cli.parse_args([
+        "--audio", str(audio),
+        "--image", str(image),
+        "--srt", str(srt),
+        "--title", "T",
+    ])
+    with pytest.raises(ValueError, match="no subtitle blocks"):
+        compose_cli.run(args)
+
+
+def test_compose_cli_run_rejects_audio_with_no_audio_stream(tmp_path, monkeypatch):
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake")
+    image = tmp_path / "bg.jpg"
+    image.write_bytes(b"fake")
+    srt = tmp_path / "subs.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:05,000\nhi\n", encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.compose_cli.preflight", lambda: None)
+    fake_info = MediaInfo(
+        duration=120.0, width=0, height=0,
+        has_video=False, has_audio=False,
+        vcodec="", acodec=None, size_bytes=1000,
+    )
+    monkeypatch.setattr("video2yt.compose_cli.validate.probe", lambda p: fake_info)
+
+    args = compose_cli.parse_args([
+        "--audio", str(audio),
+        "--image", str(image),
+        "--srt", str(srt),
+        "--title", "T",
+    ])
+    with pytest.raises(ValueError, match="no audio stream"):
+        compose_cli.run(args)

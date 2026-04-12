@@ -15,7 +15,8 @@ uv run video2yt "<url>" --cut 30~60 --cut 2:15~2:45        # remove ranges
 uv run video2yt "<url>" --speed 1.5                        # 1.5x playback
 uv run video2yt "<url>" --font-size 48 --codec h265        # style overrides
 uv run python -m video2yt "<url>"                          # run as module
-uv run pytest                                              # run tests (147)
+uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # compose from stills
+uv run pytest                                              # run tests (162)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
 
@@ -36,6 +37,7 @@ uv add <pkg>                                               # add a dep (NEVER ed
 - **Raw download caching**: `download.fetch` checks `temp_dir` for `<bv>.{mp4,mkv,webm}` AND `<bv>*.xml` before invoking yt-dlp; if both are present, it skips yt-dlp entirely and returns `from_cache=True` (cli logs `using cached download from …`). Default cleanup in `cli.run` removes only the derived ASS files (`<bv>.danmaku.ass`, `<bv>.danmaku.cut.ass`) and INTENTIONALLY leaves the raw mp4 + XML on disk so the next run hits the cache. `--keep-temp` additionally preserves the derived ASS files. To force a fresh download, delete the specific subfolder under `temp/` by hand.
 - **Agent E2E test rule**: DO NOT run `rm -rf output/` or `rm -rf temp/` during E2E tests — that wipes every cached raw download and the outputs of unrelated videos. Clean only the specific `temp/<subfolder>/` under test, or just let the cache hit on the next run. This is a workflow rule, not a code invariant.
 - **Output filename suffixes**: `_cut`, `_<speed>x`, `_preview` get appended to `<bv>_with_danmaku.mp4` based on flags, so different parameter combos coexist. Default (no modifiers) keeps the original filename. See `cli._build_output_filename`.
+- **compose SRT path escaping**: `compose.render` uses `cwd=<srt.parent>` and references the SRT by basename in the `subtitles` filter (same trick as `burn.py`). Absolute paths for `-i` inputs are fine because `-i` doesn't go through filter_complex.
 
 ## Architecture
 
@@ -45,13 +47,17 @@ src/video2yt/
 │                     # subfolder naming (<uploader[:4]>：<title>), font_size auto
 ├── download.py       # yt-dlp wrapper (fetch with raw-download cache + get_metadata + generate_ass via biliass)
 ├── burn.py           # ffmpeg wrapper (simple -vf path + filter_complex path for cuts)
+├── compose.py        # ffmpeg wrapper for audio+image+SRT -> 1080p MP4 (standalone from burn.py)
+├── compose_cli.py    # video2yt-compose entry point (parse_args/run/main)
 ├── validate.py       # ffprobe + source/ASS/output validators
 └── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ```
 
-Tests live in `tests/test_smoke.py` (147 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
+Tests live in `tests/test_smoke.py` (162 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
 
-`run()` flow: preflight → extract BV → fetch metadata → build per-video subfolder → `download.fetch` (cache-hit if raw files present, else yt-dlp) → probe source → compute auto font size → `biliass.convert_to_ass` → parse/normalize `--cut` → rewrite ASS for cuts → `burn.render` → probe output and validate against `expected_duration` → cleanup (derived ASS only by default, plus keep everything with `--keep-temp`; raw mp4+xml always preserved). Each phase is timed and logged.
+`cli.run()` flow: preflight → extract BV → fetch metadata → build per-video subfolder → `download.fetch` (cache-hit if raw files present, else yt-dlp) → probe source → compute auto font size → `biliass.convert_to_ass` → parse/normalize `--cut` → rewrite ASS for cuts → `burn.render` → probe output and validate against `expected_duration` → cleanup (derived ASS only by default, plus keep everything with `--keep-temp`; raw mp4+xml always preserved). Each phase is timed and logged.
+
+`compose_cli.run()` flow (the `video2yt-compose` entry point): preflight → validate input files exist → `validate.probe` the audio (must have an audio stream) → `compose.check_srt` (≥1 timecode block required, UTF-8 with GBK fallback) → `_sanitize_title` → `compose.render` (ffmpeg `-loop 1` image + audio with `filter_complex` scale/pad/subtitles, libx264 tune stillimage, aac 192k, `-shortest`) → probe output and assert 1920x1080 h264 + audio + duration within 1s of input audio. All inputs and behavior are independent of `cli.py`; no existing pipeline was touched.
 
 ## Feature flags quick reference
 

@@ -147,8 +147,48 @@ Only delete the specific subfolder you want to re-fetch; wiping `temp/` wholesal
 - When `--cut` is in play the burn step uses an `ffmpeg filter_complex` chain (`trim`/`atrim`/`concat`/`subtitles`) — a single encode pass over the whole timeline.
 - Danmaku that straddle a cut boundary are dropped entirely rather than clipped or shifted in fragments. This keeps the rules simple and avoids partial-display weirdness; in practice few dialogues happen to span a cut.
 
+## Compose from audio + image + SRT
+
+Separate entry point `video2yt-compose` for creating a 1080p MP4 from an audio file, a static background image, and an SRT subtitle file. Useful for podcast uploads, lecture recordings, audiobook chapters, etc.
+
+### Usage
+
+```bash
+uv run video2yt-compose \
+  --audio path/to/audio.mp3 \
+  --image path/to/background.jpg \
+  --srt path/to/subs.srt \
+  --title "My Video Title"
+```
+
+### Options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--audio PATH` | required | Audio file (mp3/m4a/wav/flac/ogg/etc.) |
+| `--image PATH` | required | Background image (jpg/png/webp) |
+| `--srt PATH` | required | SRT subtitle file (UTF-8 or GBK) |
+| `--title TITLE` | required | Used for subfolder and output filename |
+| `-o, --output-dir DIR` | `./output` | Output base directory |
+| `--font-face NAME` | `Hiragino Sans GB` | Subtitle font family |
+| `--font-size N` | `42` | Subtitle font size in pixels |
+
+### Output
+
+The final MP4 goes to `<output_dir>/<sanitized_title>/<sanitized_title>.mp4`.
+
+### Behavior notes
+
+- Video: 1080p h264 (libx264 preset medium crf 20, tuned for still image), yuv420p, 30 fps
+- Audio: AAC 192 kbps
+- Duration: matches the input audio (image loops via `-loop 1 -shortest`)
+- Subtitles: burned in via ffmpeg's `subtitles` filter with hard-coded style (white text, black outline 2px, centered bottom, MarginV 80). Only `--font-face` and `--font-size` are adjustable from the CLI.
+- Image: scaled to fit 1920x1080 with aspect ratio preserved, black bars added where needed (letterbox). No stretching.
+- SRT must contain at least one valid timecode block; empty/malformed SRTs fail fast.
+- Libass with a CJK font must be installed (see "Requirements" above).
+
 ## Development
 
 ```bash
-uv run pytest    # currently 147 tests; everything mocked at the subprocess boundary
+uv run pytest    # currently 162 tests; everything mocked at the subprocess boundary
 ```
