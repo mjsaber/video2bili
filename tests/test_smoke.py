@@ -184,3 +184,93 @@ def test_check_output_warns_on_huge_output():
     output = _mk_info(size_bytes=100_000_000)  # 10x
     warnings = validate.check_output(source, output)
     assert any("size" in w.lower() for w in warnings)
+
+
+from video2yt import download
+
+
+def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        # Simulate yt-dlp producing the output files
+        (tmp_path / "BV191DpBmE2t.mp4").write_bytes(b"fake video")
+        (tmp_path / "BV191DpBmE2t.danmaku.ass").write_text(
+            "[Events]\nDialogue: 0,0:00:01.00,0:00:05.00,Default,hi\n",
+            encoding="utf-8",
+        )
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    video, ass = download.fetch(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x",
+        temp_dir=tmp_path,
+        quality=1080,
+        browser="chrome",
+        bv_id="BV191DpBmE2t",
+    )
+
+    cmd = captured["cmd"]
+    assert cmd[0] == "yt-dlp"
+    # cookies
+    assert "--cookies-from-browser" in cmd
+    assert "chrome" in cmd
+    # format with quality
+    fmt_idx = cmd.index("-f")
+    assert "height<=1080" in cmd[fmt_idx + 1]
+    assert cmd[fmt_idx + 1].endswith("/b")  # fallback sentinel
+    # danmaku postprocessor
+    assert "--use-postprocessor" in cmd
+    pp_idx = cmd.index("--use-postprocessor")
+    assert cmd[pp_idx + 1] == "danmaku"
+    # write-subs present
+    assert "--write-subs" in cmd
+    # output template contains BV id and %(ext)s
+    out_idx = cmd.index("--output")
+    assert "BV191DpBmE2t" in cmd[out_idx + 1]
+    assert "%(ext)s" in cmd[out_idx + 1]
+    # URL at end
+    assert cmd[-1] == "https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x"
+
+    assert video == tmp_path / "BV191DpBmE2t.mp4"
+    assert ass == tmp_path / "BV191DpBmE2t.danmaku.ass"
+
+
+def test_fetch_uses_quality_720(tmp_path, monkeypatch):
+    def fake_run(cmd, **kwargs):
+        fmt_idx = cmd.index("-f")
+        assert "height<=720" in cmd[fmt_idx + 1]
+        (tmp_path / "BV.mp4").write_bytes(b"v")
+        (tmp_path / "BV.danmaku.ass").write_text(
+            "[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8",
+        )
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    download.fetch("https://x/video/BV", tmp_path, 720, "chrome", "BV")
+
+
+def test_fetch_raises_when_video_file_missing(tmp_path, monkeypatch):
+    def fake_run(cmd, **kwargs):
+        # Only create the ASS file, skip the video
+        (tmp_path / "BV.danmaku.ass").write_text(
+            "[Events]\nDialogue: x\n", encoding="utf-8",
+        )
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    with pytest.raises(FileNotFoundError, match="video"):
+        download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
+
+
+def test_fetch_raises_when_ass_file_missing(tmp_path, monkeypatch):
+    def fake_run(cmd, **kwargs):
+        (tmp_path / "BV.mp4").write_bytes(b"v")
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    with pytest.raises(FileNotFoundError, match="ASS|ass"):
+        download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
