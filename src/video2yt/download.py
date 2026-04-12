@@ -4,12 +4,34 @@ from pathlib import Path
 import biliass
 
 
+def _build_format_spec(quality: int, codec: str) -> str:
+    """Build yt-dlp format selector with quality cap and codec preference.
+
+    Layers:
+      1. bv*[height<=Q][vcodec^=CODEC] + ba — split streams, codec-filtered
+      2. b[height<=Q][vcodec^=CODEC] — pre-muxed with codec filter
+      3. b[vcodec^=CODEC] — any codec-matching file
+      4. b — absolute fallback (should be rare)
+    """
+    h = f"[height<={quality}]"
+    if codec == "h264":
+        cv = "[vcodec^=avc1]"
+    elif codec == "h265":
+        cv = "[vcodec^=hev1]"
+    else:  # auto
+        cv = ""
+    if cv == "":
+        return f"bv*{h}+ba/b{h}/b"
+    return f"bv*{h}{cv}+ba/b{h}{cv}/b{cv}/b"
+
+
 def fetch(
     url: str,
     temp_dir: Path,
     quality: int,
     browser: str,
     bv_id: str,
+    codec: str = "h264",
 ) -> tuple[Path, Path]:
     """Download video and raw danmaku XML via yt-dlp.
 
@@ -19,7 +41,7 @@ def fetch(
     """
     temp_dir.mkdir(parents=True, exist_ok=True)
     output_template = str(temp_dir / f"{bv_id}.%(ext)s")
-    format_spec = f"bv*[height<={quality}]+ba/b[height<={quality}]/b"
+    format_spec = _build_format_spec(quality, codec)
 
     cmd = [
         "yt-dlp",

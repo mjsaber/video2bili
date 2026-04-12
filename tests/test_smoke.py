@@ -218,9 +218,10 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
     # cookies
     assert "--cookies-from-browser" in cmd
     assert "chrome" in cmd
-    # format with quality
+    # format with quality — h264 is the default codec
     fmt_idx = cmd.index("-f")
     assert "height<=1080" in cmd[fmt_idx + 1]
+    assert "[vcodec^=avc1]" in cmd[fmt_idx + 1]
     assert cmd[fmt_idx + 1].endswith("/b")  # fallback sentinel
     # raw danmaku XML via --write-subs + --sub-langs
     assert "--write-subs" in cmd
@@ -253,6 +254,36 @@ def test_fetch_uses_quality_720(tmp_path, monkeypatch):
 
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
     download.fetch("https://x/video/BV", tmp_path, 720, "chrome", "BV")
+
+
+@pytest.mark.parametrize("codec,expected_tag", [
+    ("h264", "[vcodec^=avc1]"),
+    ("h265", "[vcodec^=hev1]"),
+])
+def test_fetch_format_spec_uses_codec(tmp_path, monkeypatch, codec, expected_tag):
+    def fake_run(cmd, **kwargs):
+        fmt_idx = cmd.index("-f")
+        assert expected_tag in cmd[fmt_idx + 1]
+        (tmp_path / "BV.mp4").write_bytes(b"v")
+        (tmp_path / "BV.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV", codec=codec)
+
+
+def test_fetch_format_spec_auto_has_no_codec_filter(tmp_path, monkeypatch):
+    def fake_run(cmd, **kwargs):
+        fmt_idx = cmd.index("-f")
+        assert "[vcodec^=" not in cmd[fmt_idx + 1]
+        (tmp_path / "BV.mp4").write_bytes(b"v")
+        (tmp_path / "BV.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
+        )
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV", codec="auto")
 
 
 def test_fetch_raises_when_video_file_missing(tmp_path, monkeypatch):
@@ -370,6 +401,58 @@ def test_render_uses_cwd_and_relative_paths(tmp_path, monkeypatch):
     assert Path(output_arg) == output.resolve()
 
 
+def test_render_adds_t_flag_with_max_duration(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"v")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "output" / "BV_with_danmaku.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    burn.render(video, ass, output, max_duration=60)
+
+    cmd = captured["cmd"]
+    assert "-t" in cmd
+    t_idx = cmd.index("-t")
+    assert cmd[t_idx + 1] == "60"
+    # -t must come after -i and before -vf
+    i_idx = cmd.index("-i")
+    vf_idx = cmd.index("-vf")
+    assert i_idx < t_idx < vf_idx
+
+
+def test_render_omits_t_flag_without_max_duration(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"v")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "output" / "BV_with_danmaku.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    burn.render(video, ass, output)  # no max_duration
+
+    cmd = captured["cmd"]
+    assert "-t" not in cmd
+
+
 def test_render_raises_if_video_and_ass_in_different_dirs(tmp_path):
     video = tmp_path / "a" / "v.mp4"
     video.parent.mkdir()
@@ -449,6 +532,8 @@ def test_parse_args_defaults():
     assert args.keep_temp is False
     assert args.font_face == "Hiragino Sans GB"
     assert args.font_size is None
+    assert args.codec == "h264"
+    assert args.preview_seconds is None
 
 
 def test_compute_font_size_matches_bilibili_reference():
@@ -477,6 +562,8 @@ def test_parse_args_custom():
         "--keep-temp",
         "--font-face", "Noto Sans CJK SC",
         "--font-size", "32",
+        "--codec", "h265",
+        "--preview-seconds", "30",
     ])
     assert args.output_dir == Path("/tmp/out")
     assert args.temp_dir == Path("/tmp/tmp")
@@ -485,6 +572,8 @@ def test_parse_args_custom():
     assert args.keep_temp is True
     assert args.font_face == "Noto Sans CJK SC"
     assert args.font_size == 32
+    assert args.codec == "h265"
+    assert args.preview_seconds == 30
 
 
 def test_parse_args_rejects_bad_quality():
@@ -492,15 +581,20 @@ def test_parse_args_rejects_bad_quality():
         cli.parse_args(["https://x", "-q", "4320"])
 
 
-def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
+def test_parse_args_rejects_bad_codec():
+    with pytest.raises(SystemExit):
+        cli.parse_args(["https://x", "--codec", "av1"])
+
+
+def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
     """Full pipeline with all subprocess boundaries mocked; verifies call order."""
     call_log = []
 
     # Skip dep preflight
     monkeypatch.setattr("video2yt.cli.preflight", lambda: call_log.append("preflight"))
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
-        call_log.append(f"fetch:{bv_id}:{quality}:{browser}")
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        call_log.append(f"fetch:{bv_id}:{quality}:{browser}:{codec}")
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"fakevideo")
         x = temp_dir / f"{bv_id}.danmaku.xml"
@@ -538,7 +632,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
 
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
 
-    def fake_render(video_path, ass_path, output_path):
+    def fake_render(video_path, ass_path, output_path, max_duration=None):
         call_log.append(f"render:{output_path.name}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"burnedoutput")
@@ -552,22 +646,25 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch):
         "-t", str(tmp_path / "temp"),
     ])
     result = cli.run(args)
+    captured_out = capsys.readouterr()
 
     assert result == tmp_path / "output" / "BV191DpBmE2t_with_danmaku.mp4"
     assert result.exists()
     # Verify call order
     assert call_log[0] == "preflight"
-    assert call_log[1] == "fetch:BV191DpBmE2t:1080:chrome"
+    assert call_log[1] == "fetch:BV191DpBmE2t:1080:chrome:h264"
     assert call_log[2] == "generate_ass:1920x1080:Hiragino Sans GB:50"
     assert call_log[3] == "render:BV191DpBmE2t_with_danmaku.mp4"
     # Probe called twice: source then output
     assert len(probe_calls) == 2
+    # Timing summary should be printed at the end
+    assert "timings:" in captured_out.err
 
 
 def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"v")
         x = temp_dir / f"{bv_id}.danmaku.xml"
@@ -588,7 +685,7 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_render(v, a, o):
+    def fake_render(v, a, o, max_duration=None):
         o.parent.mkdir(parents=True, exist_ok=True)
         o.write_bytes(b"x")
         return o
@@ -611,7 +708,7 @@ def test_run_deletes_temp_files_on_success(tmp_path, monkeypatch):
 def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         v = temp_dir / f"{bv_id}.mp4"
         v.write_bytes(b"v")
         x = temp_dir / f"{bv_id}.danmaku.xml"
@@ -633,7 +730,7 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -653,7 +750,7 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
     captured_font_size = []
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
@@ -687,7 +784,7 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -705,7 +802,7 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
     captured_font_size = []
 
-    def fake_fetch(url, temp_dir, quality, browser, bv_id):
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
         (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
         (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
@@ -739,7 +836,7 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([

@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from video2yt import burn, download, validate
@@ -98,6 +99,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "native formula video_height * 25 / 540."
         ),
     )
+    parser.add_argument(
+        "--codec", default="h264", choices=["h264", "h265", "auto"],
+        help=(
+            "Video codec preference (default: h264 — most compatible, "
+            "preferred by YouTube). 'h265' for smaller files on modern players. "
+            "'auto' lets yt-dlp decide by its own sort rules."
+        ),
+    )
+    parser.add_argument(
+        "--preview-seconds", type=int, default=None,
+        help=(
+            "If set, burn only the first N seconds of the video (passed to "
+            "ffmpeg as -t N). Useful for quickly previewing style/codec choices "
+            "without re-encoding the whole video."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -106,24 +123,35 @@ def _log(msg: str) -> None:
 
 
 def run(args: argparse.Namespace) -> Path:
+    timings: dict[str, float] = {}
+    t_start = time.monotonic()
+
     preflight()
     bv_id = extract_bv_id(args.url)
     args.temp_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    _log(f"downloading {bv_id} (quality<={args.quality}, browser={args.browser})")
+    _log(
+        f"downloading {bv_id} (quality<={args.quality}, "
+        f"codec={args.codec}, browser={args.browser})"
+    )
+    t0 = time.monotonic()
     video_path, xml_path = download.fetch(
         url=args.url,
         temp_dir=args.temp_dir,
         quality=args.quality,
         browser=args.browser,
         bv_id=bv_id,
+        codec=args.codec,
     )
+    timings["download"] = time.monotonic() - t0
 
     _log("probing source video")
+    t0 = time.monotonic()
     source_info = validate.probe(video_path)
     for w in validate.check_source(source_info, args.quality):
         _log(f"warning: {w}")
+    timings["probe_source"] = time.monotonic() - t0
 
     font_size = (
         args.font_size if args.font_size is not None
@@ -131,9 +159,11 @@ def run(args: argparse.Namespace) -> Path:
     )
     _log(
         f"danmaku font: face={args.font_face!r} size={font_size}px "
-        f"(video is {source_info.width}x{source_info.height})"
+        f"(video is {source_info.width}x{source_info.height}, "
+        f"codec={source_info.vcodec})"
     )
 
+    t0 = time.monotonic()
     ass_path = args.temp_dir / f"{bv_id}.danmaku.ass"
     download.generate_ass(
         xml_path=xml_path,
@@ -146,15 +176,24 @@ def run(args: argparse.Namespace) -> Path:
 
     n_danmaku = validate.check_ass(ass_path)
     _log(f"detected {n_danmaku} danmaku lines")
+    timings["generate_ass"] = time.monotonic() - t0
 
     output_path = args.output_dir / f"{bv_id}_with_danmaku.mp4"
-    _log(f"burning danmaku into {output_path.name}")
-    burn.render(video_path, ass_path, output_path)
+    preview_tag = (
+        f" (preview first {args.preview_seconds}s)"
+        if args.preview_seconds else ""
+    )
+    _log(f"burning danmaku into {output_path.name}{preview_tag}")
+    t0 = time.monotonic()
+    burn.render(video_path, ass_path, output_path, max_duration=args.preview_seconds)
+    timings["burn"] = time.monotonic() - t0
 
     _log("validating output")
+    t0 = time.monotonic()
     output_info = validate.probe(output_path)
     for w in validate.check_output(source_info, output_info):
         _log(f"warning: {w}")
+    timings["validate_output"] = time.monotonic() - t0
 
     if not args.keep_temp:
         _log("cleaning up temp files")
@@ -162,6 +201,15 @@ def run(args: argparse.Namespace) -> Path:
         xml_path.unlink(missing_ok=True)
         ass_path.unlink(missing_ok=True)
 
+    total = time.monotonic() - t_start
+    _log(
+        f"timings: download={timings['download']:.1f}s "
+        f"probe_src={timings['probe_source']:.2f}s "
+        f"gen_ass={timings['generate_ass']:.2f}s "
+        f"burn={timings['burn']:.1f}s "
+        f"validate_out={timings['validate_output']:.2f}s "
+        f"total={total:.1f}s"
+    )
     return output_path
 
 
