@@ -180,6 +180,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--cut 30~60, --cut 0:30~1:00, --cut 00:01:30~00:02:00."
         ),
     )
+    parser.add_argument(
+        "--speed", type=float, default=1.0,
+        help=(
+            "Playback speed multiplier for the output (default: 1.0 = original). "
+            "Common values: 1.1, 1.25, 1.5, 2.0. Range [0.5, 2.0]. "
+            "Applies to video, audio (pitch-preserved via atempo), and danmaku."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -190,6 +198,11 @@ def _log(msg: str) -> None:
 def run(args: argparse.Namespace) -> Path:
     timings: dict[str, float] = {}
     t_start = time.monotonic()
+
+    if not (0.5 <= args.speed <= 2.0):
+        raise ValueError(
+            f"--speed must be between 0.5 and 2.0, got {args.speed}"
+        )
 
     preflight()
     bv_id = extract_bv_id(args.url)
@@ -292,7 +305,8 @@ def run(args: argparse.Namespace) -> Path:
         if args.preview_seconds else ""
     )
     cut_tag = f" (cuts applied: {len(cut_ranges)})" if cut_ranges else ""
-    _log(f"burning danmaku into {output_path.name}{preview_tag}{cut_tag}")
+    speed_tag = f" @ {args.speed}x" if args.speed != 1.0 else ""
+    _log(f"burning danmaku into {output_path.name}{preview_tag}{cut_tag}{speed_tag}")
     t0 = time.monotonic()
     burn.render(
         video_path,
@@ -300,6 +314,7 @@ def run(args: argparse.Namespace) -> Path:
         output_path,
         max_duration=args.preview_seconds,
         keep_ranges=keep_ranges,
+        speed=args.speed,
     )
     timings["burn"] = time.monotonic() - t0
 
@@ -310,10 +325,11 @@ def run(args: argparse.Namespace) -> Path:
         kept_duration = sum(end - start for start, end in keep_ranges)
     else:
         kept_duration = source_info.duration
+    played_duration = kept_duration / args.speed
     expected_duration = (
-        min(float(args.preview_seconds), kept_duration)
+        min(float(args.preview_seconds), played_duration)
         if args.preview_seconds is not None
-        else kept_duration
+        else played_duration
     )
     for w in validate.check_output(
         source_info, output_info, expected_duration=expected_duration

@@ -1,6 +1,6 @@
 # video2yt
 
-Download a Bilibili video and burn its danmaku (bullet comments) into a YouTube-ready MP4. Supports preview clips, time-range cuts, codec selection, and Bilibili-accurate danmaku sizing.
+Download a Bilibili video and burn its danmaku (bullet comments) into a YouTube-ready MP4. Supports preview clips, time-range cuts, playback speed, codec selection, and Bilibili-accurate danmaku sizing.
 
 ## Requirements
 
@@ -41,6 +41,7 @@ uv run video2yt <url> [options]
 | `--font-size` | `auto` | Pixel size for a standard (nominal=25) danmaku. Default `auto` uses Bilibili's native formula `video_height * 25 / 540` (≈ `height / 21.6`). |
 | `--preview-seconds` | none | If set, cap the burned output to the first N seconds (`ffmpeg -t N`). Useful for fast style/codec iteration. |
 | `--cut START~END` | none | Remove a time range from the output. Repeatable. See [Time format for `--cut`](#time-format-for---cut). |
+| `--speed FLOAT` | `1.0` | Playback speed multiplier for the output. Range `[0.5, 2.0]`. Common values: `1.1`, `1.25`, `1.5`, `2.0`. Applies to video, audio (pitch preserved via ffmpeg `atempo`), and danmaku together. |
 | `--keep-temp` | off | Also keep derived ASS files after success. Raw downloads (video + danmaku XML) are ALWAYS kept regardless, to enable caching. |
 
 ## Output layout
@@ -71,6 +72,12 @@ uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" --cut 37~59
 uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" \
     --cut 0:30~1:00 --cut 2:15~2:45
 
+# 1.5x playback speed (pitch preserved)
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" --speed 1.5
+
+# Cut a range and double the playback speed
+uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" --cut 30~60 --speed 2
+
 # 720p h265 for smaller files
 uv run video2yt "https://www.bilibili.com/video/BV1xxxxxxxxx/" -q 720 --codec h265
 
@@ -92,6 +99,10 @@ Each `--cut` value is `START~END` (separator is `~`, U+007E). Both sides accept 
 Fractional seconds are allowed in any form. `--cut` is repeatable; ranges are auto-swapped if `start > end`, zero-width ranges are dropped, overlapping/touching ranges are merged. The cut list may not cover the entire video.
 
 `--cut` and `--preview-seconds` interact in this order: cut is applied first on the source timeline, then preview clamps the resulting (shorter) timeline. So `--cut 30~60 --preview-seconds 60` on a 5-minute source produces a 60-second output containing source `[0, 30) ∪ [60, 90)`.
+
+## Playback speed (`--speed`)
+
+`--speed FLOAT` (default `1.0`) multiplies the playback speed of the output. Range: `0.5` (half-speed) to `2.0` (double-speed). Common values: `1.1`, `1.25`, `1.5`, `2.0`. Speed applies to video, audio (pitch preserved via ffmpeg `atempo`), and danmaku together — the danmaku is burned onto the original timeline first and then the whole frame is time-scaled, so bullets move faster naturally. Any non-1.0 speed forces the `filter_complex` path (`atempo` can't coexist with `-c:a copy`), so audio is re-encoded.
 
 ## Caching
 
@@ -115,5 +126,5 @@ Only delete the specific subfolder you want to re-fetch; wiping `temp/` wholesal
 ## Development
 
 ```bash
-uv run pytest    # currently 120 tests; everything mocked at the subprocess boundary
+uv run pytest    # currently 134 tests; everything mocked at the subprocess boundary
 ```

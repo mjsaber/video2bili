@@ -847,7 +847,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
 
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
         call_log.append(f"render:{output_path.name}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"burnedoutput")
@@ -905,7 +905,7 @@ def test_run_deletes_derived_ass_on_success(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_render(v, a, o, max_duration=None, keep_ranges=None):
+    def fake_render(v, a, o, max_duration=None, keep_ranges=None, speed=1.0):
         o.parent.mkdir(parents=True, exist_ok=True)
         o.write_bytes(b"x")
         return o
@@ -966,7 +966,7 @@ def test_run_cleanup_removes_cut_ass_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1031,7 +1031,7 @@ def test_run_keep_temp_keeps_all_including_derived(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1085,7 +1085,7 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -1144,7 +1144,7 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -1200,7 +1200,7 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -1268,7 +1268,7 @@ def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1330,7 +1330,7 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1386,7 +1386,7 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1447,7 +1447,7 @@ def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1682,6 +1682,50 @@ def test_build_filter_complex_multiple_keep_ranges():
     assert "subtitles=f='x.ass'" in s
 
 
+def test_build_filter_complex_speed_only_no_cut():
+    from video2yt.burn import _build_filter_complex
+    fc = _build_filter_complex(None, "x.ass", speed=1.5)
+    assert "[0:v]null[cv]" in fc
+    assert "[0:a]anull[ca]" in fc
+    assert "subtitles=f='x.ass'[sv]" in fc
+    assert "setpts=PTS/1.5[outv]" in fc
+    assert "atempo=1.5[outa]" in fc
+
+
+def test_build_filter_complex_cut_and_speed():
+    from video2yt.burn import _build_filter_complex
+    fc = _build_filter_complex([(0.0, 30.0), (60.0, 100.0)], "x.ass", speed=2.0)
+    assert "trim=start=0.0:end=30.0" in fc
+    assert "trim=start=60.0:end=100.0" in fc
+    assert "concat=n=2:v=1:a=1[cv][ca]" in fc
+    assert "subtitles=f='x.ass'[sv]" in fc
+    assert "setpts=PTS/2.0[outv]" in fc
+    assert "atempo=2.0[outa]" in fc
+
+
+def test_build_filter_complex_cut_no_speed_still_produces_outv_outa():
+    """With cuts but speed=1.0, still emits [outv] and [outa] via null filters."""
+    from video2yt.burn import _build_filter_complex
+    fc = _build_filter_complex([(0.0, 30.0), (60.0, 100.0)], "x.ass", speed=1.0)
+    assert "concat=n=2:v=1:a=1[cv][ca]" in fc
+    assert "subtitles=f='x.ass'[sv]" in fc
+    assert "[sv]null[outv]" in fc
+    assert "[ca]anull[outa]" in fc
+    # Should NOT contain setpts or atempo
+    assert "setpts=PTS/" not in fc
+    assert "atempo=" not in fc
+
+
+def test_build_filter_complex_no_cut_no_speed_uses_passthrough():
+    """With no cut and speed=1.0, filter_complex is all passthrough (this fn is typically not called then)."""
+    from video2yt.burn import _build_filter_complex
+    fc = _build_filter_complex(None, "x.ass", speed=1.0)
+    assert "[0:v]null[cv]" in fc
+    assert "[0:a]anull[ca]" in fc
+    assert "[sv]null[outv]" in fc
+    assert "[ca]anull[outa]" in fc
+
+
 def test_render_with_cut_ranges_uses_filter_complex(tmp_path, monkeypatch):
     temp_dir = tmp_path / "temp"
     temp_dir.mkdir()
@@ -1707,8 +1751,96 @@ def test_render_with_cut_ranges_uses_filter_complex(tmp_path, monkeypatch):
     ca_idx = cmd.index("-c:a")
     assert cmd[ca_idx + 1] == "aac"
     assert "-vf" not in cmd
-    assert any("outv" in a for a in cmd)
-    assert any("ca" in a for a in cmd)
+    # Both maps point to outv/outa (speed change made [outa] uniform)
+    assert any(a == "[outv]" for a in cmd)
+    assert any(a == "[outa]" for a in cmd)
+
+
+def test_render_with_speed_uses_filter_complex(tmp_path, monkeypatch):
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"v")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "output" / "BV_out.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    burn.render(video, ass, output, speed=1.5)
+
+    cmd = captured["cmd"]
+    assert "-filter_complex" in cmd
+    fc_idx = cmd.index("-filter_complex")
+    assert "setpts=PTS/1.5" in cmd[fc_idx + 1]
+    assert "atempo=1.5" in cmd[fc_idx + 1]
+    # Both maps point to outv/outa
+    assert any(a == "[outv]" for a in cmd)
+    assert any(a == "[outa]" for a in cmd)
+    # Audio re-encoded
+    ca_idx = cmd.index("-c:a")
+    assert cmd[ca_idx + 1] == "aac"
+
+
+def test_render_with_cut_maps_outa_now(tmp_path, monkeypatch):
+    """Cut-only test: filter_complex now always maps [outa] instead of [ca]."""
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"v")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "output" / "BV_out.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    burn.render(video, ass, output, keep_ranges=[(0.0, 30.0), (60.0, 100.0)], speed=1.0)
+
+    cmd = captured["cmd"]
+    assert "-filter_complex" in cmd
+    assert any(a == "[outv]" for a in cmd)
+    assert any(a == "[outa]" for a in cmd)  # now always outa
+    ca_idx = cmd.index("-c:a")
+    assert cmd[ca_idx + 1] == "aac"
+
+
+def test_render_without_cut_without_speed_uses_simple_path(tmp_path, monkeypatch):
+    """When speed=1.0 and no cuts, still use the simple -vf path."""
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    video = temp_dir / "BV.mp4"
+    video.write_bytes(b"v")
+    ass = temp_dir / "BV.danmaku.ass"
+    ass.write_text("data", encoding="utf-8")
+    output = tmp_path / "output" / "BV_out.mp4"
+
+    captured = {}
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"burned")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.burn.subprocess.run", fake_run)
+
+    burn.render(video, ass, output)  # defaults: keep_ranges=None, speed=1.0
+
+    cmd = captured["cmd"]
+    assert "-filter_complex" not in cmd
+    assert "-vf" in cmd
+    ca_idx = cmd.index("-c:a")
+    assert cmd[ca_idx + 1] == "copy"
 
 
 def test_render_without_cut_ranges_uses_simple_path(tmp_path, monkeypatch):
@@ -1800,7 +1932,7 @@ def test_run_passes_keep_ranges_and_rewrites_ass(tmp_path, monkeypatch):
         return info if len(probe_calls) == 1 else out_info
 
     captured_render = {}
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
         captured_render["keep_ranges"] = keep_ranges
         captured_render["ass_path"] = ass_path
         captured_render["ass_text"] = ass_path.read_text(encoding="utf-8")
@@ -1878,7 +2010,7 @@ def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
         captured["expected_duration"] = expected_duration
         return []
 
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
         captured["keep_ranges"] = keep_ranges
         captured["max_duration"] = max_duration
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1906,3 +2038,167 @@ def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
     assert captured["expected_duration"] == 60.0
     assert captured["keep_ranges"] == [(0.0, 30.0), (60.0, 200.0)]
     assert captured["max_duration"] == 60
+
+
+# ---- --speed CLI + run() integration ----
+
+def test_parse_args_speed_default():
+    args = cli.parse_args(["https://x/video/BV1"])
+    assert args.speed == 1.0
+
+
+def test_parse_args_speed_custom():
+    args = cli.parse_args(["https://x/video/BV1", "--speed", "1.5"])
+    assert args.speed == 1.5
+
+
+def test_parse_args_speed_accepts_float():
+    args = cli.parse_args(["https://x/video/BV1", "--speed", "1.25"])
+    assert args.speed == 1.25
+
+
+def test_run_rejects_speed_above_range(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    args = cli.parse_args(["https://x/video/BV1", "--speed", "3.0"])
+    with pytest.raises(ValueError, match="0.5 and 2.0"):
+        cli.run(args)
+
+
+def test_run_rejects_speed_below_range(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    args = cli.parse_args(["https://x/video/BV1", "--speed", "0.25"])
+    with pytest.raises(ValueError, match="0.5 and 2.0"):
+        cli.run(args)
+
+
+def test_run_passes_speed_to_burn_and_scales_expected_duration(tmp_path, monkeypatch):
+    """With --speed 2.0, expected_duration should be halved."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "T", "uploader": "UP"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(b"<i></i>")
+        return (temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False)
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            "[Events]\nFormat: Layer, Start, End, Style\n"
+            "Dialogue: 0,0:00:05.00,0:00:10.00,Default,hi\n",
+            encoding="utf-8",
+        )
+
+    source_info = MediaInfo(
+        duration=120.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=9_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    captured = {}
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
+        captured["speed"] = speed
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"x")
+        return output_path
+
+    def fake_check_output(source, output, expected_duration=None):
+        captured["expected_duration"] = expected_duration
+        return []
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
+    monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--speed", "2.0",
+    ])
+    cli.run(args)
+
+    assert captured["speed"] == 2.0
+    # source 120s / speed 2.0 = 60s expected
+    assert abs(captured["expected_duration"] - 60.0) < 0.01
+
+
+def test_run_speed_with_cut_scales_kept_duration(tmp_path, monkeypatch):
+    """With both --cut and --speed: expected_duration = kept_duration / speed."""
+    monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.cli.download.get_metadata",
+        lambda url, browser: {"title": "T", "uploader": "UP"},
+    )
+
+    def fake_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        (temp_dir / f"{bv_id}.mp4").write_bytes(b"v")
+        (temp_dir / f"{bv_id}.danmaku.xml").write_bytes(b"<i></i>")
+        return (temp_dir / f"{bv_id}.mp4", temp_dir / f"{bv_id}.danmaku.xml", False)
+
+    def fake_generate_ass(xml_path, ass_path, width, height, font_face, font_size):
+        ass_path.write_text(
+            _ass_with_dialogues([
+                "0,0:00:05.00,0:00:08.00,Default,,0,0,0,,a",
+            ]),
+            encoding="utf-8",
+        )
+
+    source_info = MediaInfo(
+        duration=120.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+    output_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=9_000_000,
+    )
+    probe_calls = []
+    def fake_probe(p):
+        probe_calls.append(p)
+        return source_info if len(probe_calls) == 1 else output_info
+
+    captured = {}
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
+        captured["speed"] = speed
+        captured["keep_ranges"] = keep_ranges
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"x")
+        return output_path
+
+    def fake_check_output(source, output, expected_duration=None):
+        captured["expected_duration"] = expected_duration
+        return []
+
+    monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
+    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
+    monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
+
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--cut", "30~60",
+        "--speed", "1.5",
+    ])
+    cli.run(args)
+
+    # source 120s, cut 30~60 removes 30s -> kept = 90s, 90/1.5 = 60s
+    assert captured["speed"] == 1.5
+    assert abs(captured["expected_duration"] - 60.0) < 0.01
