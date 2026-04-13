@@ -3752,6 +3752,7 @@ name = "video2yt"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "pillow" },
     { name = "whisperx" },
     { name = "yt-dlp" },
     { name = "yt-dlp-danmaku" },
@@ -3764,6 +3765,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pillow", specifier = ">=12.2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "whisperx", specifier = ">=3.8.5" },
     { name = "yt-dlp", specifier = ">=2025.1.1" },

@@ -16,7 +16,8 @@ uv run video2yt "<url>" --speed 1.5                        # 1.5x playback
 uv run video2yt "<url>" --font-size 48 --codec h265        # style overrides
 uv run python -m video2yt "<url>"                          # run as module
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # compose from stills
-uv run pytest                                              # run tests (162)
+uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --title "T"   # concat + progress bar + loudnorm + chapters
+uv run pytest                                              # run tests (230)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
 
@@ -38,6 +39,8 @@ uv add <pkg>                                               # add a dep (NEVER ed
 - **Agent E2E test rule**: DO NOT run `rm -rf output/` or `rm -rf temp/` during E2E tests — that wipes every cached raw download and the outputs of unrelated videos. Clean only the specific `temp/<subfolder>/` under test, or just let the cache hit on the next run. This is a workflow rule, not a code invariant.
 - **Output filename suffixes**: `_cut`, `_<speed>x`, `_preview` get appended to `<bv>_with_danmaku.mp4` based on flags, so different parameter combos coexist. Default (no modifiers) keeps the original filename. See `cli._build_output_filename`.
 - **compose SRT path escaping**: `compose.render` uses `cwd=<srt.parent>` and references the SRT by basename in the `subtitles` filter (same trick as `burn.py`). Absolute paths for `-i` inputs are fine because `-i` doesn't go through filter_complex.
+- **merge strict mode**: all `--segment` inputs must be 1920x1080 30fps h264. No auto-normalization. Fail fast with all violations listed.
+- **merge progress bar**: base bar rendered by Pillow to PNG; current-segment highlight done by ffmpeg `drawbox` with `enable='between(t,S,E)'` per segment.
 
 ## Architecture
 
@@ -49,6 +52,9 @@ src/video2yt/
 ├── burn.py           # ffmpeg wrapper (simple -vf path + filter_complex path for cuts)
 ├── compose.py        # ffmpeg wrapper for audio+image+SRT -> 1080p MP4 (standalone from burn.py)
 ├── compose_cli.py    # video2yt-compose entry point (parse_args/run/main)
+├── merge.py          # strict segment validation, Pillow progress bar PNG, ffmpeg filter_complex
+│                     # with concat + per-seg loudnorm + overlay + drawbox highlights, chapters file
+├── merge_cli.py      # video2yt-merge entry point (parse_args/run/main)
 ├── validate.py       # ffprobe + source/ASS/output validators
 └── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ```

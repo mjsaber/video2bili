@@ -3329,3 +3329,261 @@ def test_transcribe_cli_run_rejects_audio_without_audio_stream(tmp_path, monkeyp
     ])
     with pytest.raises(ValueError, match="no audio stream"):
         transcribe_cli.run(args)
+
+
+# =========================================================================
+# video2yt-merge tests
+# =========================================================================
+
+
+def test_fit_label_short_text_not_truncated(tmp_path):
+    from PIL import Image, ImageDraw
+    from video2yt.merge import _fit_label_to_width, _load_font
+    img = Image.new("RGBA", (100, 100))
+    draw = ImageDraw.Draw(img)
+    font = _load_font("Hiragino Sans GB", 20)
+    assert _fit_label_to_width("短", font, 1000, draw) == "短"
+
+
+def test_fit_label_long_text_truncated(tmp_path):
+    from PIL import Image, ImageDraw
+    from video2yt.merge import _fit_label_to_width, _load_font
+    img = Image.new("RGBA", (100, 100))
+    draw = ImageDraw.Draw(img)
+    font = _load_font("Hiragino Sans GB", 20)
+    text = "这是一个非常长的标签名称"
+    result = _fit_label_to_width(text, font, 60, draw)
+    assert result != text  # got truncated
+    assert result.endswith("…") or result == ""
+
+
+def test_fit_label_zero_width_returns_empty(tmp_path):
+    from PIL import Image, ImageDraw
+    from video2yt.merge import _fit_label_to_width, _load_font
+    img = Image.new("RGBA", (100, 100))
+    draw = ImageDraw.Draw(img)
+    font = _load_font("Hiragino Sans GB", 20)
+    assert _fit_label_to_width("anything", font, 0, draw) == ""
+
+
+def test_format_chapter_time_under_hour():
+    from video2yt.merge import _format_chapter_time
+    assert _format_chapter_time(0) == "00:00"
+    assert _format_chapter_time(25) == "00:25"
+    assert _format_chapter_time(125) == "02:05"
+    assert _format_chapter_time(3599) == "59:59"
+
+
+def test_format_chapter_time_over_hour():
+    from video2yt.merge import _format_chapter_time
+    assert _format_chapter_time(3600) == "01:00:00"
+    assert _format_chapter_time(3661) == "01:01:01"
+
+
+def test_generate_chapters_text_three_segments():
+    from video2yt.merge import generate_chapters_text, Segment
+    from pathlib import Path as P
+    segs = [
+        Segment(P("a.mp4"), "Intro", duration=25.0),
+        Segment(P("b.mp4"), "恶魔解析", duration=300.0),
+        Segment(P("c.mp4"), "实战", duration=400.0),
+    ]
+    text = generate_chapters_text(segs)
+    lines = text.strip().splitlines()
+    assert lines[0] == "00:00 Intro"
+    assert lines[1] == "00:25 恶魔解析"
+    assert lines[2] == "05:25 实战"
+
+
+def test_generate_progress_bar_png_produces_1920x1080_rgba(tmp_path):
+    from PIL import Image
+    from video2yt.merge import generate_progress_bar_png, Segment
+    segs = [
+        Segment(tmp_path / "a.mp4", "Intro", duration=25.0),
+        Segment(tmp_path / "b.mp4", "恶魔解析", duration=300.0),
+        Segment(tmp_path / "c.mp4", "实战", duration=400.0),
+    ]
+    png_path = tmp_path / "bar.png"
+    generate_progress_bar_png(segs, png_path)
+    img = Image.open(png_path)
+    assert img.size == (1920, 1080)
+    assert img.mode == "RGBA"
+    # Top area should be transparent (alpha=0)
+    top_pixel = img.getpixel((960, 100))
+    assert top_pixel[3] == 0, f"top area should be transparent, got {top_pixel}"
+    # Bar area should have visible pixels
+    bar_y = 1080 - 20 - 12 + 6  # middle of bar
+    bar_pixel = img.getpixel((960, bar_y))
+    assert bar_pixel[3] > 100, f"bar should be visible, got {bar_pixel}"
+
+
+def test_generate_progress_bar_png_zero_duration_raises(tmp_path):
+    from video2yt.merge import generate_progress_bar_png, Segment
+    segs = [Segment(tmp_path / "a.mp4", "x", duration=0.0)]
+    with pytest.raises(ValueError, match="positive"):
+        generate_progress_bar_png(segs, tmp_path / "bar.png")
+
+
+def test_build_filter_complex_has_concat_loudnorm_overlay_drawbox():
+    from video2yt.merge import _build_filter_complex, Segment
+    from pathlib import Path as P
+    segs = [
+        Segment(P("a.mp4"), "Intro", duration=25.0),
+        Segment(P("b.mp4"), "Main", duration=300.0),
+    ]
+    fc = _build_filter_complex(segs, progress_bar_input_idx=2)
+    # loudnorm applied to each audio input
+    assert fc.count("loudnorm=I=-14:TP=-1:LRA=11") == 2
+    # concat of 2 inputs
+    assert "concat=n=2:v=1:a=1" in fc
+    # overlay of progress bar PNG
+    assert "[cv][2:v]overlay" in fc
+    # drawbox with enable='between(t,0,25' for first segment
+    assert "drawbox" in fc
+    assert "enable='between(t,0.000,25.000)" in fc
+    assert "enable='between(t,25.000,325.000)" in fc
+    # final label is [outv]
+    assert "[outv]" in fc
+    # audio output label
+    assert "[outa]" in fc
+
+
+def test_validate_segments_strict_rejects_wrong_resolution(tmp_path, monkeypatch):
+    from video2yt.merge import validate_segments_strict, Segment
+    seg = Segment(tmp_path / "bad.mp4", "x")
+    (tmp_path / "bad.mp4").write_bytes(b"fake")
+    def fake_run(cmd, **kwargs):
+        import json
+        result = MagicMock()
+        result.stdout = json.dumps({
+            "streams": [
+                {"codec_type": "video", "codec_name": "h264", "width": 1280, "height": 720, "r_frame_rate": "30/1"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+            "format": {"duration": "60.0"},
+        })
+        return result
+    monkeypatch.setattr("video2yt.merge.subprocess.run", fake_run)
+    with pytest.raises(ValueError, match="1280x720"):
+        validate_segments_strict([seg])
+
+
+def test_validate_segments_strict_rejects_non_h264(tmp_path, monkeypatch):
+    from video2yt.merge import validate_segments_strict, Segment
+    seg = Segment(tmp_path / "bad.mp4", "x")
+    (tmp_path / "bad.mp4").write_bytes(b"fake")
+    def fake_run(cmd, **kwargs):
+        import json
+        result = MagicMock()
+        result.stdout = json.dumps({
+            "streams": [
+                {"codec_type": "video", "codec_name": "hevc", "width": 1920, "height": 1080, "r_frame_rate": "30/1"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+            "format": {"duration": "60.0"},
+        })
+        return result
+    monkeypatch.setattr("video2yt.merge.subprocess.run", fake_run)
+    with pytest.raises(ValueError, match="hevc"):
+        validate_segments_strict([seg])
+
+
+def test_validate_segments_strict_accepts_valid_input(tmp_path, monkeypatch):
+    from video2yt.merge import validate_segments_strict, Segment
+    seg = Segment(tmp_path / "good.mp4", "x")
+    (tmp_path / "good.mp4").write_bytes(b"fake")
+    def fake_run(cmd, **kwargs):
+        import json
+        result = MagicMock()
+        result.stdout = json.dumps({
+            "streams": [
+                {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "r_frame_rate": "30/1"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+            "format": {"duration": "60.5"},
+        })
+        return result
+    monkeypatch.setattr("video2yt.merge.subprocess.run", fake_run)
+    validate_segments_strict([seg])
+    assert seg.duration == 60.5
+
+
+def test_merge_cli_parse_args_defaults():
+    from video2yt import merge_cli
+    args = merge_cli.parse_args([
+        "--segment", "a.mp4", "--label", "A",
+        "--segment", "b.mp4", "--label", "B",
+        "--title", "T",
+    ])
+    assert len(args.segment) == 2
+    assert args.label == ["A", "B"]
+    assert args.title == "T"
+    assert args.output is None
+    assert args.label_font_face == "Hiragino Sans GB"
+
+
+def test_merge_cli_run_mismatched_counts_raises(monkeypatch):
+    from video2yt import merge_cli
+    monkeypatch.setattr("video2yt.merge_cli.preflight", lambda: None)
+    args = merge_cli.parse_args([
+        "--segment", "a.mp4",
+        "--segment", "b.mp4",
+        "--label", "A",
+        "--title", "T",
+    ])
+    with pytest.raises(ValueError, match="counts must match"):
+        merge_cli.run(args)
+
+
+def test_merge_cli_run_single_segment_raises(monkeypatch):
+    from video2yt import merge_cli
+    monkeypatch.setattr("video2yt.merge_cli.preflight", lambda: None)
+    args = merge_cli.parse_args([
+        "--segment", "a.mp4", "--label", "A",
+        "--title", "T",
+    ])
+    with pytest.raises(ValueError, match="at least 2"):
+        merge_cli.run(args)
+
+
+def test_merge_cli_run_happy_path_default_output_in_first_segment_dir(tmp_path, monkeypatch):
+    """Output defaults to the first segment's parent directory + sanitized title."""
+    from video2yt import merge_cli
+    seg_dir = tmp_path / "seg_home"
+    seg_dir.mkdir()
+    a = seg_dir / "a.mp4"
+    a.write_bytes(b"fake")
+    b = seg_dir / "b.mp4"
+    b.write_bytes(b"fake")
+
+    monkeypatch.setattr("video2yt.merge_cli.preflight", lambda: None)
+
+    def fake_validate(segs):
+        for s in segs:
+            s.duration = 30.0
+    monkeypatch.setattr("video2yt.merge_cli.merge.validate_segments_strict", fake_validate)
+
+    captured = {}
+    def fake_render(inputs, output_path):
+        captured["output"] = output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"merged")
+        return output_path
+    monkeypatch.setattr("video2yt.merge_cli.merge.render", fake_render)
+
+    fake_info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=1_000_000,
+    )
+    monkeypatch.setattr("video2yt.merge_cli.validate.probe", lambda p: fake_info)
+
+    args = merge_cli.parse_args([
+        "--segment", str(a), "--label", "A",
+        "--segment", str(b), "--label", "B",
+        "--title", "Test Merge",
+    ])
+    result = merge_cli.run(args)
+    # Should be in seg_dir with sanitized title filename
+    assert result.parent == seg_dir
+    assert result.name == "Test Merge.mp4"
