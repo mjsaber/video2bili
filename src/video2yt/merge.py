@@ -238,22 +238,44 @@ def generate_progress_bar_png(
             width=2,
         )
 
-    # Labels above each segment
+    # Labels above each segment. Labels are drawn at their natural width and
+    # centred on each segment's center; they are ALLOWED to extend beyond
+    # the segment's own x range (useful for very short segments whose bar
+    # width is too narrow for the label). We only clamp to the frame's left
+    # and right edges so nothing falls off-screen, and truncate with "…"
+    # only as a last resort when the label is wider than the entire frame.
     font = _load_font(font_face, font_size)
     label_y_bottom = bar_y - _LABEL_GAP_ABOVE_BAR
+    frame_label_min_x = 10  # leave a 10 px edge margin
+    frame_label_max_x = video_width - 10
+    frame_label_avail = frame_label_max_x - frame_label_min_x
     for seg, (seg_x0, seg_x1) in zip(segments, segment_rects):
         seg_center_x = (seg_x0 + seg_x1) / 2
-        seg_width = seg_x1 - seg_x0
-        fitted = _fit_label_to_width(seg.label, font, max_width=seg_width - 8, draw=draw)
-        if not fitted:
-            continue
-        bbox = draw.textbbox((0, 0), fitted, font=font)
+        # Measure the full label. Only truncate if it's wider than the frame.
+        bbox = draw.textbbox((0, 0), seg.label, font=font)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
+        if text_w > frame_label_avail:
+            fitted = _fit_label_to_width(
+                seg.label, font, max_width=frame_label_avail, draw=draw,
+            )
+            if not fitted:
+                continue
+            bbox = draw.textbbox((0, 0), fitted, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            label = fitted
+        else:
+            label = seg.label
+        # Centre on segment, then clamp to frame edges.
         text_x = seg_center_x - text_w / 2
+        if text_x < frame_label_min_x:
+            text_x = frame_label_min_x
+        elif text_x + text_w > frame_label_max_x:
+            text_x = frame_label_max_x - text_w
         text_y = label_y_bottom - text_h
         _draw_text_with_outline(
-            draw, (text_x, text_y), fitted, font,
+            draw, (text_x, text_y), label, font,
             fill=_LABEL_FILL, outline=_LABEL_OUTLINE,
         )
 

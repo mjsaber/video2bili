@@ -3424,6 +3424,37 @@ def test_generate_progress_bar_png_zero_duration_raises(tmp_path):
         generate_progress_bar_png(segs, tmp_path / "bar.png")
 
 
+def test_generate_progress_bar_png_tiny_segment_still_has_label(tmp_path):
+    """A segment whose bar width is much smaller than its label's natural
+    width should still render the label above the bar, allowed to overflow
+    the segment's own x range."""
+    from PIL import Image
+    from video2yt.merge import generate_progress_bar_png, Segment
+    # Segment 1 is 1% of total → ~17 px bar width, way too narrow for the label
+    segs = [
+        Segment(tmp_path / "a.mp4", "Intro", duration=10.0),
+        Segment(tmp_path / "b.mp4", "Main content", duration=990.0),
+    ]
+    png_path = tmp_path / "bar.png"
+    generate_progress_bar_png(segs, png_path)
+    img = Image.open(png_path)
+    # The "Intro" label should paint SOME visible pixels in the label strip
+    # above the bar, near the leftmost x region (around the first segment's center).
+    # Bar: y=1048..1060. Labels sit just above at roughly y=1020..1045.
+    # Scan a horizontal band for any non-transparent pixel in the left area.
+    label_band_y = 1030
+    found_label_pixel = False
+    for x in range(0, 300):  # leftmost 300 px of frame
+        pixel = img.getpixel((x, label_band_y))
+        if pixel[3] > 100:  # visible (not transparent)
+            found_label_pixel = True
+            break
+    assert found_label_pixel, (
+        "Expected 'Intro' label pixels to be visible in the leftmost 300 px "
+        "above the bar for the tiny first segment"
+    )
+
+
 def test_build_filter_complex_has_concat_loudnorm_overlay_drawbox():
     from video2yt.merge import _build_filter_complex, Segment
     from pathlib import Path as P
