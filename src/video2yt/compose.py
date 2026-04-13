@@ -115,6 +115,8 @@ def _effective_chars_per_line(
 
 # Chars after which we prefer to wrap (in greedy char-based wrap).
 _CJK_SOFT_BREAK_CHARS = set("、，。！？:；,.!?;: \t")
+# Terminal punctuation that should never appear orphaned on its own line.
+_TERMINAL_PUNCT_CHARS = set("。！？!?，、,;；:：")
 
 
 def _wrap_text_for_ass(text: str, max_chars: int) -> list[str]:
@@ -128,6 +130,11 @@ def _wrap_text_for_ass(text: str, max_chars: int) -> list[str]:
       hard-wrap at the next char regardless.
     - Leading/trailing whitespace on each produced line is stripped.
     - Empty or all-whitespace output lines are dropped.
+    - Post-process: if a produced line consists entirely of terminal
+      punctuation (e.g. a lone "。" stranded after a hard wrap), merge
+      it back into the preceding line. This tolerates a tiny amount of
+      horizontal overflow (usually 1 char) to avoid orphaned punctuation,
+      which is a standard CJK typography rule.
 
     This is a greedy algorithm that favours breaking at punctuation when
     it is reasonable but falls back to hard wrap when a clause is too long.
@@ -153,7 +160,15 @@ def _wrap_text_for_ass(text: str, max_chars: int) -> list[str]:
         tail = "".join(current).strip()
         if tail:
             lines.append(tail)
-    return [l for l in lines if l]
+
+    # Merge orphan terminal-punctuation lines into the previous line.
+    merged: list[str] = []
+    for line in lines:
+        if merged and line and all(c in _TERMINAL_PUNCT_CHARS for c in line):
+            merged[-1] = merged[-1] + line
+        else:
+            merged.append(line)
+    return [l for l in merged if l]
 
 
 def srt_to_ass(

@@ -3037,6 +3037,42 @@ def test_wrap_text_preserves_latin():
         assert len(line) <= 15
 
 
+def test_wrap_text_merges_orphan_terminal_punctuation():
+    """A trailing '。' that would otherwise end up alone on the last line
+    should be merged into the preceding line."""
+    from video2yt.compose import _wrap_text_for_ass
+    # 22 chars of content + "。" = 23 chars. With max_chars=22, the
+    # algorithm will finalize after 22 chars and leave "。" stranded.
+    # Post-process should merge it.
+    text = "一二三四五六七八九十一二三四五六七八九十一二。"
+    result = _wrap_text_for_ass(text, 22)
+    # Must NOT contain a line that is ONLY "。"
+    for line in result:
+        assert line != "。", f"orphan period survived: {result}"
+    # The last line should end with 。 (it got merged in)
+    assert result[-1].endswith("。")
+
+
+def test_wrap_text_merges_multiple_orphan_punct_chars():
+    """A trailing "。！" combination also should not orphan."""
+    from video2yt.compose import _wrap_text_for_ass
+    text = "一二三四五六七八九十一二三四五六七八九十一二。！"
+    result = _wrap_text_for_ass(text, 22)
+    for line in result:
+        assert line not in ("。", "！", "。！"), f"orphan punct: {result}"
+    assert result[-1].endswith("。！")
+
+
+def test_wrap_text_standalone_punctuation_text_is_not_merged():
+    """If the ENTIRE text is just punctuation, produce a single line
+    (not merge into nothing). This covers a corner case."""
+    from video2yt.compose import _wrap_text_for_ass
+    text = "。！？"
+    result = _wrap_text_for_ass(text, 22)
+    # Should produce exactly one line with all the punct
+    assert result == ["。！？"]
+
+
 def test_srt_to_ass_wraps_long_chinese_line():
     from video2yt.compose import srt_to_ass
     srt = (
