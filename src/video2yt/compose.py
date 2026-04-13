@@ -92,6 +92,70 @@ def _ass_escape_text(text: str) -> str:
     return text
 
 
+def _effective_chars_per_line(
+    font_size: int,
+    video_width: int,
+    margin_l: int,
+    margin_r: int,
+    char_width_factor: float = 0.95,
+) -> int:
+    """Compute how many CJK-sized chars fit on one physical line.
+
+    Assumes each CJK char occupies approximately ``font_size`` pixels wide
+    (they are approximately square at unit em size). Latin chars are
+    narrower, so this is a conservative bound for mixed content.
+
+    A small safety factor (0.95) shrinks the effective width slightly so
+    renders don't clip at the edge due to kerning or outline thickness.
+    """
+    usable_width = (video_width - margin_l - margin_r) * char_width_factor
+    chars = int(usable_width // font_size)
+    return max(1, chars)
+
+
+# Chars after which we prefer to wrap (in greedy char-based wrap).
+_CJK_SOFT_BREAK_CHARS = set("、，。！？:；,.!?;: \t")
+
+
+def _wrap_text_for_ass(text: str, max_chars: int) -> list[str]:
+    """Wrap a single SRT text block into lines of at most ``max_chars`` chars.
+
+    Algorithm:
+    - Build one line at a time by appending chars.
+    - When a "soft break" character is encountered AND the current line
+      is already at least 60% full, finalize the line and start a new one.
+    - If the current line reaches ``max_chars`` without a soft break,
+      hard-wrap at the next char regardless.
+    - Leading/trailing whitespace on each produced line is stripped.
+    - Empty or all-whitespace output lines are dropped.
+
+    This is a greedy algorithm that favours breaking at punctuation when
+    it is reasonable but falls back to hard wrap when a clause is too long.
+    """
+    lines: list[str] = []
+    current: list[str] = []
+    soft_threshold = max(1, int(max_chars * 0.6))
+
+    for ch in text:
+        current.append(ch)
+        current_len = len(current)
+        if ch in _CJK_SOFT_BREAK_CHARS and current_len >= soft_threshold:
+            piece = "".join(current).strip()
+            if piece:
+                lines.append(piece)
+            current = []
+        elif current_len >= max_chars:
+            piece = "".join(current).strip()
+            if piece:
+                lines.append(piece)
+            current = []
+    if current:
+        tail = "".join(current).strip()
+        if tail:
+            lines.append(tail)
+    return [l for l in lines if l]
+
+
 def srt_to_ass(
     srt_text: str,
     video_width: int,
@@ -121,6 +185,15 @@ def srt_to_ass(
             f"invalid position {position!r}, expected one of "
             f"{sorted(_POSITION_TO_ALIGNMENT)}"
         )
+    margin_l = 80
+    margin_r = 80
+    margin_v = 80
+    max_chars_per_line = _effective_chars_per_line(
+        font_size=font_size,
+        video_width=video_width,
+        margin_l=margin_l,
+        margin_r=margin_r,
+    )
     blocks = re.split(r"\n\s*\n", srt_text.strip())
     dialogue_lines: list[str] = []
     for block in blocks:
@@ -144,7 +217,18 @@ def srt_to_ass(
         text_lines = lines[start_idx + 1:]
         if not text_lines:
             continue
-        text = "\\N".join(_ass_escape_text(ln) for ln in text_lines)
+        # Pre-wrap each SRT source line in Python so libass (WrapStyle 2)
+        # does not have to guess break points in long CJK clauses. Each
+        # SRT newline is a paragraph boundary; every wrapped piece is
+        # joined with the ASS hard line break "\N".
+        wrapped_all: list[str] = []
+        for src_line in text_lines:
+            wrapped = _wrap_text_for_ass(src_line, max_chars_per_line)
+            if wrapped:
+                wrapped_all.extend(wrapped)
+        if not wrapped_all:
+            continue
+        text = "\\N".join(_ass_escape_text(line) for line in wrapped_all)
         dialogue_lines.append(
             f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}"
         )
@@ -157,7 +241,7 @@ def srt_to_ass(
         f"PlayResX: {video_width}\n"
         f"PlayResY: {video_height}\n"
         "ScaledBorderAndShadow: yes\n"
-        "WrapStyle: 0\n"
+        "WrapStyle: 2\n"
         "\n"
         "[V4+ Styles]\n"
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
@@ -166,7 +250,8 @@ def srt_to_ass(
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_face},{font_size},"
         "&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
-        f"0,0,0,0,100,100,0,0,1,2,0,{alignment},10,10,80,1\n"
+        f"0,0,0,0,100,100,0,0,1,2,0,{alignment},"
+        f"{margin_l},{margin_r},{margin_v},1\n"
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "

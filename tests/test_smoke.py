@@ -2953,6 +2953,127 @@ def test_compose_cli_run_explicit_font_size_wins(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# compose: Python-side subtitle wrapping (_effective_chars_per_line,
+# _wrap_text_for_ass, srt_to_ass integration)
+# ---------------------------------------------------------------------------
+
+
+def test_effective_chars_per_line_72_at_1920():
+    from video2yt.compose import _effective_chars_per_line
+    # 1920 - 2*80 = 1760 usable, * 0.95 safety = 1672, // 72 = 23
+    result = _effective_chars_per_line(72, 1920, 80, 80)
+    assert result == 23
+
+
+def test_effective_chars_per_line_42_at_1920():
+    from video2yt.compose import _effective_chars_per_line
+    # 1760 * 0.95 = 1672, // 42 = 39
+    result = _effective_chars_per_line(42, 1920, 80, 80)
+    assert result == 39
+
+
+def test_wrap_text_short_sentence_no_split():
+    from video2yt.compose import _wrap_text_for_ass
+    result = _wrap_text_for_ass("炉石战旗 S13灾变降临4月15号正式开启。", 23)
+    # 23-char line holds the whole 20-char sentence
+    assert result == ["炉石战旗 S13灾变降临4月15号正式开启。"]
+
+
+def test_wrap_text_long_sentence_with_commas():
+    from video2yt.compose import _wrap_text_for_ass
+    # Long sentence with multiple natural break points
+    text = "这个新赛季最大的变化，包括 饰品回归、新英雄加入，以及多个种族都拿到了新的关键词和新玩法。"
+    result = _wrap_text_for_ass(text, 23)
+    # Should produce multiple lines, each <= 23 chars
+    assert len(result) >= 2
+    for line in result:
+        assert len(line) <= 23, f"line too long: {line!r}"
+    # Content should be preserved when lines are joined (ignoring spaces)
+    joined = "".join(result)
+    assert joined.replace(" ", "") == text.replace(" ", "")
+
+
+def test_wrap_text_unbreakable_long_clause_hard_wraps():
+    from video2yt.compose import _wrap_text_for_ass
+    # A 30-char clause with no soft breaks; must be hard-wrapped
+    text = "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十"
+    result = _wrap_text_for_ass(text, 10)
+    assert len(result) == 3
+    for line in result:
+        assert len(line) <= 10
+
+
+def test_wrap_text_prefers_soft_break_over_hard():
+    from video2yt.compose import _wrap_text_for_ass
+    text = "前缀很短，后面有一个长到需要换行的长长长长长长的后缀。"
+    # The comma at position 5 should be a soft break point
+    result = _wrap_text_for_ass(text, 12)
+    # First line should end at or near the soft break
+    assert len(result[0]) <= 12
+    # No line exceeds max
+    for line in result:
+        assert len(line) <= 12
+
+
+def test_wrap_text_respects_existing_short_line():
+    from video2yt.compose import _wrap_text_for_ass
+    result = _wrap_text_for_ass("短句。", 23)
+    assert result == ["短句。"]
+
+
+def test_wrap_text_empty_input():
+    from video2yt.compose import _wrap_text_for_ass
+    assert _wrap_text_for_ass("", 20) == []
+    assert _wrap_text_for_ass("   ", 20) == []
+
+
+def test_wrap_text_preserves_latin():
+    from video2yt.compose import _wrap_text_for_ass
+    text = "Hello World, this is a test."
+    result = _wrap_text_for_ass(text, 15)
+    # Should break at the comma
+    assert len(result) >= 2
+    for line in result:
+        assert len(line) <= 15
+
+
+def test_srt_to_ass_wraps_long_chinese_line():
+    from video2yt.compose import srt_to_ass
+    srt = (
+        "1\n00:00:00,000 --> 00:00:05,000\n"
+        "这个新赛季最大的变化，包括 饰品回归、新英雄加入，以及多个种族都拿到了新的关键词和新玩法。\n"
+    )
+    ass = srt_to_ass(srt, 1920, 1080, "Hiragino Sans GB", 72)
+    # The Dialogue line should contain \N separators (multi-line wrap)
+    dialogue = [l for l in ass.splitlines() if l.startswith("Dialogue: ")][0]
+    assert "\\N" in dialogue
+    # Extract the text part (after ',,')
+    text = dialogue.split(",,", 1)[1]
+    visual_lines = text.split("\\N")
+    for line in visual_lines:
+        assert len(line) <= 23
+
+
+def test_srt_to_ass_uses_wrap_style_2():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Font", 42)
+    assert "WrapStyle: 2" in ass
+
+
+def test_srt_to_ass_uses_80px_margins_in_style():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Font", 42)
+    style = [l for l in ass.splitlines() if l.startswith("Style: Default,")][0]
+    fields = style.split(",")
+    # After the fix, MarginL=80, MarginR=80, MarginV=80
+    assert fields[19].strip() == "80"
+    assert fields[20].strip() == "80"
+    assert fields[21].strip() == "80"
+
+
+# ---------------------------------------------------------------------------
 # transcribe: script-to-audio forced alignment
 # ---------------------------------------------------------------------------
 
