@@ -13,6 +13,14 @@ class ComposeInputs:
     output_dir: Path
     font_face: str = "Hiragino Sans GB"
     font_size: int = 42
+    position: str = "center"
+
+
+_POSITION_TO_ALIGNMENT = {
+    "bottom": 2,
+    "center": 5,
+    "top": 8,
+}
 
 
 _TIMECODE_PATTERN = re.compile(
@@ -90,16 +98,29 @@ def srt_to_ass(
     video_height: int,
     font_face: str,
     font_size: int,
+    position: str = "center",
 ) -> str:
     """Convert SRT text to ASS text with pixel-accurate script resolution.
 
     Sets ``PlayResX=video_width`` and ``PlayResY=video_height`` so ASS
     ``FontSize`` units equal display pixels exactly. Produces a single
     ``Default`` style with the given font and size, white primary colour,
-    black outline (2px), alignment 2 (centred bottom), MarginV=80.
+    black outline (2px), MarginV=80.
 
-    Raises ``ValueError`` if no parseable dialogue blocks are found.
+    ``position`` maps to an ASS ``Alignment`` value: ``"bottom"`` -> 2
+    (bottom centre), ``"center"`` -> 5 (middle centre), ``"top"`` -> 8 (top
+    centre). For Alignment=5, libass ignores MarginV; we still emit 80 in
+    the style which is harmless.
+
+    Raises ``ValueError`` if no parseable dialogue blocks are found or if
+    ``position`` is not one of the supported values.
     """
+    alignment = _POSITION_TO_ALIGNMENT.get(position)
+    if alignment is None:
+        raise ValueError(
+            f"invalid position {position!r}, expected one of "
+            f"{sorted(_POSITION_TO_ALIGNMENT)}"
+        )
     blocks = re.split(r"\n\s*\n", srt_text.strip())
     dialogue_lines: list[str] = []
     for block in blocks:
@@ -145,7 +166,7 @@ def srt_to_ass(
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_face},{font_size},"
         "&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
-        "0,0,0,0,100,100,0,0,1,2,0,2,10,10,80,1\n"
+        f"0,0,0,0,100,100,0,0,1,2,0,{alignment},10,10,80,1\n"
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
@@ -175,6 +196,7 @@ def render(inputs: ComposeInputs, output_path: Path) -> Path:
         video_height=1080,
         font_face=inputs.font_face,
         font_size=inputs.font_size,
+        position=inputs.position,
     )
     ass_path = inputs.srt_path.with_suffix(".compose.ass")
     ass_path.write_text(ass_text, encoding="utf-8")

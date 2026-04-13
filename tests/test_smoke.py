@@ -2580,6 +2580,41 @@ def test_srt_to_ass_with_different_font_size_reflects_in_style():
     assert ",42," not in ass
 
 
+def test_srt_to_ass_default_position_is_center():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Font", 42)
+    style_line = [l for l in ass.splitlines() if l.startswith("Style: Default,")][0]
+    fields = style_line.split(",")
+    # Alignment is at index 18 (see verified field layout in implementation plan).
+    assert fields[18].strip() == "5"
+
+
+def test_srt_to_ass_bottom_position_alignment_2():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Font", 42, position="bottom")
+    style_line = [l for l in ass.splitlines() if l.startswith("Style: Default,")][0]
+    fields = style_line.split(",")
+    assert fields[18].strip() == "2"
+
+
+def test_srt_to_ass_top_position_alignment_8():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Font", 42, position="top")
+    style_line = [l for l in ass.splitlines() if l.startswith("Style: Default,")][0]
+    fields = style_line.split(",")
+    assert fields[18].strip() == "8"
+
+
+def test_srt_to_ass_rejects_invalid_position():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    with pytest.raises(ValueError, match="invalid position"):
+        srt_to_ass(srt, 1920, 1080, "Font", 42, position="sideways")
+
+
 def test_render_builds_correct_ffmpeg_command(tmp_path, monkeypatch):
     work_dir = tmp_path / "srt_dir"
     work_dir.mkdir()
@@ -2674,7 +2709,8 @@ def test_compose_cli_parse_args_defaults(tmp_path):
     assert args.title == "My Title"
     assert args.output_dir == Path("./output")
     assert args.font_face == "Hiragino Sans GB"
-    assert args.font_size == 42
+    assert args.font_size is None
+    assert args.position == "center"
 
 
 def test_compose_cli_run_happy_path(tmp_path, monkeypatch):
@@ -2790,6 +2826,130 @@ def test_compose_cli_run_rejects_audio_with_no_audio_stream(tmp_path, monkeypatc
     ])
     with pytest.raises(ValueError, match="no audio stream"):
         compose_cli.run(args)
+
+
+def test_compose_cli_parse_args_default_position_center():
+    args = compose_cli.parse_args([
+        "--audio", "a.mp3", "--image", "b.jpg",
+        "--srt", "c.srt", "--title", "T",
+    ])
+    assert args.position == "center"
+    assert args.font_size is None  # auto, resolved in run()
+
+
+def test_compose_cli_parse_args_position_bottom():
+    args = compose_cli.parse_args([
+        "--audio", "a.mp3", "--image", "b.jpg",
+        "--srt", "c.srt", "--title", "T",
+        "--position", "bottom",
+    ])
+    assert args.position == "bottom"
+
+
+def test_compose_cli_parse_args_rejects_invalid_position():
+    with pytest.raises(SystemExit):
+        compose_cli.parse_args([
+            "--audio", "a.mp3", "--image", "b.jpg",
+            "--srt", "c.srt", "--title", "T",
+            "--position", "diagonal",
+        ])
+
+
+def _compose_cli_run_fixture(tmp_path, monkeypatch):
+    """Build common fakes/paths for compose_cli.run auto-font-size tests."""
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake")
+    image = tmp_path / "bg.jpg"
+    image.write_bytes(b"fake")
+    srt = tmp_path / "subs.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:05,000\nhi\n", encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.compose_cli.preflight", lambda: None)
+    audio_info = MediaInfo(
+        duration=120.0, width=0, height=0,
+        has_video=False, has_audio=True,
+        vcodec="", acodec="aac", size_bytes=1000,
+    )
+    output_info = MediaInfo(
+        duration=120.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=5_000_000,
+    )
+    probe_calls = []
+
+    def fake_probe(p):
+        probe_calls.append(p)
+        return audio_info if len(probe_calls) == 1 else output_info
+
+    monkeypatch.setattr("video2yt.compose_cli.validate.probe", fake_probe)
+
+    captured: dict = {}
+
+    def fake_render(inputs, output_path):
+        captured["font_size"] = inputs.font_size
+        captured["position"] = inputs.position
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake")
+        return output_path
+
+    monkeypatch.setattr("video2yt.compose_cli.compose.render", fake_render)
+    return audio, image, srt, captured
+
+
+def test_compose_cli_run_center_default_font_size_72(tmp_path, monkeypatch):
+    """--position center with no --font-size -> font_size=72 passed to render."""
+    audio, image, srt, captured = _compose_cli_run_fixture(tmp_path, monkeypatch)
+    args = compose_cli.parse_args([
+        "--audio", str(audio), "--image", str(image),
+        "--srt", str(srt), "--title", "T",
+        "-o", str(tmp_path / "out"),
+    ])
+    compose_cli.run(args)
+    assert captured["font_size"] == 72
+    assert captured["position"] == "center"
+
+
+def test_compose_cli_run_bottom_default_font_size_42(tmp_path, monkeypatch):
+    """--position bottom with no --font-size -> font_size=42."""
+    audio, image, srt, captured = _compose_cli_run_fixture(tmp_path, monkeypatch)
+    args = compose_cli.parse_args([
+        "--audio", str(audio), "--image", str(image),
+        "--srt", str(srt), "--title", "T",
+        "-o", str(tmp_path / "out"),
+        "--position", "bottom",
+    ])
+    compose_cli.run(args)
+    assert captured["font_size"] == 42
+    assert captured["position"] == "bottom"
+
+
+def test_compose_cli_run_top_default_font_size_42(tmp_path, monkeypatch):
+    """--position top with no --font-size -> font_size=42."""
+    audio, image, srt, captured = _compose_cli_run_fixture(tmp_path, monkeypatch)
+    args = compose_cli.parse_args([
+        "--audio", str(audio), "--image", str(image),
+        "--srt", str(srt), "--title", "T",
+        "-o", str(tmp_path / "out"),
+        "--position", "top",
+    ])
+    compose_cli.run(args)
+    assert captured["font_size"] == 42
+    assert captured["position"] == "top"
+
+
+def test_compose_cli_run_explicit_font_size_wins(tmp_path, monkeypatch):
+    """--position center --font-size 50 -> 50 passed to render (explicit wins)."""
+    audio, image, srt, captured = _compose_cli_run_fixture(tmp_path, monkeypatch)
+    args = compose_cli.parse_args([
+        "--audio", str(audio), "--image", str(image),
+        "--srt", str(srt), "--title", "T",
+        "-o", str(tmp_path / "out"),
+        "--position", "center",
+        "--font-size", "50",
+    ])
+    compose_cli.run(args)
+    assert captured["font_size"] == 50
+    assert captured["position"] == "center"
 
 
 # ---------------------------------------------------------------------------

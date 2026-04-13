@@ -57,8 +57,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Subtitle font family (default: Hiragino Sans GB)",
     )
     parser.add_argument(
-        "--font-size", type=int, default=42,
-        help="Subtitle font size in pixels (default: 42)",
+        "--font-size", type=int, default=None,
+        help=(
+            "Subtitle font size in pixels "
+            "(default: auto - 72 for center, 42 for bottom/top)"
+        ),
+    )
+    parser.add_argument(
+        "--position", choices=["bottom", "center", "top"], default="center",
+        help="Subtitle vertical position (default: center)",
     )
     return parser.parse_args(argv)
 
@@ -92,6 +99,12 @@ def run(args: argparse.Namespace) -> Path:
     output_path = output_subdir / f"{safe_title}.mp4"
 
     # 5. Compose
+    if args.font_size is not None:
+        font_size = args.font_size
+    elif args.position == "center":
+        font_size = 72
+    else:
+        font_size = 42
     inputs = compose.ComposeInputs(
         audio_path=args.audio,
         image_path=args.image,
@@ -99,11 +112,12 @@ def run(args: argparse.Namespace) -> Path:
         title=args.title,
         output_dir=args.output_dir,
         font_face=args.font_face,
-        font_size=args.font_size,
+        font_size=font_size,
+        position=args.position,
     )
     _log(
         f"composing {output_path.name} "
-        f"(font: {args.font_face!r} {args.font_size}px)"
+        f"(font: {args.font_face!r} {font_size}px, position: {args.position})"
     )
     compose.render(inputs, output_path)
 
