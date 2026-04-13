@@ -2494,24 +2494,90 @@ def test_check_srt_gbk_fallback(tmp_path):
     assert compose.check_srt(srt) == 1
 
 
-def test_build_subtitles_filter_includes_style():
-    from video2yt.compose import _build_subtitles_filter
-    f = _build_subtitles_filter("test.srt", "Hiragino Sans GB", 42)
-    assert "subtitles=f='test.srt'" in f
-    assert "FontName=Hiragino Sans GB" in f
-    assert "FontSize=42" in f
-    assert "PrimaryColour=&HFFFFFF" in f
-    assert "Alignment=2" in f
+def test_srt_time_to_ass_time_basic():
+    from video2yt.compose import _srt_time_to_ass_time
+    assert _srt_time_to_ass_time("00:00:00,000") == "0:00:00.00"
+    assert _srt_time_to_ass_time("00:00:01,500") == "0:00:01.50"
+    assert _srt_time_to_ass_time("00:01:23,456") == "0:01:23.46"
+    assert _srt_time_to_ass_time("01:23:45,999") == "1:23:46.00"
 
 
-def test_build_filter_complex_includes_scale_pad_subtitles():
-    from video2yt.compose import _build_filter_complex
-    fc = _build_filter_complex("test.srt", "Hiragino Sans GB", 42)
-    assert "scale=1920:1080:force_original_aspect_ratio=decrease" in fc
-    assert "pad=1920:1080" in fc
-    assert "subtitles=f='test.srt'" in fc
-    assert "[bg]" in fc
-    assert "[outv]" in fc
+def test_srt_time_to_ass_time_dot_separator():
+    from video2yt.compose import _srt_time_to_ass_time
+    assert _srt_time_to_ass_time("00:00:01.500") == "0:00:01.50"
+
+
+def test_srt_time_to_ass_time_rejects_invalid():
+    from video2yt.compose import _srt_time_to_ass_time
+    with pytest.raises(ValueError):
+        _srt_time_to_ass_time("not a time")
+
+
+def test_srt_to_ass_has_script_info_section():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhello\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Hiragino Sans GB", 42)
+    assert "[Script Info]" in ass
+    assert "PlayResX: 1920" in ass
+    assert "PlayResY: 1080" in ass
+    assert "ScriptType: v4.00+" in ass
+
+
+def test_srt_to_ass_has_style_section_with_font():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Hiragino Sans GB", 42)
+    assert "[V4+ Styles]" in ass
+    assert "Hiragino Sans GB" in ass
+    assert ",42," in ass
+    assert "&H00FFFFFF" in ass
+    assert "&H00000000" in ass
+
+
+def test_srt_to_ass_converts_dialogue():
+    from video2yt.compose import srt_to_ass
+    srt = (
+        "1\n00:00:00,000 --> 00:00:02,500\n第一句\n\n"
+        "2\n00:00:03,000 --> 00:00:05,750\n第二句\n"
+    )
+    ass = srt_to_ass(srt, 1920, 1080, "Hiragino Sans GB", 42)
+    assert "Dialogue: 0,0:00:00.00,0:00:02.50,Default,,0,0,0,,第一句" in ass
+    assert "Dialogue: 0,0:00:03.00,0:00:05.75,Default,,0,0,0,,第二句" in ass
+
+
+def test_srt_to_ass_handles_multiline_text():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nline one\nline two\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Hiragino Sans GB", 42)
+    assert "line one\\Nline two" in ass
+
+
+def test_srt_to_ass_skips_malformed_blocks():
+    from video2yt.compose import srt_to_ass
+    srt = (
+        "1\n00:00:00,000 --> 00:00:02,000\ngood\n\n"
+        "gibberish\nno timecode\n\n"
+        "2\n00:00:03,000 --> 00:00:05,000\nanother good\n"
+    )
+    ass = srt_to_ass(srt, 1920, 1080, "Font", 42)
+    assert "good" in ass
+    assert "another good" in ass
+    assert "gibberish" not in ass
+
+
+def test_srt_to_ass_raises_on_all_malformed():
+    from video2yt.compose import srt_to_ass
+    srt = "just some gibberish\nnot an srt file\n"
+    with pytest.raises(ValueError, match="no parseable dialogue"):
+        srt_to_ass(srt, 1920, 1080, "Font", 42)
+
+
+def test_srt_to_ass_with_different_font_size_reflects_in_style():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Hiragino Sans GB", 28)
+    assert ",28," in ass
+    assert ",42," not in ass
 
 
 def test_render_builds_correct_ffmpeg_command(tmp_path, monkeypatch):
@@ -2560,9 +2626,17 @@ def test_render_builds_correct_ffmpeg_command(tmp_path, monkeypatch):
     # filter_complex present
     assert "-filter_complex" in cmd
     fc_idx = cmd.index("-filter_complex")
-    assert "subtitles=f='subs.srt'" in cmd[fc_idx + 1]
-    assert "FontName=Hiragino Sans GB" in cmd[fc_idx + 1]
+    assert "subtitles=f='subs.compose.ass'" in cmd[fc_idx + 1]
+    assert "force_style" not in cmd[fc_idx + 1]
     assert "scale=1920:1080" in cmd[fc_idx + 1]
+    # Verify the intermediate ASS file was written with pixel-accurate
+    # PlayRes and the requested font face
+    ass_file = work_dir / "subs.compose.ass"
+    assert ass_file.exists()
+    ass_text = ass_file.read_text(encoding="utf-8")
+    assert "PlayResY: 1080" in ass_text
+    assert "PlayResX: 1920" in ass_text
+    assert "Hiragino Sans GB" in ass_text
     # Maps
     assert "-map" in cmd
     map_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
