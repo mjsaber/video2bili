@@ -3345,6 +3345,80 @@ def test_transcribe_cli_run_rejects_audio_without_audio_stream(tmp_path, monkeyp
         transcribe_cli.run(args)
 
 
+def test_split_long_sentences_disabled_when_zero():
+    from video2yt.transcribe import split_long_sentences
+    sents = ["一；二；三；四；五。"]
+    assert split_long_sentences(sents, max_chars=0) == sents
+
+
+def test_split_long_sentences_short_sentence_unchanged():
+    from video2yt.transcribe import split_long_sentences
+    assert split_long_sentences(["短句。"], max_chars=20) == ["短句。"]
+
+
+def test_split_long_sentences_chinese_semicolon():
+    from video2yt.transcribe import split_long_sentences
+    s = "我們先做一件事；然後做第二件事；最後做第三件事"
+    out = split_long_sentences([s], max_chars=10)
+    assert len(out) == 3
+    assert out[0].endswith("；")
+    assert out[1].endswith("；")
+    assert out[2] == "最後做第三件事"
+
+
+def test_split_long_sentences_mixed_punctuation():
+    from video2yt.transcribe import split_long_sentences
+    s = "AAAAA，BBBBB；CCCCC、DDDDD"
+    out = split_long_sentences([s], max_chars=10)
+    assert len(out) == 4
+
+
+def test_split_long_sentences_no_secondary_punct_returns_intact():
+    from video2yt.transcribe import split_long_sentences
+    s = "無任何次要標點符號的超長字串無法被切分"
+    out = split_long_sentences([s], max_chars=5)
+    assert out == [s]
+
+
+def test_transcribe_cli_parse_args_max_block_chars():
+    from video2yt import transcribe_cli
+    args = transcribe_cli.parse_args([
+        "--audio", "a.mp3",
+        "--script", "s.md",
+        "--max-block-chars", "40",
+    ])
+    assert args.max_block_chars == 40
+
+
+def test_transcribe_cli_parse_args_max_block_chars_default_zero():
+    from video2yt import transcribe_cli
+    args = transcribe_cli.parse_args([
+        "--audio", "a.mp3",
+        "--script", "s.md",
+    ])
+    assert args.max_block_chars == 0
+
+
+def test_transcribe_script_passes_max_block_chars(monkeypatch):
+    from video2yt import transcribe
+    fake_words = [("x", 0.0, 0.5), ("y", 9.5, 10.0)]
+    monkeypatch.setattr(
+        "video2yt.transcribe.run_whisperx_alignment",
+        lambda audio_path, language, model_name, device: fake_words,
+    )
+    # 一段 25-char 的句子，含分号；max_block_chars=10 时应被切为多块。
+    script = "我們先做一件事；然後做第二件事；最後做第三件事。"
+    srt = transcribe.transcribe_script(
+        audio_path=Path("fake.mp3"),
+        script_text=script,
+        max_block_chars=10,
+    )
+    # 期望至少 3 个 SRT block (用 "1\n", "2\n", "3\n" 起首做粗略检查)
+    assert "1\n00:" in srt
+    assert "2\n00:" in srt
+    assert "3\n00:" in srt
+
+
 # =========================================================================
 # video2yt-merge tests
 # =========================================================================

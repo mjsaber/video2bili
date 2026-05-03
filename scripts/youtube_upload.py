@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -32,17 +33,39 @@ SCOPES = [
 
 
 def get_credentials(secret_path: Path, token_path: Path) -> Credentials:
+    """Load (or mint) OAuth credentials. Auto-recovers from expired/revoked refresh tokens.
+
+    OAuth apps in "Testing" status have refresh tokens that expire after 7 days. The old
+    behavior crashed with `RefreshError: invalid_grant: Token has been expired or revoked.`
+    and required `rm youtube_token.json` by hand. We now catch that and fall through to
+    a fresh OAuth flow.
+    """
     creds: Credentials | None = None
     if token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+
+    if creds and creds.valid:
+        return creds
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
             creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), SCOPES)
-            creds = flow.run_local_server(port=0, prompt="consent")
-        token_path.write_text(creds.to_json())
-        print(f"[yt] token saved to {token_path}", file=sys.stderr)
+        except RefreshError as e:
+            print(
+                f"[yt] cached refresh token rejected ({e}). "
+                "Common cause: OAuth app in Testing status — refresh tokens expire after 7 days. "
+                "Deleting cached token and re-running OAuth flow.",
+                file=sys.stderr,
+            )
+            token_path.unlink(missing_ok=True)
+            creds = None
+
+    if not creds or not creds.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), SCOPES)
+        creds = flow.run_local_server(port=0, prompt="consent")
+
+    token_path.write_text(creds.to_json())
+    print(f"[yt] token saved to {token_path}", file=sys.stderr)
     return creds
 
 

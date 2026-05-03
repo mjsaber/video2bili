@@ -49,6 +49,11 @@ def strip_markdown(md: str) -> str:
 # followed by whitespace or end-of-string (avoids splitting on decimals).
 _SENTENCE_END = re.compile(r"([。！？!?]+|\.(?=\s|$))")
 
+# Secondary punctuation, used by `split_long_sentences` to break up sentences
+# that exceed `max_block_chars` (semicolons, ideographic comma, full-width comma,
+# Latin semicolon, Latin comma).
+_SECONDARY_PUNCT = re.compile(r"([；，、;,]+)")
+
 
 def split_into_sentences(text: str) -> list[str]:
     """Split prose into sentences by punctuation (CJK + Latin).
@@ -72,6 +77,40 @@ def split_into_sentences(text: str) -> list[str]:
     if buf.strip():
         sentences.append(buf.strip())
     return sentences
+
+
+def split_long_sentences(sentences: list[str], max_chars: int) -> list[str]:
+    """Split any sentence longer than `max_chars` at secondary punctuation.
+
+    Sentence-end punctuation (。！？) is the primary splitter (`split_into_sentences`).
+    For long-form scripts where the writer used semicolons/commas instead of periods,
+    the resulting SRT block can be too long for one screen. This pass cuts those
+    sentences at `；，、;,` while leaving short sentences untouched.
+
+    `max_chars <= 0` disables the pass (preserves legacy behaviour). If a sentence
+    exceeds the limit but contains no secondary punctuation, it is returned intact —
+    we don't break mid-word.
+    """
+    if max_chars <= 0:
+        return sentences
+
+    out: list[str] = []
+    for s in sentences:
+        if len(s) <= max_chars:
+            out.append(s)
+            continue
+        chunks: list[str] = []
+        buf = ""
+        for part in _SECONDARY_PUNCT.split(s):
+            buf += part
+            if _SECONDARY_PUNCT.fullmatch(part):
+                if buf.strip():
+                    chunks.append(buf.strip())
+                buf = ""
+        if buf.strip():
+            chunks.append(buf.strip())
+        out.extend(chunks if chunks else [s])
+    return out
 
 
 def _count_effective_chars(text: str) -> int:
@@ -216,10 +255,17 @@ def transcribe_script(
     language: str = "zh",
     model_name: str = "small",
     device: str = "cpu",
+    max_block_chars: int = 0,
 ) -> str:
-    """End-to-end: align audio + script -> SRT string."""
+    """End-to-end: align audio + script -> SRT string.
+
+    `max_block_chars > 0` enables a secondary split: any sentence longer than
+    that many characters is cut at semicolons/commas (`；，、;,`). 0 = legacy
+    behavior (split on `。！？` only).
+    """
     prose = strip_markdown(script_text)
     sentences = split_into_sentences(prose)
+    sentences = split_long_sentences(sentences, max_block_chars)
     if not sentences:
         raise ValueError("script has no sentences after markdown stripping")
 

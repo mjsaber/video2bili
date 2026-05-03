@@ -31,6 +31,14 @@ uv add <pkg>                                               # add a dep (NEVER ed
 
 When working on a multi-step video project (intro + multiple burnt segments + final merge), pass `-o output/<project>/` to every `video2yt` / `video2yt-compose` / `video2yt-merge` invocation so all artifacts land under one folder. Example: `output/back2back/` contains `intro.mp4`, segment subfolders, the final merged MP4, the YouTube thumbnail, and any scratch files. This keeps unrelated projects isolated and makes cleanup easy.
 
+## Battlegrounds workflow rule (intro-script drafting)
+
+For Hearthstone Battlegrounds video projects, **never draft the intro script before verifying the topic's terminology**. After the `ringnaga` mistake (drafted assuming "護戒" was a Spellcraft buff when it actually meant the card 戒指龍 / Ring Bearer), this is hard rule:
+
+1. Run `WebFetch https://search.bilibili.com/all?keyword=<策略名>` and read the top UP-主 video titles + descriptions.
+2. Confirm the 流派 pivots on the right card / hero (typically a 6-7星核心隨從).
+3. Use BG vocabulary (阵容/隨從/酒館/餵/疊屬性/吃雞), NOT constructed-mode vocabulary (牌組/起手/過渡). Full glossary in `docs/superpowers/specs/2026-04-18-video-production-workflow.md` Step 1.
+
 ## Known gotchas
 
 - **ffmpeg `subtitles=` filter path escaping**: The `subtitles=<path>` filter in `-vf` chokes on absolute paths containing spaces, colons, or parentheses. Workaround in `burn.py`: run `subprocess` with `cwd=temp_dir` and pass the ASS filename as a basename; the `-i` input is also a basename (only the output path is absolute). ffmpeg 8+ is stricter and requires the explicit `subtitles=f='<name>'` quoted form (see the `-vf` line and docstring in `src/video2yt/burn.py`).

@@ -56,7 +56,8 @@ output/back2back/
 |---|---|---|
 | `ffmpeg`, `ffprobe` | system PATH | `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg` (must include libass) |
 | Volcengine BigTTS | API key | Volcano Ark console → API Key 管理 → create. Stored as `VOLCENGINE_API_KEY` in `.env`. Only the new (single-key) auth style works; legacy v1 endpoints need separate AppID. |
-| Google Gemini (nanobanana) | API key | Google AI Studio → API key. Image-generation model requires a paid/billed key (free tier limit = 0). Stored as `GEMINI_API_KEY` in `.env`. |
+| Codex CLI (default for image gen) | `codex` in PATH, logged in | `brew install codex` then `codex login`. Uses ChatGPT auth; no separate API key required. |
+| Google Gemini (image-gen fallback) | API key | Google AI Studio → API key. Image-generation model requires a paid/billed key (free tier limit = 0). Stored as `GEMINI_API_KEY` in `.env`. Only needed when running `image_quick.py --backend gemini`. |
 | YouTube Data API v3 | OAuth client | Google Cloud Console → enable YouTube Data API v3 → create OAuth client (desktop app). Save JSON as `client_secret.json` (gitignored). First run opens browser for consent (test users must be allow-listed during testing mode). Token cached in `youtube_token.json` (gitignored). |
 | Hearthstone Battlegrounds logo | `assets/hsbg_logo.png` | One-time download from Fandom wiki (RGBA, 4098x2146). |
 
@@ -70,6 +71,27 @@ output/back2back/
 **Output**: `output/<project>/intro_script.txt` (UTF-8 plain text, ~110 chars for 30s at 1.0x speed).
 
 Hand-write or LLM-draft the script. Length rule of thumb: **3.7 chars/sec at speech_rate=0** (1.0x). For a 30s intro, aim for 100–120 Chinese chars.
+
+**Before drafting (HARD RULE — added after `ringnaga` mistake)**: when the topic involves a Hearthstone Battlegrounds 流派/阵容/卡牌, FIRST verify the terminology before writing any script. Steps:
+1. `WebFetch https://search.bilibili.com/all?keyword=<策略名>` to find the UP 主's video on the topic. Read the first few titles + descriptions.
+2. Confirm what the 流派 actually pivots on — usually a specific 6-7星核心隨從 or hero. The Chinese name often differs from the English mechanic ("護戒" = the card 戒指龍 = Ring Bearer, NOT a Spellcraft "ring" buff).
+3. Only after confirming with the user (or matching the source video) should you draft the script.
+
+**Battlegrounds vocabulary (use these, NOT constructed-mode terms)**:
+
+| Use | Don't use | Notes |
+|---|---|---|
+| 阵容 / 流派 / 體系 | 牌組 / 套牌 / 構築 | "牌组" is constructed-only |
+| 隨從 / 小弟 | 法術 (rare in BG) | The board is mostly minions |
+| 酒館 / 卡池 / 升級 | 抽牌 / 牌庫 | BG has a tavern, not a deck |
+| 站位 / 排位 | 起手 / mulligan | "起手" is constructed |
+| 餵 / 養 / 疊屬性 | 過渡 | "過渡" sounds like deck-building |
+| 開局 / 中期 / 後期 / 終局 | 早期 / 後期 alone | OK in moderation |
+| 吃雞 / 吃八雞 / 上分 | — | BG ranking jargon |
+| 種族羈絆 (海盜 / 元素 / 機械 / 食屍鬼 / 娜迦 / 龍 / 野獸 / 惡魔 / 任務小隊) | 種族特性 | Use the official族群 names |
+| 三聯 / 三合一 / 三星 | — | Combine 3 same minions |
+| 法術強化 (Spellcraft) | — | Tavern spells with a cost-modifier mechanic |
+| 加buff / 加屬性 | 增益 | More natural in BG context |
 
 ### Step 2 — TTS via Volcengine BigTTS
 
@@ -89,22 +111,31 @@ Auth: `X-Api-Key: $VOLCENGINE_API_KEY` + `X-Api-Resource-Id: seed-tts-2.0`.
 Default voice: `zh_female_vv_uranus_bigtts`.
 Speech rate range: `[-50, 100]`; `0` = 1.0x, `100` = 2.0x, `-50` = 0.5x.
 
-### Step 3 — Background image via Gemini (nanobanana)
+### Step 3 — Background image via Codex `image_gen` (default) or Gemini (fallback)
 
 **Input**: detailed art-direction prompt, target size.
 **Output**: `output/<project>/intro_bg.png` (1920x1080, center-cropped).
 **Script**: `scripts/image_quick.py`.
 
 ```bash
+# Default: Codex backend (ChatGPT auth, no separate API key, no billing).
 uv run python scripts/image_quick.py \
   --prompt-file output/<project>/intro_image_prompt.txt \
   --output      output/<project>/intro_bg.png \
   --save-raw    output/<project>/intro_bg_raw.png \
   --target-size 1920x1080 \
   --fit cover
+
+# Fallback: Gemini (requires GEMINI_API_KEY with billing enabled).
+uv run python scripts/image_quick.py --backend gemini ...
 ```
 
-Model: `gemini-2.5-flash-image` (default). Output is always 1024x1024; the script center-crops or letterboxes to the target. Prompt should explicitly say "no text, no logos, no watermarks" — Gemini hallucinates text/logos otherwise.
+Codex backend (default) calls `codex exec` with the `image_gen` tool; native output is 1536x1024 (3:2). Gemini backend always returns 1024x1024 (1:1). In both cases the script center-crops or letterboxes to the target. Prompts should explicitly say "no text, no logos, no watermarks" — both models hallucinate text/logos otherwise.
+
+Codex invocation gotchas (validated on `ringnaga`):
+- Do NOT pass `writable_roots`. The default `--sandbox workspace-write` already allows writing inside cwd; adding `writable_roots` once caused an 11+ minute hang.
+- Keep the instruction concise. Multi-step checklists trigger an approval/thinking loop. The script wraps the user prompt with a single-sentence "use image_gen, save to <path>" preamble.
+- First-time setup: `brew install codex && codex login`.
 
 ### Step 4 — Forced-alignment SRT
 
@@ -116,10 +147,11 @@ Model: `gemini-2.5-flash-image` (default). Output is always 1024x1024; the scrip
 uv run video2yt-transcribe \
   --audio  output/<project>/intro.mp3 \
   --script output/<project>/intro_script.txt \
+  --max-block-chars 30 \
   -o       output/<project>/intro.srt
 ```
 
-Text comes from the script (preserves correct terms / punctuation); whisperx provides only timestamps. Splits by Chinese sentence punctuation (`。`, `！`, `？`).
+Text comes from the script (preserves correct terms / punctuation); whisperx provides only timestamps. Splits by Chinese sentence punctuation (`。`, `！`, `？`). Pass `--max-block-chars N` to additionally split sentences longer than N chars at semicolons/commas (`；，、;,`) — useful when the script uses commas/semicolons instead of periods in long sentences (the `ringnaga` script had a 60-char block that ran 12 seconds before this flag existed).
 
 ### Step 5 — Compose the intro MP4
 
@@ -199,14 +231,15 @@ Title format used in this project: `[爐石戰棋]S13 <topic> | <streamer name> 
 
 ### Bonus — YouTube thumbnail
 
-**Input**: bg image (Step 3 style), logo PNG, title text.
+**Input**: bg image (Step 3 style), logo PNG, card art PNG, title text.
 **Output**: `output/<project>/thumbnail.png` (1280x720).
-**Script**: `scripts/thumbnail_compose.py`.
+**Scripts**: `scripts/research_card.py` (download card art), `scripts/thumbnail_compose.py` (compose).
 
-Two-stage approach to dodge Gemini's poor CJK / logo rendering:
+Three-stage approach (the new default `card-tilt-right` layout, locked in on `ringnaga`):
 
-1. Generate a clean dark-fantasy bg via Gemini (no text, no logos in prompt; reserve quiet zones for logo + text).
-2. Pillow composites: real logo top-left + title text in chosen orientation.
+1. Background via image-gen (atmosphere only, NO text/logos/people in prompt — reserve quiet zones top-left for logo, top-right for season text, left for vertical title, right for the card).
+2. Card art via `scripts/research_card.py` (auto-detects BG vs constructed style).
+3. Pillow composites: logo top-left + season top-right + vertical drop-shadow title left + tilted card right.
 
 ```bash
 # 1. Background
@@ -216,18 +249,29 @@ uv run python scripts/image_quick.py \
   --save-raw    output/<project>/thumbnail_bg_raw.png \
   --target-size 1280x720 --fit cover
 
-# 2. Composite
+# 2. Card art (downloads to assets/cards/<slug>_512.png by default)
+uv run python scripts/research_card.py --name "Ring Bearer"
+
+# 3. Composite
 uv run python scripts/thumbnail_compose.py \
   --bg          output/<project>/thumbnail_bg.png \
   --logo        assets/hsbg_logo.png \
-  --title       "<title>" \
-  --orientation vertical-left \
-  --font-size   128 \
-  --title-anchor-x-ratio 0.35 \
+  --card        assets/cards/ring_bearer_512.png \
+  --title       "護戒娜迦" \
+  --season      "S13" \
+  --orientation card-tilt-right \
+  --logo-target-w 280 --logo-margin 20 \
+  --font-size   100 \
+  --title-anchor-x-abs 350 \
   --output      output/<project>/thumbnail.png
 ```
 
-`thumbnail_compose.py` supports two orientations: `horizontal-bottom` (title across the bottom) and `vertical-left` (title stacked vertically, ASCII tokens like "S13" stay horizontal). `--title-anchor-x-ratio` controls horizontal placement (0.25 = center of left half; 0.35 nudges right to clear the logo).
+`thumbnail_compose.py` supports three orientations:
+- `card-tilt-right` (default): logo top-left, season top-right, vertical title with soft drop-shadow on the left, card art tilted right. The "focus object" makes the thumbnail read at a glance.
+- `vertical-left` (legacy): vertical title stacked left, no card. Auto-shrinks font when overflow.
+- `horizontal-bottom` (legacy): title across bottom.
+
+`research_card.py` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL) and downloads the 512px art from `art.hearthstonejson.com/v1/{render|bgs}/latest/enUS/512x/<id>.png`. `--style auto` (default) picks `bgs` for BATTLEGROUNDS-set cards, `render` for constructed.
 
 ### Step 9 — Upload to YouTube
 
@@ -257,7 +301,7 @@ Behavior:
 OAuth gotchas:
 
 - App in "Testing" status only allows allow-listed test users (add at OAuth consent screen → test users).
-- Test-mode tokens expire in 7 days; either re-auth or publish the OAuth app to production.
+- Test-mode refresh tokens expire after 7 days. **`get_credentials` auto-recovers**: if `creds.refresh()` raises `RefreshError`, the cached `youtube_token.json` is deleted and `run_local_server` is invoked to mint a fresh token. The browser will pop again on day 8+.
 - Brand channels require signing in to that brand account during the OAuth consent flow.
 
 ## 5. Scripts added by this workflow
@@ -267,8 +311,9 @@ All under `scripts/` (untracked by default — they're project-specific tooling,
 | File | Purpose | Key deps |
 |---|---|---|
 | `scripts/tts_quick.py` | Volcengine BigTTS HTTP Chunked client | `requests`, `python-dotenv` |
-| `scripts/image_quick.py` | Gemini image-gen + crop/letterbox to target size | `google-genai`, `Pillow`, `python-dotenv` |
-| `scripts/thumbnail_compose.py` | Pillow composite: bg + logo + horizontal/vertical title | `Pillow` |
+| `scripts/image_quick.py` | Image-gen via Codex (default) or Gemini, then crop/letterbox to target | `google-genai`, `Pillow`, `python-dotenv`, `codex` CLI |
+| `scripts/thumbnail_compose.py` | Pillow composite: bg + logo + (season + tilted card +) vertical/horizontal title with auto-shrink | `Pillow` |
+| `scripts/research_card.py` | Look up Hearthstone card on hearthstonejson.com and download 512px art | `requests` |
 | `scripts/youtube_upload.py` | YouTube Data API v3 OAuth + resumable upload + thumbnail set | `google-api-python-client`, `google-auth-oauthlib`, `google-auth-httplib2` |
 
 `pyproject.toml` got these new deps added during this session:
@@ -286,16 +331,56 @@ All under `scripts/` (untracked by default — they're project-specific tooling,
 |---|---|---|
 | `compose -shortest` bug | **Fixed** in this session | `compose.render` now probes audio duration and adds `-t <audio_duration>` as an output-side clamp. |
 | Promote `scripts/*.py` to CLIs | Pending | User originally chose option (A) — formalize as `video2yt-tts`, `video2yt-image`, `video2yt-thumbnail`, `video2yt-upload` with TDD. Current scripts are working but lack tests and are not installed as console scripts. |
-| Image fit aspect ratio | Pending | Gemini outputs 1024x1024; `cover` crop discards ~44% vertically when going to 16:9. Could try prompting "16:9 widescreen" + accept Gemini's best effort, or use a model that respects aspect ratio. |
-| Thumbnail font auto-fit | Pending | Vertical-left mode silently overflows if `font_size × tokens × line_spacing > target_h`. Should auto-shrink or warn. |
+| Image fit aspect ratio | Improved (Codex 3:2) | Gemini outputs 1024x1024 (44% vertical loss to 16:9). Codex `image_gen` outputs 1536x1024 (3:2 — only ~16% loss). The `image_quick.py --backend codex` default benefits from this; can switch back via `--backend gemini`. |
+| Thumbnail font auto-fit | **Fixed** | Both `vertical-left` and `card-tilt-right` orientations now auto-shrink the title font in 4-pt steps when the stacked rows would overflow the available height. Logged to stderr when shrink fires. |
 | OAuth app publishing | Pending (user-side) | While in Testing status, tokens expire in 7 days. To upload reliably long-term, publish the OAuth consent screen (or rotate tokens). |
 
-## 7. Verification — what passed on the back2back project
+## 7. Verification log — projects that have shipped through this pipeline
 
-- `intro.mp3` 21.89s → `intro.mp4` 21.97s (Δ < 0.1s ✓)
-- Final `back2back_final.mp4`: 21:55 (1315.5s), 1920x1080 30fps h264 + aac, 847 MB
-- Chapters file generated correctly with three entries (00:00 / 00:21 / 03:03)
-- 231 pytest tests pass with the compose fix included
-- YouTube upload succeeded to channel `UCEgIrCo0pR6DyyrXuSn3wBg`, public, with thumbnail
-  - Video ID: `DuglxlhKbzw` — https://www.youtube.com/watch?v=DuglxlhKbzw
-  - Total upload time: 8m 24s for 847 MB (~1.7 MB/s effective)
+| Project | Date | Video ID | Notes |
+|---|---|---|---|
+| `back2back` | 2026-04-17 | [`DuglxlhKbzw`](https://www.youtube.com/watch?v=DuglxlhKbzw) | First end-to-end run. `intro.mp3` 21.89s → `intro.mp4` 21.97s (Δ < 0.1s). Final 21:55, 847 MB. 8m 24s upload. Originated the `compose -shortest` fix. |
+| `ringnaga` | 2026-05-02 | [`hP27PqfL6zY`](https://www.youtube.com/watch?v=hP27PqfL6zY) | First `card-tilt-right` thumbnail. Validated Codex `image_gen` as Gemini fallback. Surfaced 6 workflow improvements (term research, BG glossary, thumbnail formalization, transcribe multi-separator, OAuth auto-refresh, image backend), all batched after ship and folded into this spec on 2026-05-03. |
+
+## 8. Per-project workflow template
+
+Every new project starts by creating `output/<project>/` and copying this checklist into a project-local `WORKFLOW_NOTES.md`. Track step status as you go, and **log every awkward bit / spec gap into the "Issues to fix later" section without breaking flow** — fix in a batch after the video ships.
+
+```markdown
+# <Project> Workflow Notes
+
+**Project**: `<project>` (<one-line topic>)
+**Channel**: `UCEgIrCo0pR6DyyrXuSn3wBg`
+**Started**: <YYYY-MM-DD>
+
+Running through `docs/superpowers/specs/2026-04-18-video-production-workflow.md`.
+Anything that should be fixed in the scripts / CLIs / spec gets logged below as
+we hit it. Address them in a batch after the video ships.
+
+## Step status
+
+- [ ] Step 1 — write intro script (term-research first if BG topic; see spec Step 1)
+- [ ] Step 2 — TTS via `tts_quick.py`
+- [ ] Step 3 — bg image via `image_quick.py` (Codex backend default)
+- [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
+- [ ] Step 5 — compose intro via `video2yt-compose`
+- [ ] Step 6 — burn N Bilibili segments via `video2yt`
+- [ ] Step 7 — merge via `video2yt-merge`
+- [ ] Bonus — thumbnail (`research_card.py` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
+- [ ] Step 8 — write `youtube_metadata.{txt,json}`
+- [ ] Step 9 — upload via `youtube_upload.py`
+
+## Issues to fix later
+
+<!-- Format per item:
+### N. <short title>
+- **Step**: which workflow step / which script
+- **Symptom**: what went wrong / what was awkward
+- **Proposed fix**: what to change
+-->
+```
+
+After the video ships:
+1. Review the per-project `WORKFLOW_NOTES.md` "Issues to fix later" section.
+2. Implement fixes in the scripts / CLIs / this spec, in priority order (blockers > frequency > cost).
+3. Once all items in a project's notes are addressed, the file can be deleted (its lessons live in the spec now). Keep it temporarily if a future project still relies on quirks documented there.

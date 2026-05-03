@@ -71,6 +71,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "On macOS, CPU is usually the only reliable option."
         ),
     )
+    parser.add_argument(
+        "--max-block-chars",
+        type=int,
+        default=0,
+        help=(
+            "If >0, split any sentence longer than this many characters at "
+            "secondary punctuation (；，、;,). Useful when the script uses "
+            "semicolons/commas instead of full stops in long sentences. "
+            "Default: 0 (disabled — split on 。！？ only)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -102,6 +113,7 @@ def run(args: argparse.Namespace) -> Path:
         language=args.language,
         model_name=args.model,
         device=args.device,
+        max_block_chars=args.max_block_chars,
     )
 
     output_path = args.output if args.output else args.audio.with_suffix(".srt")
