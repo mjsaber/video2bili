@@ -285,9 +285,21 @@ def render(inputs: ComposeInputs, output_path: Path) -> Path:
     debugging. ffmpeg still runs with ``cwd=<srt.parent>`` so the
     ``subtitles`` filter can reference the ASS file by basename (the same
     escaping trick used in ``burn.py``).
+
+    ffmpeg's ``-shortest`` is unreliable when the video is a looped still
+    image: the audio AAC encoder flushes a tail buffer that drags the
+    container duration past the audio, so the output ends up several
+    seconds longer than the audio. We probe the audio up front and pass
+    ``-t <audio_duration>`` as an output-side clamp to guarantee the
+    container duration matches the audio.
     """
+    from video2yt import validate
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     work_dir = inputs.srt_path.parent
+
+    audio_info = validate.probe(inputs.audio_path)
+    audio_duration = audio_info.duration
 
     srt_text = inputs.srt_path.read_text(encoding="utf-8")
     ass_text = srt_to_ass(
@@ -324,6 +336,7 @@ def render(inputs: ComposeInputs, output_path: Path) -> Path:
         "-c:a", "aac",
         "-b:a", "192k",
         "-shortest",
+        "-t", f"{audio_duration:.3f}",
         str(output_path.resolve()),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=work_dir)

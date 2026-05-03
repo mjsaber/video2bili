@@ -2637,6 +2637,14 @@ def test_render_builds_correct_ffmpeg_command(tmp_path, monkeypatch):
         return MagicMock(returncode=0)
     monkeypatch.setattr("video2yt.compose.subprocess.run", fake_run)
 
+    # Mock validate.probe so render() doesn't try to ffprobe the fake audio.
+    from video2yt import validate as _validate
+    fake_info = _validate.MediaInfo(
+        duration=12.345, width=0, height=0,
+        has_video=False, has_audio=True, vcodec="", acodec="mp3", size_bytes=10,
+    )
+    monkeypatch.setattr("video2yt.validate.probe", lambda p: fake_info)
+
     inputs = compose.ComposeInputs(
         audio_path=audio,
         image_path=image,
@@ -2687,6 +2695,12 @@ def test_render_builds_correct_ffmpeg_command(tmp_path, monkeypatch):
     assert cmd[pix_idx + 1] == "yuv420p"
     assert "aac" in cmd
     assert "-shortest" in cmd
+    # -t clamps output to the probed audio duration (workaround for -shortest
+    # not stopping the looped video stream when AAC flushes its tail).
+    assert "-t" in cmd
+    t_idx = cmd.index("-t")
+    assert cmd[t_idx + 1] == "12.345"
+    assert t_idx > i_indexes[1]  # -t must come after inputs (output option)
     # cwd is the srt's parent
     assert captured["kwargs"]["cwd"] == work_dir
 
