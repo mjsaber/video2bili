@@ -14,6 +14,7 @@ uv run video2yt "<url>" --preview-seconds 60               # first 60s
 uv run video2yt "<url>" --cut 30~60 --cut 2:15~2:45        # remove ranges
 uv run video2yt "<url>" --speed 1.5                        # 1.5x playback
 uv run video2yt "<url>" --font-size 48 --codec h265        # style overrides
+uv run video2yt "<url>" -o output/<project>/                # nest into per-project folder (recommended)
 uv run python -m video2yt "<url>"                          # run as module
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # compose from stills
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --title "T"   # concat + progress bar + loudnorm + chapters
@@ -25,6 +26,10 @@ uv add <pkg>                                               # add a dep (NEVER ed
 
 - `ffmpeg` and `ffprobe` must be in PATH (system install, not Python package). Check with `shutil.which('ffmpeg')`.
 - video2yt downloads the raw danmaku XML via `yt-dlp --write-subs --sub-langs danmaku` and converts to ASS in-process using `biliass.convert_to_ass`, so the height and font_size are known before conversion. The `yt-dlp-danmaku` plugin is no longer used as a postprocessor (refactored away in `aa1d91c`); we still depend on the `biliass` Python package that ships with it.
+
+## Project folder convention
+
+When working on a multi-step video project (intro + multiple burnt segments + final merge), pass `-o output/<project>/` to every `video2yt` / `video2yt-compose` / `video2yt-merge` invocation so all artifacts land under one folder. Example: `output/back2back/` contains `intro.mp4`, segment subfolders, the final merged MP4, the YouTube thumbnail, and any scratch files. This keeps unrelated projects isolated and makes cleanup easy.
 
 ## Known gotchas
 
