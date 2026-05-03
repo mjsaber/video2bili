@@ -3706,3 +3706,338 @@ def test_merge_cli_run_happy_path_default_output_in_first_segment_dir(tmp_path, 
     # Should be in seg_dir with sanitized title filename
     assert result.parent == seg_dir
     assert result.name == "Test Merge.mp4"
+
+
+# =========================================================================
+# video2yt-research-card tests
+# =========================================================================
+
+
+def _bg_card(name="Ring Bearer", card_id="BG34_921", **extra):
+    """Tiny factory for fake BG card dicts."""
+    return {"name": name, "id": card_id, "set": "BATTLEGROUNDS", **extra}
+
+
+def _constructed_card(name="Fireball", card_id="EX1_277", **extra):
+    return {"name": name, "id": card_id, "set": "EXPERT1", **extra}
+
+
+class _FakeResponse:
+    def __init__(self, *, status_code=200, content=b"", json_data=None):
+        self.status_code = status_code
+        self.content = content
+        self._json = json_data
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            from requests.exceptions import HTTPError
+            raise HTTPError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._json
+
+
+def test_research_card_slugify_basic():
+    from video2yt.research_card import slugify
+    assert slugify("Ring Bearer") == "ring_bearer"
+
+
+def test_research_card_slugify_punctuation():
+    from video2yt.research_card import slugify
+    assert slugify("M.T. Smyth!") == "m_t_smyth"
+
+
+def test_research_card_slugify_strips_outer_underscores():
+    from video2yt.research_card import slugify
+    assert slugify("---hello---") == "hello"
+
+
+def test_research_card_is_battlegrounds_set():
+    from video2yt.research_card import is_battlegrounds
+    assert is_battlegrounds({"set": "BATTLEGROUNDS"}) is True
+
+
+def test_research_card_is_battlegrounds_techlevel():
+    from video2yt.research_card import is_battlegrounds
+    assert is_battlegrounds({"techLevel": 6, "set": "OTHER"}) is True
+
+
+def test_research_card_is_battlegrounds_constructed():
+    from video2yt.research_card import is_battlegrounds
+    assert is_battlegrounds(_constructed_card()) is False
+
+
+def test_research_card_pick_best_single_candidate():
+    from video2yt.research_card import pick_best
+    c = _bg_card()
+    assert pick_best([c]) is c
+
+
+def test_research_card_pick_best_prefers_battlegrounds():
+    from video2yt.research_card import pick_best
+    bg = _bg_card()
+    cons = _constructed_card("Ring Bearer", "OG_001")
+    result = pick_best([cons, bg])
+    assert result is bg
+
+
+def test_research_card_pick_best_drops_golden_variant():
+    from video2yt.research_card import pick_best
+    plain = _bg_card(card_id="BG34_921")
+    golden = _bg_card(card_id="BG34_921_G")
+    assert pick_best([plain, golden]) is plain
+    assert pick_best([golden, plain]) is plain
+
+
+def test_research_card_pick_best_returns_none_when_still_ambiguous():
+    from video2yt.research_card import pick_best
+    a = _bg_card("Card A", "BG_A")
+    b = _bg_card("Card B", "BG_B")
+    assert pick_best([a, b]) is None
+
+
+def test_research_card_find_exact_match():
+    from video2yt.research_card import find_card
+    cards = [_bg_card("Ring Bearer", "BG34_921"), _bg_card("Other", "BG34_999")]
+    assert find_card(cards, "Ring Bearer")["id"] == "BG34_921"
+
+
+def test_research_card_find_case_insensitive():
+    from video2yt.research_card import find_card
+    cards = [_bg_card("Ring Bearer", "BG34_921")]
+    assert find_card(cards, "ring bearer")["id"] == "BG34_921"
+
+
+def test_research_card_find_substring_match():
+    from video2yt.research_card import find_card
+    cards = [_bg_card("Ring Bearer", "BG34_921"), _bg_card("Frostbite", "BG_OTHER")]
+    assert find_card(cards, "ring bear")["id"] == "BG34_921"
+
+
+def test_research_card_find_no_match_raises():
+    from video2yt.research_card import find_card
+    cards = [_bg_card("Ring Bearer", "BG34_921")]
+    with pytest.raises(ValueError, match="no card found"):
+        find_card(cards, "Nonexistent")
+
+
+def test_research_card_find_ambiguous_after_tiebreak_raises():
+    from video2yt.research_card import find_card
+    cards = [_bg_card("Card A", "BG_A"), _bg_card("Card B", "BG_B")]
+    with pytest.raises(ValueError, match="ambiguous"):
+        find_card(cards, "Card")
+
+
+def test_research_card_load_cards_uses_fresh_cache(tmp_path, monkeypatch):
+    from video2yt import research_card
+    cache = tmp_path / "cards.json"
+    cache.write_text(json.dumps([{"name": "Cached", "id": "X1"}]), encoding="utf-8")
+    # Make the cache fresh (mtime is now by default).
+
+    def boom(*a, **kw):
+        raise AssertionError("requests.get should not be called when cache is fresh")
+    monkeypatch.setattr("video2yt.research_card.requests.get", boom)
+
+    out = research_card.load_cards(cache_path=cache)
+    assert out == [{"name": "Cached", "id": "X1"}]
+
+
+def test_research_card_load_cards_fetches_when_cache_stale(tmp_path, monkeypatch):
+    import os
+    from video2yt import research_card
+    cache = tmp_path / "cards.json"
+    cache.write_text(json.dumps([{"name": "Old", "id": "OLD"}]), encoding="utf-8")
+    # Backdate to 8 days old (TTL is 7 days).
+    old = research_card.CACHE_TTL_SECS + 86400
+    os.utime(cache, (cache.stat().st_atime - old, cache.stat().st_mtime - old))
+
+    fresh_payload = [{"name": "Fresh", "id": "NEW"}]
+    fresh_bytes = json.dumps(fresh_payload).encode("utf-8")
+    monkeypatch.setattr(
+        "video2yt.research_card.requests.get",
+        lambda url, timeout: _FakeResponse(content=fresh_bytes, json_data=fresh_payload),
+    )
+
+    out = research_card.load_cards(cache_path=cache)
+    assert out == fresh_payload
+    assert json.loads(cache.read_text(encoding="utf-8")) == fresh_payload
+
+
+def test_research_card_load_cards_no_cache_flag_forces_fetch(tmp_path, monkeypatch):
+    from video2yt import research_card
+    cache = tmp_path / "cards.json"
+    cache.write_text(json.dumps([{"name": "Cached", "id": "X"}]), encoding="utf-8")
+
+    fresh_payload = [{"name": "Fresh", "id": "NEW"}]
+    fresh_bytes = json.dumps(fresh_payload).encode("utf-8")
+    monkeypatch.setattr(
+        "video2yt.research_card.requests.get",
+        lambda url, timeout: _FakeResponse(content=fresh_bytes, json_data=fresh_payload),
+    )
+
+    out = research_card.load_cards(no_cache=True, cache_path=cache)
+    assert out == fresh_payload
+
+
+def test_research_card_download_art_writes_bytes(tmp_path, monkeypatch):
+    from video2yt import research_card
+    monkeypatch.setattr(
+        "video2yt.research_card.requests.get",
+        lambda url, timeout: _FakeResponse(content=b"PNG_BYTES_HERE"),
+    )
+    out = tmp_path / "subdir" / "card.png"
+    research_card.download_art("BG34_921", "bgs", out)
+    assert out.read_bytes() == b"PNG_BYTES_HERE"
+
+
+def test_research_card_download_art_404_helpful_error(tmp_path, monkeypatch):
+    from video2yt import research_card
+    monkeypatch.setattr(
+        "video2yt.research_card.requests.get",
+        lambda url, timeout: _FakeResponse(status_code=404),
+    )
+    out = tmp_path / "card.png"
+    with pytest.raises(ValueError, match="art not found"):
+        research_card.download_art("BG34_921", "render", out)
+    assert not out.exists()
+
+
+def test_research_card_cli_parse_args_defaults():
+    from video2yt import research_card_cli
+    args = research_card_cli.parse_args(["--name", "Ring Bearer"])
+    assert args.name == "Ring Bearer"
+    assert args.id is None
+    assert args.style == "auto"
+    assert args.output is None
+    assert args.no_cache is False
+
+
+def test_research_card_cli_parse_args_id_path():
+    from video2yt import research_card_cli
+    args = research_card_cli.parse_args(["--id", "BG34_921", "--style", "render"])
+    assert args.id == "BG34_921"
+    assert args.style == "render"
+
+
+def test_research_card_cli_parse_args_requires_name_or_id():
+    from video2yt import research_card_cli
+    with pytest.raises(SystemExit):
+        research_card_cli.parse_args([])
+
+
+def test_research_card_cli_run_by_id_skips_metadata(tmp_path, monkeypatch):
+    from video2yt import research_card_cli
+    fetched: list[bool] = []
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.load_cards",
+        lambda **kw: fetched.append(True) or [],
+    )
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.download_art",
+        lambda card_id, style, output: output.parent.mkdir(parents=True, exist_ok=True) or output.write_bytes(b"X"),
+    )
+    out = tmp_path / "card.png"
+    args = research_card_cli.parse_args(["--id", "BG34_921", "-o", str(out)])
+    result = research_card_cli.run(args)
+    assert result == out
+    assert out.exists()
+    assert fetched == [], "load_cards should NOT be called when --id is used"
+
+
+def test_research_card_cli_run_by_name_full_path(tmp_path, monkeypatch):
+    from video2yt import research_card_cli
+    fake_cards = [_bg_card("Ring Bearer", "BG34_921")]
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.load_cards",
+        lambda **kw: fake_cards,
+    )
+    captured: dict = {}
+    def fake_dl(card_id, style, output):
+        captured["card_id"] = card_id
+        captured["style"] = style
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"PNG")
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.download_art",
+        fake_dl,
+    )
+    out = tmp_path / "card.png"
+    args = research_card_cli.parse_args(["--name", "Ring Bearer", "-o", str(out)])
+    research_card_cli.run(args)
+    assert captured == {"card_id": "BG34_921", "style": "bgs"}
+    assert out.read_bytes() == b"PNG"
+
+
+def test_research_card_cli_run_auto_style_render_for_constructed(tmp_path, monkeypatch):
+    from video2yt import research_card_cli
+    fake_cards = [_constructed_card("Fireball", "EX1_277")]
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.load_cards",
+        lambda **kw: fake_cards,
+    )
+    captured: dict = {}
+    def fake_dl(card_id, style, output):
+        captured["style"] = style
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"X")
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.download_art",
+        fake_dl,
+    )
+    args = research_card_cli.parse_args([
+        "--name", "Fireball", "-o", str(tmp_path / "f.png"),
+    ])
+    research_card_cli.run(args)
+    assert captured["style"] == "render"
+
+
+def test_research_card_cli_run_explicit_style_override(tmp_path, monkeypatch):
+    from video2yt import research_card_cli
+    fake_cards = [_bg_card("Ring Bearer", "BG34_921")]
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.load_cards",
+        lambda **kw: fake_cards,
+    )
+    captured: dict = {}
+    def fake_dl(card_id, style, output):
+        captured["style"] = style
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"X")
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.download_art",
+        fake_dl,
+    )
+    args = research_card_cli.parse_args([
+        "--name", "Ring Bearer", "--style", "render", "-o", str(tmp_path / "x.png"),
+    ])
+    research_card_cli.run(args)
+    assert captured["style"] == "render"
+
+
+def test_research_card_cli_main_returns_1_on_value_error(tmp_path, monkeypatch):
+    from video2yt import research_card_cli
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.load_cards",
+        lambda **kw: [],
+    )
+    rc = research_card_cli.main(["--name", "Nonexistent", "-o", str(tmp_path / "x.png")])
+    assert rc == 1
+
+
+def test_research_card_cli_default_output_uses_assets_cards(tmp_path, monkeypatch):
+    from video2yt import research_card_cli
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.load_cards",
+        lambda **kw: [_bg_card("Ring Bearer", "BG34_921")],
+    )
+    captured: dict = {}
+    def fake_dl(card_id, style, output):
+        captured["output"] = output
+    monkeypatch.setattr(
+        "video2yt.research_card_cli.research_card.download_art",
+        fake_dl,
+    )
+    monkeypatch.chdir(tmp_path)
+    args = research_card_cli.parse_args(["--name", "Ring Bearer"])
+    research_card_cli.run(args)
+    assert captured["output"] == Path("assets/cards") / "ring_bearer_512.png"

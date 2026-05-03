@@ -233,12 +233,12 @@ Title format used in this project: `[爐石戰棋]S13 <topic> | <streamer name> 
 
 **Input**: bg image (Step 3 style), logo PNG, card art PNG, title text.
 **Output**: `output/<project>/thumbnail.png` (1280x720).
-**Scripts**: `scripts/research_card.py` (download card art), `scripts/thumbnail_compose.py` (compose).
+**Tools**: `video2yt-research-card` (download card art), `scripts/thumbnail_compose.py` (compose).
 
 Three-stage approach (the new default `card-tilt-right` layout, locked in on `ringnaga`):
 
 1. Background via image-gen (atmosphere only, NO text/logos/people in prompt — reserve quiet zones top-left for logo, top-right for season text, left for vertical title, right for the card).
-2. Card art via `scripts/research_card.py` (auto-detects BG vs constructed style).
+2. Card art via `video2yt-research-card` (auto-detects BG vs constructed style).
 3. Pillow composites: logo top-left + season top-right + vertical drop-shadow title left + tilted card right.
 
 ```bash
@@ -250,7 +250,7 @@ uv run python scripts/image_quick.py \
   --target-size 1280x720 --fit cover
 
 # 2. Card art (downloads to assets/cards/<slug>_512.png by default)
-uv run python scripts/research_card.py --name "Ring Bearer"
+uv run video2yt-research-card --name "Ring Bearer"
 
 # 3. Composite
 uv run python scripts/thumbnail_compose.py \
@@ -271,7 +271,7 @@ uv run python scripts/thumbnail_compose.py \
 - `vertical-left` (legacy): vertical title stacked left, no card. Auto-shrinks font when overflow.
 - `horizontal-bottom` (legacy): title across bottom.
 
-`research_card.py` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL) and downloads the 512px art from `art.hearthstonejson.com/v1/{render|bgs}/latest/enUS/512x/<id>.png`. `--style auto` (default) picks `bgs` for BATTLEGROUNDS-set cards, `render` for constructed.
+`video2yt-research-card` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL) and downloads the 512px art from `art.hearthstonejson.com/v1/{render|bgs}/latest/enUS/512x/<id>.png`. `--style auto` (default) picks `bgs` for BATTLEGROUNDS-set cards, `render` for constructed.
 
 ### Step 9 — Upload to YouTube
 
@@ -313,7 +313,7 @@ All under `scripts/` (untracked by default — they're project-specific tooling,
 | `scripts/tts_quick.py` | Volcengine BigTTS HTTP Chunked client | `requests`, `python-dotenv` |
 | `scripts/image_quick.py` | Image-gen via Codex (default) or Gemini, then crop/letterbox to target | `google-genai`, `Pillow`, `python-dotenv`, `codex` CLI |
 | `scripts/thumbnail_compose.py` | Pillow composite: bg + logo + (season + tilted card +) vertical/horizontal title with auto-shrink | `Pillow` |
-| `scripts/research_card.py` | Look up Hearthstone card on hearthstonejson.com and download 512px art | `requests` |
+| `video2yt-research-card` (`src/video2yt/research_card{,_cli}.py`) | Look up Hearthstone card on hearthstonejson.com and download 512px art | `requests` |
 | `scripts/youtube_upload.py` | YouTube Data API v3 OAuth + resumable upload + thumbnail set | `google-api-python-client`, `google-auth-oauthlib`, `google-auth-httplib2` |
 
 `pyproject.toml` got these new deps added during this session:
@@ -366,7 +366,7 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 5 — compose intro via `video2yt-compose`
 - [ ] Step 6 — burn N Bilibili segments via `video2yt`
 - [ ] Step 7 — merge via `video2yt-merge`
-- [ ] Bonus — thumbnail (`research_card.py` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
+- [ ] Bonus — thumbnail (`video2yt-research-card` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`
 - [ ] Step 9 — upload via `youtube_upload.py`
 
