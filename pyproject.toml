@@ -28,6 +28,7 @@ video2yt-compose = "video2yt.compose_cli:main"
 video2yt-transcribe = "video2yt.transcribe_cli:main"
 video2yt-merge = "video2yt.merge_cli:main"
 video2yt-research-card = "video2yt.research_card_cli:main"
+video2yt-thumbnail = "video2yt.thumbnail_cli:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -4041,3 +4041,130 @@ def test_research_card_cli_default_output_uses_assets_cards(tmp_path, monkeypatc
     args = research_card_cli.parse_args(["--name", "Ring Bearer"])
     research_card_cli.run(args)
     assert captured["output"] == Path("assets/cards") / "ring_bearer_512.png"
+
+
+# =========================================================================
+# video2yt-thumbnail tests
+# =========================================================================
+
+
+def test_thumbnail_tokenize_pure_cjk():
+    from video2yt.thumbnail import tokenize_for_vertical
+    assert tokenize_for_vertical("最强阵容") == ["最", "强", "阵", "容"]
+
+
+def test_thumbnail_tokenize_ascii_cluster_stays_together():
+    from video2yt.thumbnail import tokenize_for_vertical
+    assert tokenize_for_vertical("S13测试") == ["S13", "测", "试"]
+
+
+def test_thumbnail_tokenize_drops_spaces_and_mixes():
+    from video2yt.thumbnail import tokenize_for_vertical
+    assert tokenize_for_vertical("  S13  最强 1080P ") == ["S13", "最", "强", "1080P"]
+
+
+def test_thumbnail_render_raises_when_card_missing_for_card_tilt():
+    from pathlib import Path as _P
+
+    from video2yt.thumbnail import render_thumbnail
+    with pytest.raises(ValueError, match="--card is required"):
+        render_thumbnail(
+            bg_path=_P("/nonexistent/bg.png"),
+            logo_path=_P("/nonexistent/logo.png"),
+            title="t",
+            output_path=_P("/nonexistent/out.png"),
+            orientation="card-tilt-right",
+            card_path=None,
+        )
+
+
+def test_thumbnail_render_raises_on_unknown_orientation():
+    from pathlib import Path as _P
+
+    from video2yt.thumbnail import render_thumbnail
+    with pytest.raises(ValueError, match="unknown orientation"):
+        render_thumbnail(
+            bg_path=_P("/nonexistent/bg.png"),
+            logo_path=_P("/nonexistent/logo.png"),
+            title="t",
+            output_path=_P("/nonexistent/out.png"),
+            orientation="diagonal-rainbow",
+        )
+
+
+def test_thumbnail_cli_parse_args_defaults():
+    from video2yt import thumbnail_cli
+    args = thumbnail_cli.parse_args([
+        "--bg", "bg.png", "--logo", "logo.png",
+        "--title", "测试", "-o", "out.png",
+    ])
+    assert args.orientation == "card-tilt-right"
+    assert args.target_size == "1280x720"
+    assert args.font_size == 128
+    assert args.card is None
+
+
+def test_thumbnail_cli_parse_args_orientation_choice_validated():
+    from video2yt import thumbnail_cli
+    with pytest.raises(SystemExit):
+        thumbnail_cli.parse_args([
+            "--bg", "bg.png", "--logo", "logo.png",
+            "--title", "t", "-o", "o.png",
+            "--orientation", "diagonal-rainbow",
+        ])
+
+
+def test_thumbnail_cli_parse_args_required_flags():
+    from video2yt import thumbnail_cli
+    with pytest.raises(SystemExit):
+        thumbnail_cli.parse_args([])
+
+
+def test_thumbnail_cli_run_passes_args_to_render(monkeypatch, tmp_path):
+    from video2yt import thumbnail_cli
+    captured: dict = {}
+
+    def fake_render(**kw):
+        captured.update(kw)
+
+    monkeypatch.setattr("video2yt.thumbnail_cli.thumbnail.render_thumbnail", fake_render)
+    out = tmp_path / "thumb.png"
+    args = thumbnail_cli.parse_args([
+        "--bg", "bg.png", "--logo", "logo.png",
+        "--title", "S13最强", "-o", str(out),
+        "--card", "card.png", "--season", "S13",
+        "--target-size", "1920x1080",
+    ])
+    result = thumbnail_cli.run(args)
+    assert result == out
+    assert captured["title"] == "S13最强"
+    assert captured["target_w"] == 1920
+    assert captured["target_h"] == 1080
+    assert captured["orientation"] == "card-tilt-right"
+    assert captured["season_text"] == "S13"
+
+
+def test_thumbnail_cli_main_returns_1_on_value_error(monkeypatch, tmp_path):
+    from video2yt import thumbnail_cli
+
+    def boom(**kw):
+        raise ValueError("boom")
+
+    monkeypatch.setattr("video2yt.thumbnail_cli.thumbnail.render_thumbnail", boom)
+    rc = thumbnail_cli.main([
+        "--bg", "bg.png", "--logo", "logo.png",
+        "--title", "t", "-o", str(tmp_path / "o.png"),
+        "--card", "c.png",
+    ])
+    assert rc == 1
+
+
+def test_thumbnail_cli_main_returns_0_on_success(monkeypatch, tmp_path):
+    from video2yt import thumbnail_cli
+    monkeypatch.setattr("video2yt.thumbnail_cli.thumbnail.render_thumbnail", lambda **kw: None)
+    rc = thumbnail_cli.main([
+        "--bg", "bg.png", "--logo", "logo.png",
+        "--title", "t", "-o", str(tmp_path / "o.png"),
+        "--card", "c.png",
+    ])
+    assert rc == 0
