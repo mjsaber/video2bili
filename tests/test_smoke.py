@@ -4341,3 +4341,191 @@ def test_tts_cli_main_returns_0_on_success(monkeypatch, tmp_path):
     )
     rc = tts_cli.main(["--text", "x", "-o", str(tmp_path / "o.mp3")])
     assert rc == 0
+
+
+# =========================================================================
+# video2yt-image tests
+# =========================================================================
+
+
+def test_image_parse_size_basic():
+    from video2yt.image_gen import parse_size
+    assert parse_size("1920x1080") == (1920, 1080)
+    assert parse_size("512X512") == (512, 512)
+
+
+def test_image_fit_to_size_cover_crops_landscape_to_square():
+    from PIL import Image as _Image
+
+    from video2yt.image_gen import fit_to_size
+    src = _Image.new("RGB", (200, 100), (255, 0, 0))
+    out = fit_to_size(src, 50, 50, "cover")
+    assert out.size == (50, 50)
+
+
+def test_image_fit_to_size_contain_letterboxes():
+    from PIL import Image as _Image
+
+    from video2yt.image_gen import fit_to_size
+    src = _Image.new("RGB", (200, 100), (255, 0, 0))
+    out = fit_to_size(src, 100, 100, "contain")
+    assert out.size == (100, 100)
+    # Top row is black padding (letterbox), middle row is the resized image (red).
+    assert out.getpixel((50, 5)) == (0, 0, 0)
+    assert out.getpixel((50, 50)) == (255, 0, 0)
+
+
+def test_image_fit_to_size_unknown_mode_raises():
+    from PIL import Image as _Image
+
+    from video2yt.image_gen import fit_to_size
+    src = _Image.new("RGB", (10, 10), (0, 0, 0))
+    with pytest.raises(ValueError, match="unknown fit mode"):
+        fit_to_size(src, 10, 10, "stretch")
+
+
+def test_image_generate_codex_invokes_codex_exec(monkeypatch, tmp_path):
+    from PIL import Image as _Image
+
+    from video2yt import image_gen as ig
+
+    captured: dict = {}
+
+    def fake_run(cmd, check=None, timeout=None):
+        # Recreate the contract: codex agent saved a PNG at tmpdir/image.png
+        # The tmpdir lives inside cmd as `--cd <path>`.
+        cd_idx = cmd.index("--cd") + 1
+        cwd = Path(cmd[cd_idx])
+        (cwd / "image.png").write_bytes(_PIL_PNG_BYTES())
+        captured["cmd"] = cmd
+        captured["timeout"] = timeout
+        return None
+
+    monkeypatch.setattr("video2yt.image_gen.subprocess.run", fake_run)
+    img = ig.generate_codex("a cat", codex_size="1024x1024", timeout=42)
+    assert img.size == (1, 1)
+    assert "codex" == captured["cmd"][0]
+    assert captured["timeout"] == 42
+    assert "1024x1024" in " ".join(captured["cmd"])
+
+
+def test_image_generate_codex_raises_when_output_missing(monkeypatch):
+    from video2yt import image_gen as ig
+
+    monkeypatch.setattr("video2yt.image_gen.subprocess.run", lambda *a, **kw: None)
+    with pytest.raises(RuntimeError, match="does not exist"):
+        ig.generate_codex("prompt")
+
+
+def test_image_generate_codex_raises_on_timeout(monkeypatch):
+    import subprocess as _sp
+
+    from video2yt import image_gen as ig
+
+    def boom(cmd, check=None, timeout=None):
+        raise _sp.TimeoutExpired(cmd=cmd, timeout=timeout)
+
+    monkeypatch.setattr("video2yt.image_gen.subprocess.run", boom)
+    with pytest.raises(RuntimeError, match="timed out"):
+        ig.generate_codex("prompt", timeout=5)
+
+
+def test_image_cli_parse_args_defaults():
+    from video2yt import image_gen_cli
+    args = image_gen_cli.parse_args(["--prompt", "p", "-o", "o.png"])
+    assert args.backend == "codex"
+    assert args.fit == "cover"
+    assert args.target_size == "1920x1080"
+
+
+def test_image_cli_parse_args_requires_prompt():
+    from video2yt import image_gen_cli
+    with pytest.raises(SystemExit):
+        image_gen_cli.parse_args(["-o", "o.png"])
+
+
+def test_image_cli_run_gemini_errors_when_api_key_missing(monkeypatch, tmp_path):
+    from video2yt import image_gen_cli
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr("video2yt.image_gen_cli.load_dotenv", lambda: None)
+    args = image_gen_cli.parse_args([
+        "--prompt", "p", "-o", str(tmp_path / "o.png"), "--backend", "gemini",
+    ])
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+        image_gen_cli.run(args)
+
+
+def test_image_cli_run_codex_full_pipeline(monkeypatch, tmp_path):
+    from PIL import Image as _Image
+
+    from video2yt import image_gen_cli
+
+    monkeypatch.setattr("video2yt.image_gen_cli.load_dotenv", lambda: None)
+    captured: dict = {}
+
+    def fake_codex(prompt, codex_size=None, timeout=None):
+        captured["prompt"] = prompt
+        captured["codex_size"] = codex_size
+        return _Image.new("RGB", (1536, 1024), (10, 20, 30))
+
+    monkeypatch.setattr("video2yt.image_gen_cli.image_gen.generate_codex", fake_codex)
+    out = tmp_path / "out.png"
+    args = image_gen_cli.parse_args([
+        "--prompt", "test prompt", "-o", str(out),
+        "--target-size", "1920x1080", "--fit", "cover",
+    ])
+    result = image_gen_cli.run(args)
+    assert result == out
+    assert out.exists()
+    assert _Image.open(out).size == (1920, 1080)
+    assert captured["prompt"] == "test prompt"
+
+
+def test_image_cli_run_reads_prompt_file_and_save_raw(monkeypatch, tmp_path):
+    from PIL import Image as _Image
+
+    from video2yt import image_gen_cli
+
+    monkeypatch.setattr("video2yt.image_gen_cli.load_dotenv", lambda: None)
+    pf = tmp_path / "prompt.txt"
+    pf.write_text("from-file", encoding="utf-8")
+    raw = tmp_path / "raw.png"
+    out = tmp_path / "out.png"
+
+    def fake_codex(prompt, codex_size=None, timeout=None):
+        assert prompt == "from-file"
+        return _Image.new("RGB", (200, 100), (255, 0, 0))
+
+    monkeypatch.setattr("video2yt.image_gen_cli.image_gen.generate_codex", fake_codex)
+    args = image_gen_cli.parse_args([
+        "--prompt-file", str(pf), "-o", str(out),
+        "--save-raw", str(raw), "--fit", "none",
+    ])
+    image_gen_cli.run(args)
+    assert raw.exists()
+    assert out.exists()
+    # With --fit none, output should preserve the raw 200x100 dimensions.
+    assert _Image.open(out).size == (200, 100)
+
+
+def test_image_cli_main_returns_1_on_runtime_error(monkeypatch, tmp_path):
+    from video2yt import image_gen_cli
+    monkeypatch.setattr("video2yt.image_gen_cli.load_dotenv", lambda: None)
+
+    def boom(prompt, codex_size=None, timeout=None):
+        raise RuntimeError("codex broke")
+
+    monkeypatch.setattr("video2yt.image_gen_cli.image_gen.generate_codex", boom)
+    rc = image_gen_cli.main(["--prompt", "x", "-o", str(tmp_path / "o.png")])
+    assert rc == 1
+
+
+def _PIL_PNG_BYTES() -> bytes:
+    """Smallest valid PNG (1x1) for fixture use in tests."""
+    import io as _io
+
+    from PIL import Image as _Image
+
+    buf = _io.BytesIO()
+    _Image.new("RGB", (1, 1), (0, 0, 0)).save(buf, format="PNG")
+    return buf.getvalue()
