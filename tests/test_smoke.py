@@ -4430,6 +4430,72 @@ def test_image_generate_codex_raises_on_timeout(monkeypatch):
         ig.generate_codex("prompt", timeout=5)
 
 
+def test_image_generate_codex_raises_on_called_process_error(monkeypatch):
+    import subprocess as _sp
+
+    from video2yt import image_gen as ig
+
+    def boom(cmd, check=None, timeout=None):
+        raise _sp.CalledProcessError(returncode=2, cmd=cmd)
+
+    monkeypatch.setattr("video2yt.image_gen.subprocess.run", boom)
+    with pytest.raises(RuntimeError, match="exit code 2"):
+        ig.generate_codex("prompt")
+
+
+def test_image_generate_gemini_wraps_sdk_exception(monkeypatch):
+    """SDK exceptions must become RuntimeError so CLI's main() catches them."""
+    from video2yt import image_gen as ig
+
+    class _BoomModels:
+        def generate_content(self, **kw):
+            raise RuntimeError("RESOURCE_EXHAUSTED quota")
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            self.models = _BoomModels()
+
+    monkeypatch.setattr("google.genai.Client", _FakeClient)
+    with pytest.raises(RuntimeError, match="Gemini SDK error"):
+        ig.generate_gemini("prompt", "key")
+
+
+def test_image_generate_gemini_quota_error_includes_billing_hint(monkeypatch):
+    from video2yt import image_gen as ig
+
+    class _BoomModels:
+        def generate_content(self, **kw):
+            raise RuntimeError("RESOURCE_EXHAUSTED on free_tier")
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            self.models = _BoomModels()
+
+    monkeypatch.setattr("google.genai.Client", _FakeClient)
+    with pytest.raises(RuntimeError, match="enable billing"):
+        ig.generate_gemini("prompt", "key")
+
+
+def test_image_generate_gemini_raises_when_response_has_no_image(monkeypatch):
+    from video2yt import image_gen as ig
+
+    class _EmptyResponse:
+        candidates = []
+        text = ""
+
+    class _Models:
+        def generate_content(self, **kw):
+            return _EmptyResponse()
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            self.models = _Models()
+
+    monkeypatch.setattr("google.genai.Client", _FakeClient)
+    with pytest.raises(RuntimeError, match="no image returned"):
+        ig.generate_gemini("prompt", "key")
+
+
 def test_image_cli_parse_args_defaults():
     from video2yt import image_gen_cli
     args = image_gen_cli.parse_args(["--prompt", "p", "-o", "o.png"])
@@ -4534,18 +4600,6 @@ def _PIL_PNG_BYTES() -> bytes:
 # =========================================================================
 # video2yt-upload tests
 # =========================================================================
-
-
-class _ChainCall:
-    """Records a single chained call: list/insert/set with their kwargs and a result."""
-
-    def __init__(self, result=None):
-        self.result = result
-        self.calls: list[dict] = []
-
-    def __call__(self, **kwargs):
-        self.calls.append(kwargs)
-        return self.result
 
 
 class _ExecuteWrapper:
@@ -4849,6 +4903,73 @@ def test_upload_cli_run_http_error_on_insert_becomes_runtime_error(tmp_path, mon
     args = upload_cli.parse_args(["--metadata", str(meta)])
     with pytest.raises(RuntimeError, match="upload failed"):
         upload_cli.run(args)
+
+
+def test_upload_cli_run_http_error_on_list_channels_becomes_runtime_error(
+    tmp_path, monkeypatch
+):
+    """Without the wrap, HttpError from channels().list() bypasses main()'s catch."""
+    from googleapiclient.errors import HttpError
+
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
+
+    class _Resp:
+        status = 401
+        reason = "Unauthorized"
+
+    err = HttpError(_Resp(), b'{"error": "auth"}')
+
+    class _FailingChannels:
+        def list(self, **kw):
+            raise err
+
+    class _FailingYt:
+        def channels(self):
+            return _FailingChannels()
+
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr("video2yt.upload_cli.build", lambda *a, **kw: _FailingYt())
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    with pytest.raises(RuntimeError, match="list channels"):
+        upload_cli.run(args)
+
+
+def test_upload_cli_run_thumbnail_http_error_is_swallowed(tmp_path, monkeypatch):
+    """Failing thumbnail upload after a successful video upload is recoverable."""
+    from googleapiclient.errors import HttpError
+
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x" * 1024)
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
+
+    class _Resp:
+        status = 400
+        reason = "Bad Request"
+
+    err = HttpError(_Resp(), b'{"error": "thumbnail too small"}')
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr(
+        "video2yt.upload_cli.build",
+        lambda *a, **kw: _FakeYoutube(
+            channels=[{"id": "UC_OK"}], video_id="vid42", set_raises=err,
+        ),
+    )
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    result = upload_cli.run(args)
+    assert result["video_id"] == "vid42"
+    assert result["dry_run"] is False
 
 
 def test_upload_cli_main_returns_1_on_missing_metadata(tmp_path):

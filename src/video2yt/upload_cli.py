@@ -56,7 +56,10 @@ def run(args: argparse.Namespace) -> dict:
     creds = upload.get_credentials(args.client_secret, args.token)
     youtube = build("youtube", "v3", credentials=creds, cache_discovery=False)
 
-    channels = upload.list_channels(youtube)
+    try:
+        channels = upload.list_channels(youtube)
+    except HttpError as e:
+        raise RuntimeError(f"failed to list channels: {e}")
     if not channels:
         raise RuntimeError("no channels found for authenticated user")
     channel_ids = [c["id"] for c in channels]

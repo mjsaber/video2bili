@@ -59,7 +59,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run(args: argparse.Namespace):
+def run(args: argparse.Namespace) -> Path:
     load_dotenv()
 
     if args.prompt:

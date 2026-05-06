@@ -77,13 +77,13 @@ def generate_gemini(
     except Exception as exc:
         msg = str(exc)
         if "RESOURCE_EXHAUSTED" in msg or "free_tier" in msg or "429" in msg:
-            print(
-                "[img:gemini] quota exhausted (free-tier limit is 0 for image-gen). "
-                "Either enable billing on the GEMINI_API_KEY's project, or rerun "
-                "with --backend codex (no setup required if `codex` CLI is logged in).",
-                file=sys.stderr,
+            hint = (
+                " (free-tier limit is 0 for image-gen; either enable billing "
+                "on the GEMINI_API_KEY's project, or rerun with --backend codex)"
             )
-        raise
+        else:
+            hint = ""
+        raise RuntimeError(f"Gemini SDK error: {exc}{hint}") from exc
 
     for cand in response.candidates or []:
         for part in cand.content.parts or []:
@@ -141,6 +141,11 @@ def generate_codex(
                 "`writable_roots` or a multi-step checklist instruction. See "
                 "output/ringnaga/WORKFLOW_NOTES.md for known gotchas."
             )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"codex exec failed with exit code {exc.returncode}. "
+                "Re-run interactively to inspect the codex output."
+            ) from exc
 
         if not out_path.exists():
             raise RuntimeError(
