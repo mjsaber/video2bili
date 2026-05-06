@@ -4168,3 +4168,176 @@ def test_thumbnail_cli_main_returns_0_on_success(monkeypatch, tmp_path):
         "--card", "c.png",
     ])
     assert rc == 0
+
+
+# =========================================================================
+# video2yt-tts tests
+# =========================================================================
+
+
+class _FakeTtsResponse:
+    """Mimic requests.Response used as a context manager + streaming iterator."""
+
+    def __init__(self, *, status_code=200, lines=None, text="", logid="logid-fake"):
+        self.status_code = status_code
+        self.text = text
+        self.headers = {"X-Tt-Logid": logid}
+        self._lines = lines or []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_lines(self, decode_unicode=False):
+        for line in self._lines:
+            yield line
+
+
+def _tts_chunk(audio_b64="", code=0, sentence=None):
+    import base64
+
+    msg = {"code": code}
+    if audio_b64:
+        msg["data"] = audio_b64
+    if sentence:
+        msg["sentence"] = sentence
+    return json.dumps(msg).encode("utf-8")
+
+
+def test_tts_synthesize_writes_decoded_audio(monkeypatch, tmp_path):
+    import base64
+
+    from video2yt import tts as tts_mod
+    audio_part_a = b"AUDIO_A"
+    audio_part_b = b"AUDIO_B"
+    lines = [
+        _tts_chunk(audio_b64=base64.b64encode(audio_part_a).decode("ascii")),
+        _tts_chunk(audio_b64=base64.b64encode(audio_part_b).decode("ascii"), sentence="一句"),
+        _tts_chunk(code=20000000),
+    ]
+
+    def fake_post(url, headers=None, json=None, stream=None, timeout=None):
+        assert url == tts_mod.ENDPOINT
+        assert headers["X-Api-Key"] == "secret-key"
+        assert json["req_params"]["text"] == "你好"
+        return _FakeTtsResponse(lines=lines)
+
+    monkeypatch.setattr("video2yt.tts.requests.post", fake_post)
+
+    out = tmp_path / "out.mp3"
+    info = tts_mod.synthesize("你好", "secret-key", "voice-a", out)
+    assert out.read_bytes() == audio_part_a + audio_part_b
+    assert info["bytes"] == len(audio_part_a) + len(audio_part_b)
+    assert info["chunks"] == 2
+    assert info["sentences"] == 1
+
+
+def test_tts_synthesize_raises_on_http_error(monkeypatch, tmp_path):
+    from video2yt import tts as tts_mod
+    monkeypatch.setattr(
+        "video2yt.tts.requests.post",
+        lambda *a, **kw: _FakeTtsResponse(status_code=500, text="boom"),
+    )
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        tts_mod.synthesize("hi", "k", "v", tmp_path / "o.mp3")
+
+
+def test_tts_synthesize_raises_on_nonzero_code(monkeypatch, tmp_path):
+    from video2yt import tts as tts_mod
+    err = json.dumps({"code": 40001, "message": "auth fail"}).encode("utf-8")
+    monkeypatch.setattr(
+        "video2yt.tts.requests.post",
+        lambda *a, **kw: _FakeTtsResponse(lines=[err]),
+    )
+    with pytest.raises(RuntimeError, match="code=40001"):
+        tts_mod.synthesize("hi", "k", "v", tmp_path / "o.mp3")
+
+
+def test_tts_synthesize_raises_when_no_audio_returned(monkeypatch, tmp_path):
+    from video2yt import tts as tts_mod
+    monkeypatch.setattr(
+        "video2yt.tts.requests.post",
+        lambda *a, **kw: _FakeTtsResponse(lines=[_tts_chunk(code=20000000)]),
+    )
+    with pytest.raises(RuntimeError, match="no audio chunks"):
+        tts_mod.synthesize("hi", "k", "v", tmp_path / "o.mp3")
+
+
+def test_tts_cli_parse_args_text_inline():
+    from video2yt import tts_cli
+    args = tts_cli.parse_args(["--text", "你好", "-o", "out.mp3"])
+    assert args.text == "你好"
+    assert args.text_file is None
+    assert args.speech_rate == 0
+
+
+def test_tts_cli_parse_args_requires_text_or_file():
+    from video2yt import tts_cli
+    with pytest.raises(SystemExit):
+        tts_cli.parse_args(["-o", "out.mp3"])
+
+
+def test_tts_cli_run_errors_when_api_key_missing(monkeypatch, tmp_path):
+    from video2yt import tts_cli
+    monkeypatch.delenv("VOLCENGINE_API_KEY", raising=False)
+    monkeypatch.setattr("video2yt.tts_cli.load_dotenv", lambda: None)
+    args = tts_cli.parse_args(["--text", "你好", "-o", str(tmp_path / "o.mp3")])
+    with pytest.raises(ValueError, match="VOLCENGINE_API_KEY"):
+        tts_cli.run(args)
+
+
+def test_tts_cli_run_reads_text_file(monkeypatch, tmp_path):
+    from video2yt import tts_cli
+    monkeypatch.setenv("VOLCENGINE_API_KEY", "k")
+    monkeypatch.setattr("video2yt.tts_cli.load_dotenv", lambda: None)
+    txt = tmp_path / "script.txt"
+    txt.write_text("从文件读取的文本", encoding="utf-8")
+    captured: dict = {}
+
+    def fake_synth(**kw):
+        captured.update(kw)
+        return {"bytes": 100, "chunks": 1, "sentences": 1, "logid": "x", "usage": None}
+
+    monkeypatch.setattr("video2yt.tts_cli.tts.synthesize", fake_synth)
+    args = tts_cli.parse_args(["--text-file", str(txt), "-o", str(tmp_path / "o.mp3")])
+    tts_cli.run(args)
+    assert captured["text"] == "从文件读取的文本"
+    assert captured["api_key"] == "k"
+
+
+def test_tts_cli_run_errors_on_empty_text(monkeypatch, tmp_path):
+    from video2yt import tts_cli
+    monkeypatch.setenv("VOLCENGINE_API_KEY", "k")
+    monkeypatch.setattr("video2yt.tts_cli.load_dotenv", lambda: None)
+    txt = tmp_path / "empty.txt"
+    txt.write_text("   \n", encoding="utf-8")
+    args = tts_cli.parse_args(["--text-file", str(txt), "-o", str(tmp_path / "o.mp3")])
+    with pytest.raises(ValueError, match="text is empty"):
+        tts_cli.run(args)
+
+
+def test_tts_cli_main_returns_1_on_runtime_error(monkeypatch, tmp_path):
+    from video2yt import tts_cli
+    monkeypatch.setenv("VOLCENGINE_API_KEY", "k")
+    monkeypatch.setattr("video2yt.tts_cli.load_dotenv", lambda: None)
+
+    def boom(**kw):
+        raise RuntimeError("upstream broke")
+
+    monkeypatch.setattr("video2yt.tts_cli.tts.synthesize", boom)
+    rc = tts_cli.main(["--text", "x", "-o", str(tmp_path / "o.mp3")])
+    assert rc == 1
+
+
+def test_tts_cli_main_returns_0_on_success(monkeypatch, tmp_path):
+    from video2yt import tts_cli
+    monkeypatch.setenv("VOLCENGINE_API_KEY", "k")
+    monkeypatch.setattr("video2yt.tts_cli.load_dotenv", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.tts_cli.tts.synthesize",
+        lambda **kw: {"bytes": 1, "chunks": 1, "sentences": 0, "logid": "x", "usage": None},
+    )
+    rc = tts_cli.main(["--text", "x", "-o", str(tmp_path / "o.mp3")])
+    assert rc == 0
