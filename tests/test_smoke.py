@@ -4529,3 +4529,348 @@ def _PIL_PNG_BYTES() -> bytes:
     buf = _io.BytesIO()
     _Image.new("RGB", (1, 1), (0, 0, 0)).save(buf, format="PNG")
     return buf.getvalue()
+
+
+# =========================================================================
+# video2yt-upload tests
+# =========================================================================
+
+
+class _ChainCall:
+    """Records a single chained call: list/insert/set with their kwargs and a result."""
+
+    def __init__(self, result=None):
+        self.result = result
+        self.calls: list[dict] = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+
+class _ExecuteWrapper:
+    def __init__(self, result):
+        self._result = result
+
+    def execute(self):
+        return self._result
+
+
+class _NextChunkRequest:
+    """Yields one progress 50% then a final response with the given video_id."""
+
+    def __init__(self, video_id):
+        self._video_id = video_id
+        self._step = 0
+
+    def next_chunk(self):
+        self._step += 1
+        if self._step == 1:
+            class _Status:
+                def progress(self_inner):
+                    return 0.5
+
+            return _Status(), None
+        return None, {"id": self._video_id}
+
+
+class _FakeYoutube:
+    """Mimics the chained Discovery client API just enough for upload.py."""
+
+    def __init__(self, *, channels=None, video_id="vid123", set_thumbnail_result=None,
+                 insert_raises=None, set_raises=None):
+        self._channels = channels or []
+        self._video_id = video_id
+        self._set_result = set_thumbnail_result or {"items": []}
+        self._insert_raises = insert_raises
+        self._set_raises = set_raises
+        self.insert_body: dict | None = None
+
+    def channels(self):
+        outer = self
+
+        class _Channels:
+            def list(self, **kw):
+                return _ExecuteWrapper({"items": outer._channels})
+
+        return _Channels()
+
+    def videos(self):
+        outer = self
+
+        class _Videos:
+            def insert(self, **kw):
+                if outer._insert_raises:
+                    raise outer._insert_raises
+                outer.insert_body = kw["body"]
+                return _NextChunkRequest(outer._video_id)
+
+        return _Videos()
+
+    def thumbnails(self):
+        outer = self
+
+        class _Thumbnails:
+            def set(self, **kw):
+                if outer._set_raises:
+                    raise outer._set_raises
+                return _ExecuteWrapper(outer._set_result)
+
+        return _Thumbnails()
+
+
+def _meta_dict(video_path: Path, thumb_path: Path, *, channel="UC_TEST"):
+    return {
+        "title": "T",
+        "description": "D",
+        "tags": ["a", "b"],
+        "category_id": "20",
+        "default_language": "zh",
+        "default_audio_language": "zh",
+        "privacy_status": "private",
+        "made_for_kids": False,
+        "video_path": str(video_path),
+        "thumbnail_path": str(thumb_path),
+        "expected_channel_id": channel,
+    }
+
+
+def test_upload_list_channels_returns_items():
+    from video2yt import upload as up
+    yt = _FakeYoutube(channels=[{"id": "UC_A", "snippet": {"title": "A"}}])
+    items = up.list_channels(yt)
+    assert items == [{"id": "UC_A", "snippet": {"title": "A"}}]
+
+
+def test_upload_video_builds_correct_body_and_returns_id(tmp_path):
+    from video2yt import upload as up
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x" * 1024)
+    yt = _FakeYoutube(video_id="newvid42")
+    meta = _meta_dict(video, tmp_path / "thumb.png")
+    vid = up.upload_video(yt, meta, video)
+    assert vid == "newvid42"
+    assert yt.insert_body["snippet"]["title"] == "T"
+    assert yt.insert_body["snippet"]["tags"] == ["a", "b"]
+    assert yt.insert_body["status"]["privacyStatus"] == "private"
+    assert yt.insert_body["status"]["embeddable"] is True
+
+
+def test_upload_thumbnail_calls_set(tmp_path):
+    from video2yt import upload as up
+    thumb = tmp_path / "thumb.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    yt = _FakeYoutube()
+    up.upload_thumbnail(yt, "vid123", thumb)
+    # No assertion error means the chained .set().execute() path didn't raise.
+
+
+def test_upload_get_credentials_returns_cached_when_valid(tmp_path, monkeypatch):
+    from video2yt import upload as up
+
+    class _FakeCreds:
+        valid = True
+        expired = False
+        refresh_token = None
+
+        def to_json(self):
+            return "{}"
+
+    token = tmp_path / "token.json"
+    token.write_text("{}")
+    monkeypatch.setattr(
+        "video2yt.upload.Credentials.from_authorized_user_file",
+        lambda path, scopes: _FakeCreds(),
+    )
+
+    def boom(*a, **kw):
+        raise AssertionError("flow should not run when creds are valid")
+
+    monkeypatch.setattr(
+        "video2yt.upload.InstalledAppFlow.from_client_secrets_file", boom
+    )
+    creds = up.get_credentials(tmp_path / "secret.json", token)
+    assert isinstance(creds, _FakeCreds)
+
+
+def test_upload_get_credentials_recovers_from_refresh_error(tmp_path, monkeypatch):
+    from google.auth.exceptions import RefreshError
+
+    from video2yt import upload as up
+
+    class _ExpiredCreds:
+        valid = False
+        expired = True
+        refresh_token = "rt"
+
+        def refresh(self, request):
+            raise RefreshError("Token has been expired or revoked.")
+
+    class _FreshCreds:
+        valid = True
+
+        def to_json(self):
+            return '{"refresh_token": "new"}'
+
+    token = tmp_path / "token.json"
+    token.write_text("{}")
+
+    monkeypatch.setattr(
+        "video2yt.upload.Credentials.from_authorized_user_file",
+        lambda path, scopes: _ExpiredCreds(),
+    )
+
+    class _FakeFlow:
+        def run_local_server(self, port=0, prompt=None):
+            return _FreshCreds()
+
+    monkeypatch.setattr(
+        "video2yt.upload.InstalledAppFlow.from_client_secrets_file",
+        lambda path, scopes: _FakeFlow(),
+    )
+
+    creds = up.get_credentials(tmp_path / "secret.json", token)
+    assert isinstance(creds, _FreshCreds)
+    assert token.read_text() == '{"refresh_token": "new"}'
+
+
+def test_upload_cli_parse_args_defaults():
+    from video2yt import upload_cli
+    args = upload_cli.parse_args(["--metadata", "m.json"])
+    assert args.client_secret == Path("client_secret.json")
+    assert args.token == Path("youtube_token.json")
+    assert args.skip_thumbnail is False
+    assert args.dry_run is False
+
+
+def test_upload_cli_run_errors_when_metadata_missing(tmp_path):
+    from video2yt import upload_cli
+    args = upload_cli.parse_args(["--metadata", str(tmp_path / "missing.json")])
+    with pytest.raises(FileNotFoundError, match="metadata not found"):
+        upload_cli.run(args)
+
+
+def test_upload_cli_run_errors_when_video_missing(tmp_path):
+    from video2yt import upload_cli
+    meta = tmp_path / "meta.json"
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta.write_text(json.dumps(_meta_dict(tmp_path / "missing.mp4", thumb)), encoding="utf-8")
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    with pytest.raises(FileNotFoundError, match="video not found"):
+        upload_cli.run(args)
+
+
+def test_upload_cli_run_dry_run_skips_upload(tmp_path, monkeypatch):
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x" * 1024)
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr(
+        "video2yt.upload_cli.build",
+        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}]),
+    )
+    args = upload_cli.parse_args(["--metadata", str(meta), "--dry-run"])
+    result = upload_cli.run(args)
+    assert result["dry_run"] is True
+    assert result["video_id"] is None
+
+
+def test_upload_cli_run_wrong_channel_raises(tmp_path, monkeypatch):
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_EXPECTED")), encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr(
+        "video2yt.upload_cli.build",
+        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OTHER"}]),
+    )
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    with pytest.raises(RuntimeError, match="not in authenticated channels"):
+        upload_cli.run(args)
+
+
+def test_upload_cli_run_full_happy_path(tmp_path, monkeypatch):
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x" * 1024)
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr(
+        "video2yt.upload_cli.build",
+        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ"),
+    )
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    result = upload_cli.run(args)
+    assert result["video_id"] == "vidXYZ"
+    assert "youtube.com/watch?v=vidXYZ" in result["video_url"]
+    assert "studio.youtube.com/video/vidXYZ" in result["studio_url"]
+
+
+def test_upload_cli_run_http_error_on_insert_becomes_runtime_error(tmp_path, monkeypatch):
+    from googleapiclient.errors import HttpError
+
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x" * 1024)
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
+
+    class _Resp:
+        status = 403
+        reason = "Forbidden"
+
+    err = HttpError(_Resp(), b'{"error": "quota"}')
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr(
+        "video2yt.upload_cli.build",
+        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}], insert_raises=err),
+    )
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    with pytest.raises(RuntimeError, match="upload failed"):
+        upload_cli.run(args)
+
+
+def test_upload_cli_main_returns_1_on_missing_metadata(tmp_path):
+    from video2yt import upload_cli
+    rc = upload_cli.main(["--metadata", str(tmp_path / "nope.json")])
+    assert rc == 1
+
+
+def test_upload_cli_main_returns_0_on_dry_run(tmp_path, monkeypatch):
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x")
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr(
+        "video2yt.upload_cli.build",
+        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}]),
+    )
+    rc = upload_cli.main(["--metadata", str(meta), "--dry-run"])
+    assert rc == 0

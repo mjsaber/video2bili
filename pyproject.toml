@@ -31,6 +31,7 @@ video2yt-research-card = "video2yt.research_card_cli:main"
 video2yt-thumbnail = "video2yt.thumbnail_cli:main"
 video2yt-tts = "video2yt.tts_cli:main"
 video2yt-image = "video2yt.image_gen_cli:main"
+video2yt-upload = "video2yt.upload_cli:main"
 
 [build-system]
 requires = ["hatchling"]
