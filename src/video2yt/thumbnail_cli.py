@@ -101,8 +101,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="(card-tilt-right only) Additive line gap in px.")
     legacy.add_argument(
         "--stroke-width", type=int, default=6,
-        help="Title stroke (outline) width. card-impact uses internal hook/subtitle "
-             "stroke widths instead.",
+        help="(horizontal-bottom + vertical-left only) Title stroke (outline) width. "
+             "card-tilt-right uses a drop shadow without stroke; card-impact uses "
+             "internal hook/subtitle stroke widths.",
     )
 
     # Flags specific to the card-tilt-right orientation.
