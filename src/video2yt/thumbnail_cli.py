@@ -27,47 +27,104 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target-size", default="1280x720")
     parser.add_argument("--font", default=thumbnail.DEFAULT_FONT)
     parser.add_argument("--font-index", type=int, default=thumbnail.DEFAULT_FONT_INDEX)
-    parser.add_argument("--font-size", type=int, default=128)
-    parser.add_argument("--logo-width-ratio", type=float, default=0.20)
+    parser.add_argument(
+        "--font-size", type=int, default=128,
+        help="(legacy orientations only) Title font size. card-impact uses --hook-size.",
+    )
+    parser.add_argument(
+        "--logo-width-ratio", type=float, default=None,
+        help="Logo width as fraction of canvas width. Default 0.20 for legacy "
+             "orientations, 0.125 for card-impact (logo gives way to the hook).",
+    )
     parser.add_argument(
         "--logo-target-w", type=int, default=None,
-        help="Absolute logo width in px. Overrides --logo-width-ratio when set.",
+        help="Absolute logo width in px. Overrides --logo-width-ratio. Honored "
+             "by all orientations.",
     )
     parser.add_argument("--logo-margin", type=int, default=28)
-    parser.add_argument("--title-bottom-margin", type=int, default=50)
+    parser.add_argument(
+        "--title-bottom-margin", type=int, default=50,
+        help="(horizontal-bottom only)",
+    )
     parser.add_argument(
         "--title-anchor-x-ratio", type=float, default=0.25,
-        help="Horizontal anchor (fraction of width) for the text block center.",
+        help="(legacy orientations only) Horizontal anchor fraction for the text block center.",
     )
     parser.add_argument(
         "--title-anchor-x-abs", type=int, default=None,
-        help="Absolute x (px) for vertical title center. Overrides ratio when set.",
+        help="(legacy orientations only) Absolute x (px) for vertical title center.",
     )
     parser.add_argument("--title-line-spacing", type=float, default=1.05,
-                        help="Multiplicative line spacing (vertical-left).")
+                        help="(vertical-left only) Multiplicative line spacing.")
     parser.add_argument("--title-line-gap", type=int, default=8,
-                        help="Additive line gap in px (card-tilt-right).")
-    parser.add_argument("--stroke-width", type=int, default=6)
+                        help="(card-tilt-right only) Additive line gap in px.")
+    parser.add_argument(
+        "--stroke-width", type=int, default=6,
+        help="(legacy orientations only) Title stroke width. card-impact uses internal "
+             "hook/subtitle stroke widths.",
+    )
     parser.add_argument(
         "--orientation",
-        choices=["horizontal-bottom", "vertical-left", "card-tilt-right"],
-        default="card-tilt-right",
+        choices=["card-impact", "horizontal-bottom", "vertical-left", "card-tilt-right"],
+        default="card-impact",
+        help="card-impact (default) is the new Bilibili-BG style. "
+             "card-tilt-right is the legacy locked layout.",
     )
     parser.add_argument("--card", type=Path, default=None,
-                        help="Card art PNG (RGBA). Required for orientation card-tilt-right.")
+                        help="Card art PNG (RGBA). Required for card-impact and card-tilt-right.")
     parser.add_argument("--season", default="",
-                        help="Season text for top-right corner (e.g. 'S13'). Empty to skip.")
-    parser.add_argument("--card-target-h", type=int, default=580)
-    parser.add_argument("--card-tilt-deg", type=float, default=-12.0)
-    parser.add_argument("--card-right-inset", type=int, default=150)
-    parser.add_argument("--card-glow-expand", type=int, default=12)
+                        help="Season text. Bottom-left in card-impact, top-right in card-tilt-right.")
+    parser.add_argument("--card-target-h", type=int, default=580,
+                        help="(card-tilt-right only) Card height in px.")
+    parser.add_argument(
+        "--card-tilt-deg", type=float, default=None,
+        help="Card rotation in degrees. Default depends on orientation: "
+             "+10° for card-impact (forward lean), -12° for card-tilt-right.",
+    )
+    parser.add_argument("--card-right-inset", type=int, default=150,
+                        help="(card-tilt-right only)")
+    parser.add_argument("--card-glow-expand", type=int, default=12,
+                        help="(card-tilt-right only) Card glow halo expand in px.")
     parser.add_argument("--season-size", type=int, default=80)
-    parser.add_argument("--season-inset-right", type=int, default=35)
-    parser.add_argument("--season-inset-top", type=int, default=35)
+    parser.add_argument("--season-inset-right", type=int, default=35,
+                        help="(card-tilt-right only) Season top-right inset.")
+    parser.add_argument("--season-inset-top", type=int, default=35,
+                        help="(card-tilt-right only) Season top-right inset.")
     parser.add_argument(
         "--shared-top-y", type=int, default=145,
-        help="Y coord (px) where title top AND visible TL corner of the card both anchor.",
+        help="(card-tilt-right only) Y coord where title top + card TL anchor.",
     )
+
+    # card-impact orientation
+    impact = parser.add_argument_group("card-impact orientation")
+    impact.add_argument(
+        "--hook", default="",
+        help="Punchy 2-4 char phrase, e.g. '破局'/'T0最强'/'9鸡满配'. Required for card-impact.",
+    )
+    impact.add_argument(
+        "--subtitle", default="",
+        help="Smaller white descriptor (6-14 chars), placed below the hook.",
+    )
+    impact.add_argument(
+        "--result-badge", default="",
+        help="Optional red pill in top-right corner, e.g. '9鸡' or 'T0'.",
+    )
+    impact.add_argument("--hook-size", type=int, default=240,
+                        help="Hook font size (auto-shrunk if too wide).")
+    impact.add_argument("--hook-rotation-deg", type=float, default=-8.0,
+                        help="Hook rotation. -8° gives a forward dynamic feel.")
+    impact.add_argument("--hook-anchor-x-ratio", type=float, default=0.65)
+    impact.add_argument("--hook-anchor-y-ratio", type=float, default=0.42)
+    impact.add_argument("--vignette-strength", type=float, default=0.55,
+                        help="Corner darkening for text contrast. 0=off, 1=corners black.")
+    impact.add_argument(
+        "--no-speed-lines", action="store_false", dest="speed_lines_enabled",
+        help="Disable the diagonal motion-streak lines behind the card.",
+    )
+    impact.add_argument("--card-bottom-bleed", type=int, default=70,
+                        help="(card-impact only) px the card extends past the bottom edge.")
+    impact.add_argument("--card-anchor-x-ratio", type=float, default=0.27,
+                        help="(card-impact only) horizontal center of the card as fraction of width.")
     return parser.parse_args(argv)
 
 
@@ -103,6 +160,17 @@ def run(args: argparse.Namespace) -> Path:
         season_inset_right=args.season_inset_right,
         season_inset_top=args.season_inset_top,
         shared_top_y=args.shared_top_y,
+        hook=args.hook,
+        subtitle=args.subtitle,
+        result_badge=args.result_badge,
+        hook_size=args.hook_size,
+        hook_rotation_deg=args.hook_rotation_deg,
+        hook_anchor_x_ratio=args.hook_anchor_x_ratio,
+        hook_anchor_y_ratio=args.hook_anchor_y_ratio,
+        vignette_strength=args.vignette_strength,
+        speed_lines_enabled=args.speed_lines_enabled,
+        card_bottom_bleed=args.card_bottom_bleed,
+        card_anchor_x_ratio=args.card_anchor_x_ratio,
     )
     _log(f"saved {args.output}")
     return args.output

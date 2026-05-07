@@ -4098,10 +4098,20 @@ def test_thumbnail_cli_parse_args_defaults():
         "--bg", "bg.png", "--logo", "logo.png",
         "--title", "测试", "-o", "out.png",
     ])
-    assert args.orientation == "card-tilt-right"
+    assert args.orientation == "card-impact"  # new Bilibili-BG default
     assert args.target_size == "1280x720"
     assert args.font_size == 128
     assert args.card is None
+    assert args.hook == ""
+    assert args.subtitle == ""
+    assert args.result_badge == ""
+    assert args.hook_size == 240
+    assert args.hook_rotation_deg == -8.0
+    assert args.vignette_strength == 0.55
+    assert args.speed_lines_enabled is True
+    # Sentinel-None defaults so each orientation resolves its own value.
+    assert args.card_tilt_deg is None
+    assert args.logo_width_ratio is None
 
 
 def test_thumbnail_cli_parse_args_orientation_choice_validated():
@@ -4134,6 +4144,7 @@ def test_thumbnail_cli_run_passes_args_to_render(monkeypatch, tmp_path):
         "--title", "S13最强", "-o", str(out),
         "--card", "card.png", "--season", "S13",
         "--target-size", "1920x1080",
+        "--orientation", "card-tilt-right",
     ])
     result = thumbnail_cli.run(args)
     assert result == out
@@ -4186,6 +4197,193 @@ def test_thumbnail_cli_main_returns_1_on_pil_oserror(monkeypatch, tmp_path):
         "--card", "c.png",
     ])
     assert rc == 1
+
+
+def test_thumbnail_render_card_impact_requires_card():
+    from pathlib import Path as _P
+
+    from video2yt.thumbnail import render_thumbnail
+    with pytest.raises(ValueError, match="--card is required"):
+        render_thumbnail(
+            bg_path=_P("/x/bg.png"), logo_path=_P("/x/logo.png"),
+            title="t", output_path=_P("/x/o.png"),
+            orientation="card-impact",
+            card_path=None, hook="破局",
+        )
+
+
+def test_thumbnail_render_card_impact_requires_hook():
+    from pathlib import Path as _P
+
+    from video2yt.thumbnail import render_thumbnail
+    with pytest.raises(ValueError, match="--hook is required"):
+        render_thumbnail(
+            bg_path=_P("/x/bg.png"), logo_path=_P("/x/logo.png"),
+            title="t", output_path=_P("/x/o.png"),
+            orientation="card-impact",
+            card_path=_P("/x/c.png"), hook="",
+        )
+
+
+def test_thumbnail_tokenize_unchanged_for_punctuation_and_period():
+    """Sanity check tokenize still works after refactor."""
+    from video2yt.thumbnail import tokenize_for_vertical
+    assert tokenize_for_vertical("T0破局") == ["T0", "破", "局"]
+
+
+def test_thumbnail_auto_shrink_hook_returns_smaller_when_overflow():
+    """Hook auto-shrink picks a size whose text fits within max_width."""
+    import os
+
+    from video2yt.thumbnail import DEFAULT_FONT, auto_shrink_font_for_hook
+    if not os.path.exists(DEFAULT_FONT):
+        pytest.skip("Hiragino Sans GB not available on this platform")
+    size = auto_shrink_font_for_hook(
+        font_path=DEFAULT_FONT, font_index=1,
+        requested_size=400, text="T0最强阵容",
+        max_width=400,  # very narrow → forces shrink
+    )
+    assert size < 400
+
+
+def test_thumbnail_cli_card_tilt_deg_default_is_none_so_orientation_resolves():
+    """`--card-tilt-deg` default None lets each orientation resolve its own default."""
+    from video2yt import thumbnail_cli
+    args = thumbnail_cli.parse_args([
+        "--bg", "bg.png", "--logo", "logo.png",
+        "--title", "t", "-o", "o.png",
+    ])
+    assert args.card_tilt_deg is None
+
+
+def test_thumbnail_cli_logo_width_ratio_default_is_none():
+    """Same pattern for --logo-width-ratio so card-impact gets a smaller default."""
+    from video2yt import thumbnail_cli
+    args = thumbnail_cli.parse_args([
+        "--bg", "bg.png", "--logo", "logo.png",
+        "--title", "t", "-o", "o.png",
+    ])
+    assert args.logo_width_ratio is None
+
+
+def test_thumbnail_cli_no_impact_logo_target_w_flag():
+    """Flag was redundant with --logo-target-w; ensure it is gone."""
+    from video2yt import thumbnail_cli
+    with pytest.raises(SystemExit):
+        thumbnail_cli.parse_args([
+            "--bg", "bg.png", "--logo", "logo.png", "--title", "t", "-o", "o.png",
+            "--impact-logo-target-w", "200",
+        ])
+
+
+def test_thumbnail_render_card_impact_card_tilt_deg_user_value_is_honored(monkeypatch, tmp_path):
+    """User-passed --card-tilt-deg flows through; it must NOT be silently
+    overridden to the orientation default. Real bug previously: -12.0 default
+    → silent +10 swap in card-impact.
+    """
+    import os
+
+    from PIL import Image as _Image
+
+    from video2yt.thumbnail import DEFAULT_FONT, render_thumbnail
+    if not os.path.exists(DEFAULT_FONT):
+        pytest.skip("Hiragino Sans GB not available on this platform")
+
+    bg = tmp_path / "bg.png"
+    _Image.new("RGB", (1280, 720), (40, 30, 60)).save(bg)
+    logo = tmp_path / "logo.png"
+    _Image.new("RGBA", (200, 80), (255, 200, 0, 255)).save(logo)
+    card = tmp_path / "card.png"
+    _Image.new("RGBA", (300, 420), (50, 100, 200, 255)).save(card)
+    out = tmp_path / "thumb.png"
+
+    captured: dict = {}
+    real_paste = __import__("video2yt.thumbnail", fromlist=["_paste_card_half_bleed"])._paste_card_half_bleed
+
+    def spy_paste(canvas, card_path, **kw):
+        captured["tilt_deg"] = kw["tilt_deg"]
+        return real_paste(canvas, card_path, **kw)
+
+    monkeypatch.setattr("video2yt.thumbnail._paste_card_half_bleed", spy_paste)
+
+    # Pass an unusual value (-25°) — must not be swapped to anything else.
+    render_thumbnail(
+        bg_path=bg, logo_path=logo, title="T",
+        output_path=out, orientation="card-impact",
+        card_path=card, hook="破", card_tilt_deg=-25.0,
+    )
+    assert captured["tilt_deg"] == -25.0
+
+
+def test_thumbnail_render_card_impact_logo_target_w_user_value_wins(monkeypatch, tmp_path):
+    """`--logo-target-w 200` in card-impact must produce a 200-wide logo, not
+    the orientation default of 160 (=0.125 * 1280)."""
+    import os
+
+    from PIL import Image as _Image
+
+    from video2yt.thumbnail import DEFAULT_FONT, render_thumbnail
+    if not os.path.exists(DEFAULT_FONT):
+        pytest.skip("Hiragino Sans GB not available on this platform")
+
+    bg = tmp_path / "bg.png"
+    _Image.new("RGB", (1280, 720), (40, 30, 60)).save(bg)
+    logo = tmp_path / "logo.png"
+    _Image.new("RGBA", (400, 160), (255, 200, 0, 255)).save(logo)
+    card = tmp_path / "card.png"
+    _Image.new("RGBA", (300, 420), (50, 100, 200, 255)).save(card)
+    out = tmp_path / "thumb.png"
+
+    sizes_seen: list[tuple[int, int]] = []
+    real_resize = _Image.Image.resize
+
+    def spy_resize(self, size, *args, **kwargs):
+        sizes_seen.append(size)
+        return real_resize(self, size, *args, **kwargs)
+
+    monkeypatch.setattr("PIL.Image.Image.resize", spy_resize)
+
+    render_thumbnail(
+        bg_path=bg, logo_path=logo, title="T",
+        output_path=out, orientation="card-impact",
+        card_path=card, hook="破", logo_target_w=200,
+    )
+    # The logo source is 400x160; at logo_target_w=200, scale=0.5 → resized to (200, 80).
+    assert (200, 80) in sizes_seen
+
+
+def test_thumbnail_render_card_impact_smoke_writes_png(tmp_path):
+    """End-to-end card-impact: real Pillow render writes a 1280x720 RGB PNG.
+
+    Requires Hiragino Sans GB to load (macOS-only). Skipped elsewhere.
+    """
+    import os
+
+    from PIL import Image as _Image
+
+    from video2yt.thumbnail import DEFAULT_FONT, render_thumbnail
+    if not os.path.exists(DEFAULT_FONT):
+        pytest.skip("Hiragino Sans GB not available on this platform")
+
+    bg = tmp_path / "bg.png"
+    _Image.new("RGB", (1280, 720), (40, 30, 60)).save(bg)
+    logo = tmp_path / "logo.png"
+    _Image.new("RGBA", (200, 80), (255, 200, 0, 255)).save(logo)
+    card = tmp_path / "card.png"
+    _Image.new("RGBA", (300, 420), (50, 100, 200, 255)).save(card)
+    out = tmp_path / "thumb.png"
+
+    render_thumbnail(
+        bg_path=bg, logo_path=logo, title="T",
+        output_path=out, orientation="card-impact",
+        card_path=card, hook="破局",
+        subtitle="戒指龙最强配置",
+        result_badge="9鸡", season_text="S13E07",
+    )
+    assert out.exists()
+    img = _Image.open(out)
+    assert img.size == (1280, 720)
+    assert img.mode == "RGB"
 
 
 # =========================================================================
