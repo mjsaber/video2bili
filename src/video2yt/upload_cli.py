@@ -38,7 +38,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def run(args: argparse.Namespace) -> dict:
     if not args.metadata.exists():
         raise FileNotFoundError(f"metadata not found: {args.metadata}")
-    meta = json.loads(args.metadata.read_text(encoding="utf-8"))
+    try:
+        meta = json.loads(args.metadata.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"malformed metadata JSON {args.metadata}: {e}")
+    upload.validate_meta(meta)
     video_path = Path(meta["video_path"])
     thumbnail_path = Path(meta["thumbnail_path"])
 

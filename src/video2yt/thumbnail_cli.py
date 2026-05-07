@@ -113,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         args = parse_args(argv)
         run(args)
         return 0
-    except (ValueError, FileNotFoundError, RuntimeError) as e:
+    except (ValueError, FileNotFoundError, RuntimeError, OSError) as e:
+        # OSError covers PIL UnidentifiedImageError + ImageFont.truetype failures
+        # (corrupt or missing background/logo/card PNG, missing system font, etc.).
         _log(f"error: {e}")
         return 1

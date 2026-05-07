@@ -4170,6 +4170,24 @@ def test_thumbnail_cli_main_returns_0_on_success(monkeypatch, tmp_path):
     assert rc == 0
 
 
+def test_thumbnail_cli_main_returns_1_on_pil_oserror(monkeypatch, tmp_path):
+    """PIL UnidentifiedImageError / ImageFont.truetype OSError must exit 1, not traceback."""
+    from PIL import UnidentifiedImageError
+
+    from video2yt import thumbnail_cli
+
+    def boom(**kw):
+        raise UnidentifiedImageError("cannot identify image file 'bg.png'")
+
+    monkeypatch.setattr("video2yt.thumbnail_cli.thumbnail.render_thumbnail", boom)
+    rc = thumbnail_cli.main([
+        "--bg", "bg.png", "--logo", "logo.png",
+        "--title", "t", "-o", str(tmp_path / "o.png"),
+        "--card", "c.png",
+    ])
+    assert rc == 1
+
+
 # =========================================================================
 # video2yt-tts tests
 # =========================================================================
@@ -4443,21 +4461,24 @@ def test_image_generate_codex_raises_on_called_process_error(monkeypatch):
         ig.generate_codex("prompt")
 
 
-def test_image_generate_gemini_wraps_sdk_exception(monkeypatch):
-    """SDK exceptions must become RuntimeError so CLI's main() catches them."""
+def test_image_generate_gemini_wraps_sdk_exception_without_hint_for_non_quota(monkeypatch):
+    """Non-quota SDK exceptions get wrapped without the billing hint appended."""
     from video2yt import image_gen as ig
 
     class _BoomModels:
         def generate_content(self, **kw):
-            raise RuntimeError("RESOURCE_EXHAUSTED quota")
+            raise RuntimeError("Authentication failed: invalid API key")
 
     class _FakeClient:
         def __init__(self, **kw):
             self.models = _BoomModels()
 
     monkeypatch.setattr("google.genai.Client", _FakeClient)
-    with pytest.raises(RuntimeError, match="Gemini SDK error"):
+    with pytest.raises(RuntimeError, match="Gemini SDK error") as exc_info:
         ig.generate_gemini("prompt", "key")
+    # The billing/quota hint is only appended for quota errors, not generic ones.
+    assert "enable billing" not in str(exc_info.value)
+    assert "free-tier" not in str(exc_info.value)
 
 
 def test_image_generate_gemini_quota_error_includes_billing_hint(monkeypatch):
@@ -4696,6 +4717,41 @@ def test_upload_list_channels_returns_items():
     assert items == [{"id": "UC_A", "snippet": {"title": "A"}}]
 
 
+def test_upload_validate_meta_passes_complete_dict(tmp_path):
+    from video2yt import upload as up
+    meta = _meta_dict(tmp_path / "v.mp4", tmp_path / "t.png")
+    up.validate_meta(meta)  # no exception
+
+
+def test_upload_validate_meta_lists_missing_keys():
+    from video2yt import upload as up
+    incomplete = {"title": "T", "video_path": "v.mp4"}
+    with pytest.raises(ValueError, match="metadata missing required keys"):
+        up.validate_meta(incomplete)
+
+
+def test_upload_validate_meta_rejects_non_dict():
+    from video2yt import upload as up
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        up.validate_meta(["not", "a", "dict"])
+
+
+def test_upload_get_credentials_oauth_flow_error_becomes_runtime_error(tmp_path, monkeypatch):
+    """`run_local_server` failing (port conflict, closed browser, etc.) → RuntimeError."""
+    from video2yt import upload as up
+
+    class _BoomFlow:
+        def run_local_server(self, **kw):
+            raise OSError("[Errno 48] Address already in use")
+
+    monkeypatch.setattr(
+        "video2yt.upload.InstalledAppFlow.from_client_secrets_file",
+        lambda path, scopes: _BoomFlow(),
+    )
+    with pytest.raises(RuntimeError, match="OAuth flow failed"):
+        up.get_credentials(tmp_path / "secret.json", tmp_path / "token.json")
+
+
 def test_upload_video_builds_correct_body_and_returns_id(tmp_path):
     from video2yt import upload as up
     video = tmp_path / "v.mp4"
@@ -4801,6 +4857,25 @@ def test_upload_cli_run_errors_when_metadata_missing(tmp_path):
     from video2yt import upload_cli
     args = upload_cli.parse_args(["--metadata", str(tmp_path / "missing.json")])
     with pytest.raises(FileNotFoundError, match="metadata not found"):
+        upload_cli.run(args)
+
+
+def test_upload_cli_run_errors_on_malformed_metadata_keys(tmp_path):
+    """Hand-written metadata.json missing fields gets a ValueError, not a KeyError."""
+    from video2yt import upload_cli
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps({"title": "T"}), encoding="utf-8")
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    with pytest.raises(ValueError, match="metadata missing required keys"):
+        upload_cli.run(args)
+
+
+def test_upload_cli_run_errors_on_malformed_metadata_json(tmp_path):
+    from video2yt import upload_cli
+    meta = tmp_path / "meta.json"
+    meta.write_text("{this is not json", encoding="utf-8")
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    with pytest.raises(ValueError, match="malformed metadata JSON"):
         upload_cli.run(args)
 
 

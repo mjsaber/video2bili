@@ -25,6 +25,25 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtube.readonly",
 ]
 
+REQUIRED_META_FIELDS = (
+    "video_path", "thumbnail_path", "title", "description", "tags",
+    "category_id", "default_language", "default_audio_language",
+    "privacy_status", "expected_channel_id",
+)
+
+
+def validate_meta(meta: dict) -> None:
+    """Raise `ValueError` if `meta` is missing any required key.
+
+    A clear up-front check avoids letting a hand-written metadata.json crash
+    deep inside upload_video with an unhelpful KeyError.
+    """
+    if not isinstance(meta, dict):
+        raise ValueError(f"metadata must be a JSON object, got {type(meta).__name__}")
+    missing = [k for k in REQUIRED_META_FIELDS if k not in meta]
+    if missing:
+        raise ValueError(f"metadata missing required keys: {missing}")
+
 
 def get_credentials(secret_path: Path, token_path: Path) -> Credentials:
     """Load (or mint) OAuth credentials. Auto-recovers from expired/revoked refresh tokens.
@@ -56,7 +75,13 @@ def get_credentials(secret_path: Path, token_path: Path) -> Credentials:
 
     if not creds or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), SCOPES)
-        creds = flow.run_local_server(port=0, prompt="consent")
+        try:
+            creds = flow.run_local_server(port=0, prompt="consent")
+        except Exception as e:
+            raise RuntimeError(
+                f"OAuth flow failed: {e}. Common causes: closed browser, "
+                "port conflict, no network, or denied consent."
+            ) from e
 
     token_path.write_text(creds.to_json())
     print(f"[yt] token saved to {token_path}", file=sys.stderr)
