@@ -62,8 +62,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--season", default="",
                         help="Season text. Placed bottom-left in card-impact, top-right "
                              "in card-tilt-right; ignored by other orientations.")
-    parser.add_argument("--season-size", type=int, default=80,
-                        help="Season text font size.")
+    parser.add_argument(
+        "--season-size", type=int, default=80,
+        help="Season text font size. Applies to card-impact (bottom-left) and "
+             "card-tilt-right (top-right); ignored by orientations that don't "
+             "render --season.",
+    )
     parser.add_argument(
         "--card-tilt-deg", type=float, default=None,
         help="Card rotation in degrees. Used only by card orientations (card-impact, "
