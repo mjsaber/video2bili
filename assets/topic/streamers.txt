@@ -1,0 +1,8 @@
+# Hearthstone Battlegrounds streamer whitelist for video2yt-topic.
+# Format: <name> <uid>
+# Find UID from a streamer's space URL: https://space.bilibili.com/<UID>
+# Lines starting with # are comments. Blank lines ignored.
+#
+# Add your trusted streamers below. Examples (REPLACE the UIDs with real ones):
+# 炉石郭枫 0
+# 超凡景清 0

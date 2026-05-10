@@ -1,0 +1,12 @@
+# Manually-curated list of strategies/流派 already covered.
+# One strategy per line. Lines starting with # are comments.
+#
+# Augments the auto-scan of output/<project>/intro_script.txt. Use this for:
+#   - Bootstrapping past projects that aren't easy to auto-detect
+#   - Cross-script bridges (e.g. intro is in 繁體 but Codex returns 簡體)
+#   - Strategies covered outside of this repo
+#
+# Bootstrapped from existing past projects (edit/remove as needed):
+戒指龙
+背靠背
+九鸡野兽
