@@ -1,7 +1,12 @@
 # Hearthstone Battlegrounds streamer whitelist for video2yt-topic.
-# Format: <name> <uid>
+# Format: <name> <uid> [mixed]
 # Find UID from a streamer's space URL: https://space.bilibili.com/<UID>
 # Lines starting with # are comments. Blank lines ignored.
+#
+# Optional 3rd token 'mixed' marks general-炉石 channels that post both BG
+# and constructed-mode content; the include-title filter (战棋|战旗) is
+# applied to those so non-BG uploads don't reach Codex. Default
+# (no 3rd token) = BG-dedicated channel — no positive title filter.
 
 炉石郭枫荷 485457586
 超凡景清 3546693133928781
@@ -12,6 +17,6 @@ Dan的战棋聊天室 8628805
 酒馆战棋七只羊 22526838
 炉石KK酒馆战棋 3546779144423511
 跳跳鸟-酒馆战棋 520936808
-炉石传说瓦莉拉 108635990
-安德罗妮的日常 285840500
-高冷难神衣锦夜行 383684359
+炉石传说瓦莉拉 108635990 mixed
+安德罗妮的日常 285840500 mixed
+高冷难神衣锦夜行 383684359 mixed

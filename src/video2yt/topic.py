@@ -53,6 +53,11 @@ DEFAULT_PAGES_PER_STREAMER = 2
 class Streamer:
     name: str
     uid: int
+    # True for general-炉石 channels (瓦莉拉, 衣锦夜行…) that mix BG with
+    # constructed-mode uploads; the include-title filter is applied to those.
+    # False (default) for BG-dedicated channels — those titles often skip
+    # the redundant '战棋' keyword so the include filter would over-prune.
+    is_mixed: bool = False
 
 
 @dataclass
@@ -89,7 +94,11 @@ class TopicPair:
 
 
 def parse_streamers(path: Path) -> list[Streamer]:
-    """Parse a 'name uid' per-line whitelist file.
+    """Parse a '<name> <uid> [mixed]' per-line whitelist file.
+
+    The optional 3rd token marks the streamer as a general-炉石 channel
+    whose uploads include constructed mode; the include-title filter is
+    applied to those. Default (no 3rd token) = BG-dedicated channel.
 
     Skips blank lines and `#` comments. Raises ValueError if the file is empty
     of valid entries — a CLI invocation with no streamers is almost certainly
@@ -103,11 +112,11 @@ def parse_streamers(path: Path) -> list[Streamer]:
         if not line or line.startswith("#"):
             continue
         parts = line.split()
-        if len(parts) != 2:
+        if len(parts) not in (2, 3):
             raise ValueError(
-                f"{path}:{lineno}: expected '<name> <uid>', got {raw!r}"
+                f"{path}:{lineno}: expected '<name> <uid> [mixed]', got {raw!r}"
             )
-        name, uid_str = parts
+        name, uid_str, *rest = parts
         try:
             uid = int(uid_str)
         except ValueError:
@@ -117,7 +126,15 @@ def parse_streamers(path: Path) -> list[Streamer]:
                 f"{path}:{lineno}: uid must be positive, got {uid}. "
                 "Find UID in https://space.bilibili.com/<UID>."
             )
-        streamers.append(Streamer(name=name, uid=uid))
+        is_mixed = False
+        if rest:
+            tag = rest[0].lower()
+            if tag != "mixed":
+                raise ValueError(
+                    f"{path}:{lineno}: 3rd token must be 'mixed' or omitted, got {rest[0]!r}"
+                )
+            is_mixed = True
+        streamers.append(Streamer(name=name, uid=uid, is_mixed=is_mixed))
     if not streamers:
         raise ValueError(
             f"{path} contains no valid streamer entries. "
@@ -237,7 +254,7 @@ def fetch_recent_videos(
     since_ts: int,
     min_duration_seconds: int = DEFAULT_MIN_DURATION_SECONDS,
     exclude_title_re: re.Pattern[str] = DEFAULT_EXCLUDE_TITLE_RE,
-    include_title_re: re.Pattern[str] | None = DEFAULT_INCLUDE_TITLE_RE,
+    include_title_re: re.Pattern[str] | None = None,
     pages: int = DEFAULT_PAGES_PER_STREAMER,
     credential=None,
 ) -> list[VideoCandidate]:
@@ -245,7 +262,10 @@ def fetch_recent_videos(
 
     Filters: created_ts ≥ since_ts, duration ≥ min,
     title NOT matching exclude_title_re, title matching include_title_re
-    (if provided — pass None to disable the positive filter).
+    (if provided — None disables the positive filter, which is the default
+    because BG-dedicated channels often skip the redundant '战棋' keyword).
+    The orchestrator (`run_topic`) sets this per-streamer based on
+    `streamer.is_mixed`.
     """
     raw = asyncio.run(_async_fetch_videos(streamer.uid, pages, credential))
     out: list[VideoCandidate] = []
@@ -580,6 +600,7 @@ def run_topic(
                 s,
                 since_ts=since_ts,
                 min_duration_seconds=min_duration_seconds,
+                include_title_re=DEFAULT_INCLUDE_TITLE_RE if s.is_mixed else None,
                 pages=pages_per_streamer,
                 credential=credential,
             )

@@ -5313,11 +5313,23 @@ def _topic_summary(
 def test_topic_parse_streamers_basic(tmp_path):
     from video2yt import topic
     f = tmp_path / "s.txt"
-    f.write_text("# comment\n\n炉石郭枫 12345\n超凡景清 67890\n", encoding="utf-8")
+    f.write_text(
+        "# comment\n\n炉石郭枫 12345\n超凡景清 67890\n瓦莉拉 11 mixed\n",
+        encoding="utf-8",
+    )
     out = topic.parse_streamers(f)
-    assert len(out) == 2
-    assert out[0].name == "炉石郭枫" and out[0].uid == 12345
-    assert out[1].name == "超凡景清" and out[1].uid == 67890
+    assert len(out) == 3
+    assert out[0].name == "炉石郭枫" and out[0].uid == 12345 and out[0].is_mixed is False
+    assert out[1].name == "超凡景清" and out[1].uid == 67890 and out[1].is_mixed is False
+    assert out[2].name == "瓦莉拉" and out[2].uid == 11 and out[2].is_mixed is True
+
+
+def test_topic_parse_streamers_invalid_3rd_token(tmp_path):
+    from video2yt import topic
+    f = tmp_path / "s.txt"
+    f.write_text("瓦莉拉 11 something\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="3rd token must be 'mixed'"):
+        topic.parse_streamers(f)
 
 
 def test_topic_parse_streamers_missing_file(tmp_path):
@@ -5330,7 +5342,10 @@ def test_topic_parse_streamers_invalid_format(tmp_path):
     from video2yt import topic
     f = tmp_path / "s.txt"
     f.write_text("郭枫\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="expected '<name> <uid>'"):
+    with pytest.raises(ValueError, match=r"expected '<name> <uid> \[mixed\]'"):
+        topic.parse_streamers(f)
+    f.write_text("郭枫 1 mixed extra\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"expected '<name> <uid> \[mixed\]'"):
         topic.parse_streamers(f)
 
 
@@ -5404,19 +5419,18 @@ def test_topic_parse_length_string_invalid():
 
 
 def test_topic_fetch_recent_videos_filters(monkeypatch):
+    """Default behavior: no positive title filter (BG-dedicated streamer)."""
     from video2yt import topic
 
     fixture = [
-        # passes: recent, long enough, BG title
-        {"bvid": "BV1aa", "title": "战棋实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
+        # passes: recent, long enough, plain title — no '战棋' required for BG-only channels
+        {"bvid": "BV1aa", "title": "实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
         # filtered: too short
-        {"bvid": "BV1bb", "title": "战棋实战对局", "description": "d", "length": "05:00", "play": 50000, "created": 2000},
+        {"bvid": "BV1bb", "title": "实战对局", "description": "d", "length": "05:00", "play": 50000, "created": 2000},
         # filtered: bad title (教程)
-        {"bvid": "BV1cc", "title": "战棋新版本教程", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
+        {"bvid": "BV1cc", "title": "新版本教程", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
         # filtered: too old (created < since_ts)
-        {"bvid": "BV1dd", "title": "战棋实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 500},
-        # filtered: title is BG-irrelevant (constructed-mode upload from a general HS streamer)
-        {"bvid": "BV1ee", "title": "标准模式天梯冲分", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
+        {"bvid": "BV1dd", "title": "实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 500},
     ]
     async def fake(uid, pages, credential=None):
         assert uid == 999 and pages == 2
@@ -5435,30 +5449,8 @@ def test_topic_fetch_recent_videos_filters(monkeypatch):
     assert out[0].duration_seconds == 720
 
 
-def test_topic_fetch_recent_videos_include_filter_disabled(monkeypatch):
-    """Passing include_title_re=None disables the positive filter."""
-    from video2yt import topic
-
-    fixture = [
-        {"bvid": "BV1aa", "title": "战棋实战对局", "description": "d", "length": "12:00", "play": 1, "created": 2000},
-        {"bvid": "BV1ee", "title": "标准模式天梯冲分", "description": "d", "length": "12:00", "play": 1, "created": 2000},
-    ]
-    async def fake(uid, pages, credential=None):
-        return fixture
-    monkeypatch.setattr(topic, "_async_fetch_videos", fake)
-
-    out = topic.fetch_recent_videos(
-        topic.Streamer(name="测试", uid=999),
-        since_ts=1000,
-        min_duration_seconds=600,
-        pages=1,
-        include_title_re=None,
-    )
-    assert {c.bvid for c in out} == {"BV1aa", "BV1ee"}
-
-
 def test_topic_fetch_recent_videos_include_filter_accepts_zhanqi_variants(monkeypatch):
-    """Both 战棋 and 战旗 titles pass the default include filter."""
+    """When the include filter is supplied, both 战棋 and 战旗 pass; non-BG fails."""
     from video2yt import topic
 
     fixture = [
@@ -5471,10 +5463,11 @@ def test_topic_fetch_recent_videos_include_filter_accepts_zhanqi_variants(monkey
     monkeypatch.setattr(topic, "_async_fetch_videos", fake)
 
     out = topic.fetch_recent_videos(
-        topic.Streamer(name="测试", uid=999),
+        topic.Streamer(name="测试", uid=999, is_mixed=True),
         since_ts=1000,
         min_duration_seconds=600,
         pages=1,
+        include_title_re=topic.DEFAULT_INCLUDE_TITLE_RE,
     )
     assert {c.bvid for c in out} == {"BV1q", "BV1z"}
 
@@ -5787,6 +5780,33 @@ def test_topic_run_topic_orchestrator_writes_report(tmp_path, monkeypatch):
     text = report.read_text(encoding="utf-8")
     assert "戒指龙流" in text
     assert "[新流派" in text  # nothing under output_root
+
+
+def test_topic_run_topic_applies_include_filter_only_to_mixed_streamers(tmp_path, monkeypatch):
+    """BG-only streamers fetch with no include filter; mixed streamers get the
+    战棋|战旗 filter so constructed-mode uploads are dropped before Codex."""
+    from video2yt import topic
+
+    streamers = [
+        topic.Streamer(name="郭枫", uid=1),                 # BG-dedicated
+        topic.Streamer(name="瓦莉拉", uid=2, is_mixed=True),  # general HS
+    ]
+    seen: dict[str, object] = {}
+
+    def fake_fetch(s, **kw):
+        seen[s.name] = kw.get("include_title_re")
+        return []
+    monkeypatch.setattr(topic, "fetch_recent_videos", fake_fetch)
+
+    topic.run_topic(
+        streamers=streamers,
+        days=7,
+        output_root=tmp_path / "no_output",
+        done_topics_file=None,
+        report_path=tmp_path / "report.md",
+    )
+    assert seen["郭枫"] is None
+    assert seen["瓦莉拉"] is topic.DEFAULT_INCLUDE_TITLE_RE
 
 
 def test_topic_run_topic_no_candidates_writes_empty_report(tmp_path, monkeypatch):
