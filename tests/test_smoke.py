@@ -5407,14 +5407,16 @@ def test_topic_fetch_recent_videos_filters(monkeypatch):
     from video2yt import topic
 
     fixture = [
-        # passes: recent, long enough, plain title
-        {"bvid": "BV1aa", "title": "实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
+        # passes: recent, long enough, BG title
+        {"bvid": "BV1aa", "title": "战棋实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
         # filtered: too short
-        {"bvid": "BV1bb", "title": "实战对局", "description": "d", "length": "05:00", "play": 50000, "created": 2000},
+        {"bvid": "BV1bb", "title": "战棋实战对局", "description": "d", "length": "05:00", "play": 50000, "created": 2000},
         # filtered: bad title (教程)
-        {"bvid": "BV1cc", "title": "新版本教程", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
+        {"bvid": "BV1cc", "title": "战棋新版本教程", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
         # filtered: too old (created < since_ts)
-        {"bvid": "BV1dd", "title": "实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 500},
+        {"bvid": "BV1dd", "title": "战棋实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 500},
+        # filtered: title is BG-irrelevant (constructed-mode upload from a general HS streamer)
+        {"bvid": "BV1ee", "title": "标准模式天梯冲分", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
     ]
     async def fake(uid, pages, credential=None):
         assert uid == 999 and pages == 2
@@ -5431,6 +5433,50 @@ def test_topic_fetch_recent_videos_filters(monkeypatch):
     assert out[0].bvid == "BV1aa"
     assert out[0].streamer == "测试"
     assert out[0].duration_seconds == 720
+
+
+def test_topic_fetch_recent_videos_include_filter_disabled(monkeypatch):
+    """Passing include_title_re=None disables the positive filter."""
+    from video2yt import topic
+
+    fixture = [
+        {"bvid": "BV1aa", "title": "战棋实战对局", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+        {"bvid": "BV1ee", "title": "标准模式天梯冲分", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+    ]
+    async def fake(uid, pages, credential=None):
+        return fixture
+    monkeypatch.setattr(topic, "_async_fetch_videos", fake)
+
+    out = topic.fetch_recent_videos(
+        topic.Streamer(name="测试", uid=999),
+        since_ts=1000,
+        min_duration_seconds=600,
+        pages=1,
+        include_title_re=None,
+    )
+    assert {c.bvid for c in out} == {"BV1aa", "BV1ee"}
+
+
+def test_topic_fetch_recent_videos_include_filter_accepts_zhanqi_variants(monkeypatch):
+    """Both 战棋 and 战旗 titles pass the default include filter."""
+    from video2yt import topic
+
+    fixture = [
+        {"bvid": "BV1q", "title": "酒馆战棋实战", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+        {"bvid": "BV1z", "title": "炉石战旗对局", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+        {"bvid": "BV1n", "title": "炉石传说宿伞之魂", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+    ]
+    async def fake(uid, pages, credential=None):
+        return fixture
+    monkeypatch.setattr(topic, "_async_fetch_videos", fake)
+
+    out = topic.fetch_recent_videos(
+        topic.Streamer(name="测试", uid=999),
+        since_ts=1000,
+        min_duration_seconds=600,
+        pages=1,
+    )
+    assert {c.bvid for c in out} == {"BV1q", "BV1z"}
 
 
 def test_topic_fetch_danmaku_sample_evenly_spaced(monkeypatch):

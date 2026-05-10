@@ -36,6 +36,11 @@ DEFAULT_EXCLUDE_TITLE_RE = re.compile(
     r"教程|介绍|解读|盘点|集锦|教学|攻略|讲解|新手|开箱|抽卡|预告|采访|测评|"
     r"复盘|赛事|新版本爆料|更新|公告|采访|杂谈|聊天"
 )
+# Positive title filter — required because the whitelist now mixes BG-only
+# streamers with general 炉石 streamers (瓦莉拉, 衣锦夜行, 安德罗妮…) whose
+# recent uploads include constructed-mode and brawl content. Without this,
+# Codex would be asked to extract a BG '流派' from videos that aren't BG.
+DEFAULT_INCLUDE_TITLE_RE = re.compile(r"战棋|战旗")
 DEFAULT_MIN_DURATION_SECONDS = 120  # 2 min — short-attack-form videos
                                     # (e.g. 景清's 5-7 min recap clips) count as
                                     # 对战 in this project's actual workflow.
@@ -232,12 +237,15 @@ def fetch_recent_videos(
     since_ts: int,
     min_duration_seconds: int = DEFAULT_MIN_DURATION_SECONDS,
     exclude_title_re: re.Pattern[str] = DEFAULT_EXCLUDE_TITLE_RE,
+    include_title_re: re.Pattern[str] | None = DEFAULT_INCLUDE_TITLE_RE,
     pages: int = DEFAULT_PAGES_PER_STREAMER,
     credential=None,
 ) -> list[VideoCandidate]:
     """Fetch this streamer's recent uploads and return the surviving battle candidates.
 
-    Filters: created_ts ≥ since_ts, duration ≥ min, title NOT matching exclude_title_re.
+    Filters: created_ts ≥ since_ts, duration ≥ min,
+    title NOT matching exclude_title_re, title matching include_title_re
+    (if provided — pass None to disable the positive filter).
     """
     raw = asyncio.run(_async_fetch_videos(streamer.uid, pages, credential))
     out: list[VideoCandidate] = []
@@ -247,6 +255,8 @@ def fetch_recent_videos(
             continue
         title = str(v.get("title", "")).strip()
         if not title or exclude_title_re.search(title):
+            continue
+        if include_title_re is not None and not include_title_re.search(title):
             continue
         try:
             duration = parse_length_string(str(v.get("length", "0:00")))
