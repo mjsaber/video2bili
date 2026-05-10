@@ -5871,6 +5871,35 @@ def test_topic_cli_main_returns_1_on_missing_whitelist(tmp_path):
     assert rc == 1
 
 
+def test_topic_load_credential_wraps_yt_dlp_exception(monkeypatch):
+    """yt_dlp can raise a wide range of exception types (browser missing,
+    keyring failure, locked cookie DB, unsupported browser). They must NOT
+    bubble out — they must surface as a RuntimeError that main() can catch."""
+    from video2yt import topic
+    class WeirdYtDlpError(Exception):
+        pass
+    def boom(browser):
+        raise WeirdYtDlpError("simulated keyring blowup")
+    monkeypatch.setattr("yt_dlp.cookies.extract_cookies_from_browser", boom)
+    with pytest.raises(RuntimeError, match="could not load cookies"):
+        topic.load_credential_from_browser("chrome")
+
+
+def test_topic_cli_main_returns_1_when_browser_cookies_blow_up(tmp_path, monkeypatch):
+    """Default `--cookies-from-browser chrome` must not produce a stack trace
+    when the user has no Chrome / no Bilibili login / locked DB."""
+    from video2yt import topic_cli
+    streamers_file = tmp_path / "s.txt"
+    streamers_file.write_text("郭枫 1\n", encoding="utf-8")
+    class WeirdYtDlpError(Exception):
+        pass
+    def boom(browser):
+        raise WeirdYtDlpError("no chrome installed")
+    monkeypatch.setattr("yt_dlp.cookies.extract_cookies_from_browser", boom)
+    rc = topic_cli.main(["--whitelist", str(streamers_file)])
+    assert rc == 1
+
+
 def test_topic_cli_main_returns_0_on_success(tmp_path, monkeypatch):
     from video2yt import topic, topic_cli
     streamers_file = tmp_path / "s.txt"

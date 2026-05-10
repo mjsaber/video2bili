@@ -173,10 +173,25 @@ def parse_length_string(length: str) -> int:
 
 def load_credential_from_browser(browser: str = "chrome"):
     """Extract Bilibili cookies from a local browser (via yt_dlp) and build a
-    Credential. Without this, anonymous calls hit HTTP 412 (B 站风控)."""
+    Credential. Without this, anonymous calls hit HTTP 412 (B 站风控).
+
+    All extraction failures are normalized to RuntimeError so the CLI's
+    `main()` catch handles them cleanly. Common causes: browser not
+    installed, no profile, Bilibili not logged in, cookie DB locked by an
+    open browser, missing keyring on Linux.
+    """
     import yt_dlp.cookies
     from bilibili_api import Credential
-    jar = yt_dlp.cookies.extract_cookies_from_browser(browser)
+    try:
+        jar = yt_dlp.cookies.extract_cookies_from_browser(browser)
+    except Exception as exc:
+        raise RuntimeError(
+            f"could not load cookies from {browser!r}: {exc}. "
+            "Hints: (1) close the browser if it's open (it locks the cookie "
+            "DB); (2) try a different browser via --cookies-from-browser "
+            "{firefox,safari,edge,chromium}; (3) skip auth via "
+            "--cookies-from-browser '' (anonymous calls will hit B 站 412)."
+        ) from exc
     pick: dict[str, str] = {}
     for c in jar:
         if c.domain.endswith("bilibili.com") and c.name in {
@@ -186,7 +201,8 @@ def load_credential_from_browser(browser: str = "chrome"):
     if not pick.get("SESSDATA"):
         raise RuntimeError(
             f"no Bilibili SESSDATA cookie found in {browser}. "
-            "Log into bilibili.com in that browser first."
+            "Log into bilibili.com in that browser first, or skip auth via "
+            "--cookies-from-browser ''."
         )
     return Credential(
         sessdata=pick.get("SESSDATA"),
