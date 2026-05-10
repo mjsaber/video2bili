@@ -5416,7 +5416,7 @@ def test_topic_fetch_recent_videos_filters(monkeypatch):
         # filtered: too old (created < since_ts)
         {"bvid": "BV1dd", "title": "实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 500},
     ]
-    async def fake(uid, pages):
+    async def fake(uid, pages, credential=None):
         assert uid == 999 and pages == 2
         return fixture
     monkeypatch.setattr(topic, "_async_fetch_videos", fake)
@@ -5436,7 +5436,7 @@ def test_topic_fetch_recent_videos_filters(monkeypatch):
 def test_topic_fetch_danmaku_sample_evenly_spaced(monkeypatch):
     from video2yt import topic
     texts = [f"d{i}" for i in range(1000)]
-    async def fake(bvid):
+    async def fake(bvid, credential=None):
         assert bvid == "BV1aa"
         return texts
     monkeypatch.setattr(topic, "_async_fetch_danmaku", fake)
@@ -5449,7 +5449,7 @@ def test_topic_fetch_danmaku_sample_evenly_spaced(monkeypatch):
 
 def test_topic_fetch_danmaku_sample_returns_all_when_small(monkeypatch):
     from video2yt import topic
-    async def fake(bvid):
+    async def fake(bvid, credential=None):
         return ["a", "b", "c"]
     monkeypatch.setattr(topic, "_async_fetch_danmaku", fake)
     assert topic.fetch_danmaku_sample("BV", sample_size=10) == ["a", "b", "c"]
@@ -5523,15 +5523,15 @@ def test_topic_group_pairs_keeps_two_distinct_streamers():
     from video2yt import topic
     s1 = _topic_summary(
         candidate=_topic_candidate(bvid="BV1", streamer="郭枫", play=100000),
-        strategy="戒指龙流",
+        strategy="戒指龙流", core_card="戒指龙",
     )
     s2 = _topic_summary(
         candidate=_topic_candidate(bvid="BV2", streamer="景清", play=80000),
-        strategy="戒指龙流",
+        strategy="戒指龙流", core_card="戒指龙",
     )
     s3 = _topic_summary(
         candidate=_topic_candidate(bvid="BV3", streamer="郭枫", play=50000),
-        strategy="戒指龙流",
+        strategy="戒指龙流", core_card="戒指龙",
     )  # second video by same streamer; should be dropped
     pairs = topic.group_pairs([s1, s2, s3])
     assert len(pairs) == 1
@@ -5539,19 +5539,37 @@ def test_topic_group_pairs_keeps_two_distinct_streamers():
     assert {s.candidate.streamer for s in pairs[0].summaries} == {"郭枫", "景清"}
 
 
+def test_topic_group_pairs_unifies_via_core_card_when_strategy_differs():
+    """Real-world case: Codex returns slightly different strategy names for
+    the same comp ('戒指龙流' vs '亡灵戒指龙'), but core_card is the same."""
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫", play=100000),
+        strategy="戒指龙流", core_card="戒指龙",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清", play=80000),
+        strategy="亡灵戒指龙", core_card="戒指龙",
+    )
+    pairs = topic.group_pairs([s1, s2])
+    assert len(pairs) == 1
+    # The displayed strategy is the higher-played one's strategy
+    assert pairs[0].strategy == "戒指龙流"
+
+
 def test_topic_group_pairs_drops_singletons():
     from video2yt import topic
     s1 = _topic_summary(
         candidate=_topic_candidate(streamer="郭枫"),
-        strategy="孤儿流",
+        strategy="孤儿流", core_card="孤儿卡",
     )
     assert topic.group_pairs([s1]) == []
 
 
-def test_topic_group_pairs_skips_blank_strategy():
+def test_topic_group_pairs_skips_blank_core_card():
     from video2yt import topic
-    s1 = _topic_summary(candidate=_topic_candidate(streamer="郭枫"), strategy="")
-    s2 = _topic_summary(candidate=_topic_candidate(streamer="景清"), strategy="")
+    s1 = _topic_summary(candidate=_topic_candidate(streamer="郭枫"), core_card="")
+    s2 = _topic_summary(candidate=_topic_candidate(streamer="景清"), core_card="")
     assert topic.group_pairs([s1, s2]) == []
 
 
@@ -5802,6 +5820,7 @@ def test_topic_cli_run_invokes_run_topic_with_parsed_args(tmp_path, monkeypatch)
         captured.update(kw)
         return kw["report_path"]
     monkeypatch.setattr(topic, "run_topic", fake_run_topic)
+    monkeypatch.setattr(topic, "load_credential_from_browser", lambda b: f"CRED:{b}")
     args = topic_cli.parse_args([
         "--whitelist", str(streamers_file),
         "--report", str(tmp_path / "r.md"),
@@ -5812,6 +5831,25 @@ def test_topic_cli_run_invokes_run_topic_with_parsed_args(tmp_path, monkeypatch)
     assert captured["days"] == 3
     assert captured["report_path"] == tmp_path / "r.md"
     assert len(captured["streamers"]) == 1
+    assert captured["credential"] == "CRED:chrome"
+
+
+def test_topic_cli_run_skips_credential_when_browser_empty(tmp_path, monkeypatch):
+    from video2yt import topic, topic_cli
+    streamers_file = tmp_path / "s.txt"
+    streamers_file.write_text("郭枫 1\n", encoding="utf-8")
+    captured: dict = {}
+    monkeypatch.setattr(topic, "run_topic", lambda **kw: captured.update(kw) or kw["report_path"])
+    def boom(b):
+        raise AssertionError("should not be called when --cookies-from-browser=''")
+    monkeypatch.setattr(topic, "load_credential_from_browser", boom)
+    args = topic_cli.parse_args([
+        "--whitelist", str(streamers_file),
+        "--report", str(tmp_path / "r.md"),
+        "--cookies-from-browser", "",
+    ])
+    topic_cli.run(args)
+    assert captured["credential"] is None
 
 
 def test_topic_cli_run_default_report_path_uses_today(tmp_path, monkeypatch):
@@ -5820,6 +5858,7 @@ def test_topic_cli_run_default_report_path_uses_today(tmp_path, monkeypatch):
     streamers_file.write_text("郭枫 1\n", encoding="utf-8")
     captured: dict = {}
     monkeypatch.setattr(topic, "run_topic", lambda **kw: captured.update(kw) or kw["report_path"])
+    monkeypatch.setattr(topic, "load_credential_from_browser", lambda b: None)
     args = topic_cli.parse_args(["--whitelist", str(streamers_file)])
     topic_cli.run(args)
     assert captured["report_path"].parent == Path("output") / "topics"
@@ -5837,6 +5876,7 @@ def test_topic_cli_main_returns_0_on_success(tmp_path, monkeypatch):
     streamers_file = tmp_path / "s.txt"
     streamers_file.write_text("郭枫 1\n", encoding="utf-8")
     monkeypatch.setattr(topic, "run_topic", lambda **kw: kw["report_path"])
+    monkeypatch.setattr(topic, "load_credential_from_browser", lambda b: None)
     rc = topic_cli.main([
         "--whitelist", str(streamers_file),
         "--report", str(tmp_path / "r.md"),

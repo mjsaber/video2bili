@@ -36,7 +36,9 @@ DEFAULT_EXCLUDE_TITLE_RE = re.compile(
     r"教程|介绍|解读|盘点|集锦|教学|攻略|讲解|新手|开箱|抽卡|预告|采访|测评|"
     r"复盘|赛事|新版本爆料|更新|公告|采访|杂谈|聊天"
 )
-DEFAULT_MIN_DURATION_SECONDS = 600  # 10 min
+DEFAULT_MIN_DURATION_SECONDS = 120  # 2 min — short-attack-form videos
+                                    # (e.g. 景清's 5-7 min recap clips) count as
+                                    # 对战 in this project's actual workflow.
 DEFAULT_DAYS = 7
 DEFAULT_DANMAKU_SAMPLE = 80
 DEFAULT_PAGES_PER_STREAMER = 2
@@ -169,9 +171,35 @@ def parse_length_string(length: str) -> int:
     raise ValueError(f"unparseable length string: {length!r}")
 
 
-async def _async_fetch_videos(uid: int, pages: int) -> list[dict]:
+def load_credential_from_browser(browser: str = "chrome"):
+    """Extract Bilibili cookies from a local browser (via yt_dlp) and build a
+    Credential. Without this, anonymous calls hit HTTP 412 (B 站风控)."""
+    import yt_dlp.cookies
+    from bilibili_api import Credential
+    jar = yt_dlp.cookies.extract_cookies_from_browser(browser)
+    pick: dict[str, str] = {}
+    for c in jar:
+        if c.domain.endswith("bilibili.com") and c.name in {
+            "SESSDATA", "bili_jct", "buvid3", "buvid4", "DedeUserID",
+        }:
+            pick[c.name] = c.value
+    if not pick.get("SESSDATA"):
+        raise RuntimeError(
+            f"no Bilibili SESSDATA cookie found in {browser}. "
+            "Log into bilibili.com in that browser first."
+        )
+    return Credential(
+        sessdata=pick.get("SESSDATA"),
+        bili_jct=pick.get("bili_jct"),
+        buvid3=pick.get("buvid3"),
+        buvid4=pick.get("buvid4"),
+        dedeuserid=pick.get("DedeUserID"),
+    )
+
+
+async def _async_fetch_videos(uid: int, pages: int, credential=None) -> list[dict]:
     from bilibili_api import user as bili_user
-    u = bili_user.User(uid)
+    u = bili_user.User(uid, credential=credential)
     out: list[dict] = []
     for pn in range(1, pages + 1):
         resp = await u.get_videos(pn=pn, ps=30)
@@ -189,12 +217,13 @@ def fetch_recent_videos(
     min_duration_seconds: int = DEFAULT_MIN_DURATION_SECONDS,
     exclude_title_re: re.Pattern[str] = DEFAULT_EXCLUDE_TITLE_RE,
     pages: int = DEFAULT_PAGES_PER_STREAMER,
+    credential=None,
 ) -> list[VideoCandidate]:
     """Fetch this streamer's recent uploads and return the surviving battle candidates.
 
     Filters: created_ts ≥ since_ts, duration ≥ min, title NOT matching exclude_title_re.
     """
-    raw = asyncio.run(_async_fetch_videos(streamer.uid, pages))
+    raw = asyncio.run(_async_fetch_videos(streamer.uid, pages, credential))
     out: list[VideoCandidate] = []
     for v in raw:
         created = int(v.get("created", 0))
@@ -224,20 +253,25 @@ def fetch_recent_videos(
     return out
 
 
-async def _async_fetch_danmaku(bvid: str) -> list[str]:
+async def _async_fetch_danmaku(bvid: str, credential=None) -> list[str]:
     from bilibili_api import video as bili_video
-    v = bili_video.Video(bvid=bvid)
+    v = bili_video.Video(bvid=bvid, credential=credential)
     danmakus = await v.get_danmakus(page_index=0)
     return [getattr(d, "text", "") for d in danmakus if getattr(d, "text", "")]
 
 
-def fetch_danmaku_sample(bvid: str, sample_size: int = DEFAULT_DANMAKU_SAMPLE) -> list[str]:
+def fetch_danmaku_sample(
+    bvid: str,
+    sample_size: int = DEFAULT_DANMAKU_SAMPLE,
+    *,
+    credential=None,
+) -> list[str]:
     """Fetch danmaku for a video and return up to `sample_size` evenly-spaced texts.
 
     Even sampling preserves coverage across the timeline (early-game vs late-game
     chat differ a lot for BG matches).
     """
-    all_texts = asyncio.run(_async_fetch_danmaku(bvid))
+    all_texts = asyncio.run(_async_fetch_danmaku(bvid, credential))
     if len(all_texts) <= sample_size:
         return all_texts
     step = len(all_texts) / sample_size
@@ -358,18 +392,23 @@ def summarize_with_codex(
 
 
 def group_pairs(summaries: list[VideoSummary]) -> list[TopicPair]:
-    """Group by normalized strategy. Keep groups whose unique-streamer count ≥2.
+    """Group by `core_card`. Keep groups with ≥2 distinct streamers.
 
-    Within a group, take 2 summaries from distinct streamers (the highest-played).
+    Why core_card not strategy: in practice Codex returns slightly different
+    strategy names for the same comp across videos (e.g. '戒指龙流' vs
+    '亡灵戒指龙'), but the core_card is the actual pivotal Hearthstone card
+    and stays stable. Within a group, take the 2 highest-played summaries
+    from distinct streamers; the displayed `strategy` field for the pair is
+    that of the higher-played pick.
     """
-    by_strategy: dict[str, list[VideoSummary]] = {}
+    by_card: dict[str, list[VideoSummary]] = {}
     for s in summaries:
-        key = s.strategy.strip()
+        key = s.core_card.strip()
         if not key:
             continue
-        by_strategy.setdefault(key, []).append(s)
+        by_card.setdefault(key, []).append(s)
     out: list[TopicPair] = []
-    for strat, group in by_strategy.items():
+    for card, group in by_card.items():
         seen_streamers: set[str] = set()
         picked: list[VideoSummary] = []
         for s in sorted(group, key=lambda x: x.candidate.play_count, reverse=True):
@@ -381,7 +420,7 @@ def group_pairs(summaries: list[VideoSummary]) -> list[TopicPair]:
                 break
         if len(picked) == 2:
             out.append(TopicPair(
-                strategy=strat,
+                strategy=picked[0].strategy or card,
                 summaries=picked,
                 is_already_done=False,
                 done_marker=None,
@@ -493,6 +532,7 @@ def run_topic(
     pages_per_streamer: int = DEFAULT_PAGES_PER_STREAMER,
     codex_timeout: int = 600,
     now_ts: int | None = None,
+    credential=None,
 ) -> Path:
     """Top-level orchestrator. Returns the report path.
 
@@ -503,7 +543,8 @@ def run_topic(
     since_ts = now_ts - days * 86400
 
     print(
-        f"[topic] window: last {days} days · {len(streamers)} streamer(s)",
+        f"[topic] window: last {days} days · {len(streamers)} streamer(s)"
+        f" · auth={'on' if credential else 'off'}",
         file=sys.stderr,
     )
     candidates: list[VideoCandidate] = []
@@ -514,6 +555,7 @@ def run_topic(
                 since_ts=since_ts,
                 min_duration_seconds=min_duration_seconds,
                 pages=pages_per_streamer,
+                credential=credential,
             )
         except Exception as exc:
             print(f"[topic] skipping {s.name} (uid={s.uid}): {exc}", file=sys.stderr)
@@ -538,7 +580,9 @@ def run_topic(
     danmaku_by_bvid: dict[str, list[str]] = {}
     for c in candidates:
         try:
-            danmaku_by_bvid[c.bvid] = fetch_danmaku_sample(c.bvid, danmaku_sample_size)
+            danmaku_by_bvid[c.bvid] = fetch_danmaku_sample(
+                c.bvid, danmaku_sample_size, credential=credential,
+            )
         except Exception as exc:
             print(f"[topic]   {c.bvid} danmaku fail ({exc}); using []", file=sys.stderr)
             danmaku_by_bvid[c.bvid] = []

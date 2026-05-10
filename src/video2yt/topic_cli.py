@@ -90,6 +90,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=600,
         help="Seconds to wait for the codex summarization batch (default 600).",
     )
+    parser.add_argument(
+        "--cookies-from-browser",
+        default="chrome",
+        help=(
+            "Browser to lift Bilibili cookies from (default chrome). "
+            "Anonymous calls hit HTTP 412 风控 — log into bilibili.com in this "
+            "browser first. Pass empty string to skip and run unauthenticated."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -103,6 +112,11 @@ def run(args: argparse.Namespace) -> Path:
     else:
         report_path = args.report
 
+    credential = None
+    if args.cookies_from_browser:
+        credential = topic.load_credential_from_browser(args.cookies_from_browser)
+        _log(f"loaded Bilibili credential from {args.cookies_from_browser}")
+
     return topic.run_topic(
         streamers=streamers,
         days=args.days,
@@ -113,6 +127,7 @@ def run(args: argparse.Namespace) -> Path:
         danmaku_sample_size=args.danmaku_sample,
         pages_per_streamer=args.pages,
         codex_timeout=args.codex_timeout,
+        credential=credential,
     )
 
 
