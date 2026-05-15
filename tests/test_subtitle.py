@@ -517,3 +517,67 @@ def test_split_threshold_is_strict_greater_than():
     seg = subtitle.FunASRSegment(0.0, 3.0, text)
     out = subtitle.split_segments([seg], max_line_chars=30)
     assert len(out) == 1
+
+
+@patch("subprocess.run")
+def test_burn_constructs_ffmpeg_command_with_basename(mock_run, tmp_path):
+    """ffmpeg subprocess uses cwd=temp_dir and an ASS basename, not absolute path
+    (same path-escape avoidance as burn.py)."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"fake")
+    output_mp4 = tmp_path / "seg_subbed.mp4"
+    entries = [subtitle.SrtEntry(0.0, 2.0, "你好")]
+    subtitle.burn_subtitles(
+        input_mp4, entries, output_mp4,
+        font_face="Hiragino Sans GB", font_size=42,
+        outline_px=4, shadow_px=2,
+        video_width=1920, video_height=1080,
+    )
+    assert mock_run.called
+    call_args = mock_run.call_args
+    cmd = call_args.kwargs.get("args") or call_args.args[0]
+    cwd = call_args.kwargs.get("cwd")
+    # ASS path referenced by basename via subtitles=f='<name>'
+    assert any("subtitles=f='" in arg for arg in cmd)
+    # Filter does NOT contain the full path of the ASS
+    assert not any(str(tmp_path) in arg and ".ass" in arg for arg in cmd)
+    # cwd is set
+    assert cwd is not None
+
+
+@patch("subprocess.run")
+def test_burn_passes_outline_shadow_via_compose(mock_run, tmp_path):
+    """The ASS written to disk has BorderStyle=1, Outline=4, Shadow=2 in style."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"fake")
+    output_mp4 = tmp_path / "seg_subbed.mp4"
+    entries = [subtitle.SrtEntry(0.0, 2.0, "你好")]
+    subtitle.burn_subtitles(
+        input_mp4, entries, output_mp4,
+        font_face="Hiragino Sans GB", font_size=42,
+        outline_px=4, shadow_px=2,
+        video_width=1920, video_height=1080,
+    )
+    # The temp ASS file gets created beside the input (subtitle.py uses input.parent)
+    ass_files = list(input_mp4.parent.glob("*.ass"))
+    assert ass_files, "expected an ASS file to be written next to the input"
+    ass_text = ass_files[0].read_text(encoding="utf-8")
+    assert "1,4,2,2," in ass_text   # BorderStyle=1, Outline=4, Shadow=2, Alignment=2
+
+
+@patch("subprocess.run")
+def test_burn_uses_audio_copy(mock_run, tmp_path):
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"fake")
+    entries = [subtitle.SrtEntry(0.0, 2.0, "abc")]
+    subtitle.burn_subtitles(
+        input_mp4, entries, tmp_path / "out.mp4",
+        font_face="x", font_size=42, outline_px=4, shadow_px=2,
+        video_width=1920, video_height=1080,
+    )
+    cmd = mock_run.call_args.kwargs.get("args") or mock_run.call_args.args[0]
+    assert "-c:a" in cmd
+    assert cmd[cmd.index("-c:a") + 1] == "copy"

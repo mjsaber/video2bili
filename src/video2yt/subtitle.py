@@ -11,6 +11,8 @@ from pathlib import Path
 
 import yaml
 
+from video2yt.compose import srt_to_ass
+
 # Bilibili's renderer convention for type=4 (bottom-fixed) danmaku display time.
 # Source: spec §5.1 D. Changing this requires re-tuning danmaku detection thresholds.
 BILIBILI_FIXED_DANMAKU_SECONDS = 5.0
@@ -642,3 +644,54 @@ def split_segments(
     for seg in segments:
         raw_entries.extend(_split_one_recursive(seg.start, seg.end, seg.text, max_line_chars))
     return _apply_hard_floor(raw_entries)
+
+
+def burn_subtitles(
+    input_video: Path,
+    entries: list[SrtEntry],
+    output_video: Path,
+    *,
+    font_face: str,
+    font_size: int,
+    outline_px: int,
+    shadow_px: int,
+    video_width: int,
+    video_height: int,
+) -> None:
+    """Burn ``entries`` into ``input_video``, write to ``output_video``.
+
+    Reuses ``compose.srt_to_ass`` for ASS templating. ffmpeg is invoked with
+    ``cwd=input_video.parent`` and the ASS path referenced by basename to dodge
+    the ``subtitles=`` filter's path-escape issues (same trick as ``burn.py``).
+    """
+    output_video.parent.mkdir(parents=True, exist_ok=True)
+
+    # Serialize entries as SRT so we can reuse compose.srt_to_ass.
+    srt_segs = [FunASRSegment(e.start, e.end, e.text) for e in entries]
+    srt_text = segments_to_srt(srt_segs)
+
+    ass_text = srt_to_ass(
+        srt_text, video_width, video_height, font_face, font_size,
+        position="bottom", outline_px=outline_px, shadow_px=shadow_px,
+    )
+
+    ass_path = input_video.parent / f"{input_video.stem}.subbed.ass"
+    ass_path.write_text(ass_text, encoding="utf-8")
+    ass_basename = ass_path.name
+
+    cmd = [
+        "ffmpeg", "-y", "-v", "error",
+        "-i", str(input_video.resolve()),
+        "-vf", f"subtitles=f='{ass_basename}'",
+        "-c:a", "copy",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-r", "30",
+        str(output_video.resolve()),
+    ]
+    subprocess.run(
+        cmd, check=True, capture_output=True, text=True,
+        cwd=str(input_video.parent),
+    )
