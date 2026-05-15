@@ -29,6 +29,7 @@ It is invoked per-segment, not on the merged output, because detection signals o
 | Dimension | Decision | Rationale |
 |---|---|---|
 | Form factor | Independent CLI `video2yt-subtitle` | Single-responsibility, matches existing flat module pattern (compose/compose_cli, merge/merge_cli); cacheable per-segment; parallelizable; doesn't bloat merge.py |
+| Dependency gating | ML deps (`funasr`, `rapidocr-onnxruntime`) live in `[project.optional-dependencies] subtitle`, NOT top-level | These deps pull in PyTorch + ONNX runtime (~1.5-2GB). Other CLIs in this repo shouldn't be forced to install them. Install via `uv sync --extra subtitle`; lazy import + preflight check matches existing whisperx pattern |
 | ASR engine | Alibaba SenseVoice-Small via `funasr` | 2-4 pts lower Mandarin CER than whisper-large; ~5× faster; built-in VAD; mature open-source by 2026 |
 | Cleanup | Codex CLI with in-repo glossary | Same auth path as image-gen (ChatGPT subscription); risk profile consistent with current project usage of Codex CLI; preserves option to migrate to direct API later |
 | Detection signals | a + b + c (danmaku XML scan + visual OCR sample + manual flag) | User chose comprehensive coverage. "Don't add" is the safe default — any signal saying SKIP triggers SKIP |
@@ -54,17 +55,29 @@ tests/
 
 ```toml
 dependencies = [
-    # ... existing ...
-    "funasr>=1.2",            # SenseVoice-Small runtime
-    "rapidocr-onnxruntime>=1.4",
-    "pyyaml>=6.0",            # glossary parsing
+    # ... existing top-level deps unchanged ...
+    "pyyaml>=6.0",            # glossary parsing — lightweight, top-level
+]
+
+[project.optional-dependencies]
+subtitle = [
+    "funasr>=1.2",            # SenseVoice-Small runtime + PyTorch transitively
+    "rapidocr-onnxruntime>=1.4",  # ONNX runtime for OCR detection
 ]
 
 [project.scripts]
 video2yt-subtitle = "video2yt.subtitle_cli:main"
 ```
 
-Rationale for flat layout (not a `subtitle/` subpackage): every other module in the project is a single flat file. Introducing a subpackage here would be the first inconsistency. If `subtitle.py` grows past ~800 lines we revisit; not now.
+**Dependency gating**: `funasr` and `rapidocr-onnxruntime` together pull in PyTorch + ONNX runtime, easily 1.5-2GB on disk. Users who only run `video2yt` / `video2yt-merge` / `video2yt-compose` should not be forced to install this stack. Therefore:
+
+- Heavy deps live in `[project.optional-dependencies] subtitle = [...]`
+- Install via `uv sync --extra subtitle` (or `uv add --extra subtitle video2yt`)
+- `subtitle.py` uses lazy imports (`import funasr` / `import rapidocr_onnxruntime` inside the functions that need them), matching the existing `transcribe.py` pattern with `whisperx`
+- `subtitle_cli.preflight()` does `try: import funasr; import rapidocr_onnxruntime; except ImportError → raise RuntimeError("subtitle extras not installed. Run: uv sync --extra subtitle")`
+- README documents this extra in the install section
+
+Rationale for flat module layout (not a `subtitle/` subpackage): every other module in the project is a single flat file. Introducing a subpackage here would be the first inconsistency. If `subtitle.py` grows past ~800 lines we revisit; not now.
 
 ## 5. Data flow (per segment)
 
@@ -137,7 +150,53 @@ OUTPUT: segment_subbed.mp4 (or input copy/hardlink if skipped)
         Persisted intermediates: <stem>.raw.srt, <stem>.cleaned.srt
 ```
 
-### 5.1 Deliberate design choices to call out
+### 5.1 Timeline handling — explicit contract
+
+This is the load-bearing part: subtitles only work if text and timestamps stay aligned. Three timeline concerns, each handled explicitly:
+
+**A. SenseVoice segment splitting (ASR → SRT)**
+
+SenseVoice-Small returns segment-level timestamps. Typical segments run 1-15s; long pauses produce short segments, but rapid speech can yield a single 10-15s segment with 80+ Chinese characters — too long to read as one subtitle line.
+
+Rule:
+- Each FunASR segment becomes one or more SRT entries
+- If the segment text length ≤ `MAX_LINE_CHARS` (default **30** effective CJK chars, matching `compose.py::_effective_chars_per_line` for 1080p / fontsize 42): one entry, keep `(start, end)` as-is
+- If longer: split at Chinese sentence punctuation (`。！？`) first; if any sub-piece still > MAX_LINE_CHARS, split further at clause punctuation (`；，、`). This is the same split policy as `transcribe.py::split_long_sentences`, and we reuse that function rather than re-implementing it.
+- Split timestamps proportionally by character count: piece `i` of total `n` with chars `c_i` gets `[start + (Σ_{j<i} c_j / Σ c) * duration, start + (Σ_{j≤i} c_j / Σ c) * duration)`. This isn't word-aligned (SenseVoice doesn't give word timestamps) but is good enough for short bursts; an alignment pass with whisperx wav2vec2 is a future option that would replace this.
+- Hard floor: every SRT entry has duration ≥ 0.8s (extend `end` if needed). Hard ceiling: ≤ 6s per entry (split further if needed).
+
+**B. Cleanup preserves alignment by construction, not by sanity check**
+
+Codex receives a numbered list of N lines and is instructed to return exactly N lines. The cleanup step then re-zips:
+
+```
+raw:     [(t0,t1,raw_line_0), (t1,t2,raw_line_1), ..., (tN-1,tN,raw_line_{N-1})]
+cleaned: [(t0,t1,fix_line_0), (t1,t2,fix_line_1), ..., (tN-1,tN,fix_line_{N-1})]
+```
+
+Timestamps come from raw and never change. The cleanup output is line-aligned text only.
+
+The ±20% per-line length sanity check (and N-lines-out == N-lines-in check) is defense-in-depth, NOT the alignment mechanism. If Codex returns the wrong number of lines, or any single line's length blows past 20%, we fall back to raw — because we no longer trust that the re-zip is semantically meaningful, even though it would still be syntactically valid.
+
+**C. Danmaku coverage formula (detection signal)**
+
+For type=4 (bottom-fixed) danmaku, Bilibili's standard renderer displays each entry for **5 seconds**. There is no duration field in the XML; the 5s window is a renderer convention, not metadata.
+
+Coverage formula:
+```
+intervals = [(start_i, start_i + 5.0) for each type=4 danmaku i]
+coverage_seconds = total length of UNION of intervals
+coverage_ratio = coverage_seconds / segment_duration
+```
+
+Threshold (defaults, tunable via flags):
+```
+hit if (count(type=4) >= --danmaku-min-fixed) AND (coverage_ratio >= --danmaku-min-coverage / 100)
+```
+
+The 5.0 second assumption is documented as a constant `BILIBILI_FIXED_DANMAKU_SECONDS = 5.0` in the source, with a comment pointing to this spec. Future Bilibili renderer changes would require updating the constant.
+
+### 5.2 Deliberate design choices to call out
 
 - **Short-circuit decision, not voting**: any single signal saying SKIP triggers SKIP. Rationale: "don't add subtitles" is the safe undo-able state. Adding subtitles and getting them wrong (overlapping with existing burnt subs) is much harder to fix than realizing later you missed an opportunity.
 - **Cleanup is "quality bonus", not "correctness path"**: Codex failures fall back to raw ASR without failing the run. Better to ship slightly imperfect terminology than to block the pipeline.
@@ -219,6 +278,7 @@ ADD path (no existing subs):
 |---|---|---|
 | `ffmpeg` / `ffprobe` not in PATH | preflight error, print install command | 1 |
 | `codex` CLI not in PATH | preflight error (still required even with --skip-cleanup, matches project convention) | 1 |
+| `funasr` / `rapidocr_onnxruntime` not importable | preflight error: `subtitle extras not installed. Run: uv sync --extra subtitle` | 1 |
 | FunASR model not downloaded | Let FunASR auto-download on first run, log one line `[downloading SenseVoice-Small ~600MB...]`. Network failure during download surfaces as ASR runtime failure | 0 on success / 3 on network failure |
 | Input file missing / not 1080p | error with actual resolution | 2 |
 | `--danmaku` XML corrupted | error (fail fast — user passed bad input) | 2 |
@@ -247,9 +307,18 @@ New file `tests/test_subtitle.py`, following the existing pattern of mocking at 
 - Overlapping intervals merged correctly for coverage
 - Corrupt XML raises ValueError with helpful message
 
-**ASR-result → SRT conversion**
-- Mock FunASR returns [(0.0, 2.5, "你好"), (2.5, 5.0, "世界")] → valid SRT
+**ASR-result → SRT conversion (timeline-critical, §5.1 A)**
+- Mock FunASR returns [(0.0, 2.5, "你好"), (2.5, 5.0, "世界")] → 2 SRT entries
+- Long segment (12s, 90 chars) → splits at `。`, then `，` if still too long
+- Proportional time-split: 3-piece split of (0.0, 12.0) with char counts [40, 30, 20] → cumulative ratios → (0.0, 5.33), (5.33, 9.33), (9.33, 12.0)
+- Hard floor: 0.3s segment gets extended to 0.8s end
+- Hard ceiling: 8s single piece exceeds the 6s ceiling and gets split further
 - Chinese punctuation at segment boundaries preserved
+
+**Danmaku coverage (timeline-critical, §5.1 C)**
+- Single type=4 at t=10 → coverage interval [10, 15] = 5s
+- Two type=4 at t=10, t=12 (overlapping) → union [10, 17] = 7s (NOT 10s)
+- Type=4 at t=segment_end-2 → clipped to [end-2, end] = 2s (the 5s window can extend past end conceptually, but coverage caps at segment_duration)
 
 **Cleanup sanity check**
 - Mock Codex normal response → use cleaned
