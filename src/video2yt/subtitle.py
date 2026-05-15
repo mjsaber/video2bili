@@ -412,6 +412,96 @@ def segments_to_srt(segments: list[FunASRSegment]) -> str:
     return "\n".join(lines) + "\n"
 
 
+from video2yt.transcribe import _count_effective_chars
+
+
+def _build_cleanup_prompt(segments: list[FunASRSegment], glossary: Glossary) -> str:
+    correction_lines = "\n".join(f"  {k} → {v}" for k, v in glossary.corrections.items())
+    canonical_lines = "\n".join(f"  - {term}" for term in glossary.canonical)
+    numbered = "\n".join(f"{i + 1}. {seg.text}" for i, seg in enumerate(segments))
+    return (
+        "以下是繁體中文爐石戰記戰棋實況解說的 STT 轉寫，每行一句。\n"
+        "只修正錯字、術語、人名；\n"
+        "每行修正後的字數必須與原文相差不超過 ±20%；\n"
+        "不改寫語意、不增刪句子、不合併或分割行。\n"
+        "\n"
+        "術語對應表（左 → 右為錯誤 → 正確）：\n"
+        f"{correction_lines}\n"
+        "\n"
+        "首選用詞（若有歧義請偏向以下形式）：\n"
+        f"{canonical_lines}\n"
+        "\n"
+        f"輸入（共 {len(segments)} 行，已編號）：\n"
+        f"{numbered}\n"
+        "\n"
+        f"輸出：請只輸出 {len(segments)} 行修正結果，順序與輸入對應，不要編號、不要說明、不要空行。"
+    )
+
+
+def _invoke_codex(prompt: str, timeout: int = CLEANUP_TIMEOUT_SECONDS) -> str:
+    """Run the codex CLI non-interactively. Returns the raw stdout text.
+
+    Uses ``codex exec`` (the non-interactive subcommand). Stdin is unused;
+    prompt is passed as the positional argument.
+    """
+    result = subprocess.run(
+        ["codex", "exec", "--skip-git-repo-check", prompt],
+        check=True, capture_output=True, text=True, timeout=timeout,
+    )
+    return result.stdout
+
+
+def cleanup_with_codex(
+    segments: list[FunASRSegment],
+    glossary: Glossary,
+    timeout: int = CLEANUP_TIMEOUT_SECONDS,
+) -> list[FunASRSegment]:
+    """Run Codex terminology cleanup. On ANY failure, return ``segments`` unchanged.
+
+    Sanity checks (spec §5.1 B):
+    - line count out == line count in
+    - per-line: 0.8 ≤ len_eff(clean) / max(len_eff(raw), 1) ≤ 1.2
+    """
+    if not segments:
+        return segments
+    prompt = _build_cleanup_prompt(segments, glossary)
+    try:
+        raw_output = _invoke_codex(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _log.warning("codex cleanup timeout after %ds; using raw ASR", timeout)
+        return segments
+    except subprocess.CalledProcessError as e:
+        _log.warning("codex cleanup failed (exit %d); using raw ASR", e.returncode)
+        return segments
+    except FileNotFoundError:
+        _log.warning("codex CLI not found; using raw ASR")
+        return segments
+
+    cleaned_lines = [ln.strip() for ln in raw_output.splitlines() if ln.strip()]
+    if len(cleaned_lines) != len(segments):
+        _log.warning(
+            "codex output line count %d != input %d; using raw ASR",
+            len(cleaned_lines), len(segments),
+        )
+        return segments
+
+    for i, (raw_seg, clean_text) in enumerate(zip(segments, cleaned_lines)):
+        raw_eff = max(_count_effective_chars(raw_seg.text), 1)
+        clean_eff = _count_effective_chars(clean_text)
+        ratio = clean_eff / raw_eff
+        if not (0.8 <= ratio <= 1.2):
+            _log.warning(
+                "codex line %d length ratio %.2f outside [0.8, 1.2]; using raw ASR",
+                i + 1, ratio,
+            )
+            return segments
+
+    return [
+        FunASRSegment(raw.start, raw.end, clean)
+        for raw, clean in zip(segments, cleaned_lines)
+    ]
+
+
 def parse_srt_to_segments(srt_text: str) -> list[FunASRSegment]:
     """Parse a standard SRT (one entry per FunASR segment) back into segments.
 

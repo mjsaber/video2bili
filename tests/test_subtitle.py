@@ -1,5 +1,7 @@
 """Unit tests for video2yt-subtitle. All subprocess boundaries are mocked."""
 
+import logging
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -353,3 +355,74 @@ def test_parse_srt_skips_empty_blocks():
     assert len(parsed) == 2
     assert parsed[0].text == "foo"
     assert parsed[1].text == "bar"
+
+
+@patch("video2yt.subtitle._invoke_codex")
+def test_cleanup_happy_path_replaces_text(mock_codex):
+    segs = [
+        subtitle.FunASRSegment(0.0, 2.0, "戰旗很有趣"),
+        subtitle.FunASRSegment(2.0, 5.0, "拉法母真的強"),
+    ]
+    glossary = subtitle.Glossary(
+        corrections={"戰旗": "戰棋", "拉法母": "拉法姆"},
+        canonical=[],
+    )
+    mock_codex.return_value = "戰棋很有趣\n拉法姆真的強\n"
+    out = subtitle.cleanup_with_codex(segs, glossary)
+    assert out[0].text == "戰棋很有趣"
+    assert out[1].text == "拉法姆真的強"
+    # Timestamps preserved exactly
+    assert out[0].start == 0.0 and out[0].end == 2.0
+    assert out[1].start == 2.0 and out[1].end == 5.0
+
+
+@patch("video2yt.subtitle._invoke_codex")
+def test_cleanup_line_count_mismatch_falls_back(mock_codex, caplog):
+    """Codex returns the wrong number of lines → return raw + WARNING."""
+    segs = [
+        subtitle.FunASRSegment(0.0, 2.0, "abc"),
+        subtitle.FunASRSegment(2.0, 4.0, "def"),
+    ]
+    glossary = subtitle.Glossary({}, [])
+    mock_codex.return_value = "abc\n"   # only 1 line, expected 2
+    with caplog.at_level(logging.WARNING):
+        out = subtitle.cleanup_with_codex(segs, glossary)
+    assert out == segs
+    assert any("line count" in r.message.lower() for r in caplog.records)
+
+
+@patch("video2yt.subtitle._invoke_codex")
+def test_cleanup_length_blown_per_line_falls_back(mock_codex, caplog):
+    """One line's length ratio is outside [0.8, 1.2] → fall back, WARN."""
+    segs = [
+        subtitle.FunASRSegment(0.0, 2.0, "短"),    # 1 char
+        subtitle.FunASRSegment(2.0, 4.0, "也短"),  # 2 chars
+    ]
+    glossary = subtitle.Glossary({}, [])
+    # Line 2 expanded from 2 chars to 10 chars → ratio 5.0, way over 1.2
+    mock_codex.return_value = "短\n這是個被改寫太多的句子\n"
+    with caplog.at_level(logging.WARNING):
+        out = subtitle.cleanup_with_codex(segs, glossary)
+    assert out == segs
+    assert any("length" in r.message.lower() for r in caplog.records)
+
+
+@patch("video2yt.subtitle._invoke_codex")
+def test_cleanup_codex_timeout_falls_back(mock_codex, caplog):
+    segs = [subtitle.FunASRSegment(0.0, 2.0, "abc")]
+    mock_codex.side_effect = subprocess.TimeoutExpired(cmd="codex", timeout=30)
+    with caplog.at_level(logging.WARNING):
+        out = subtitle.cleanup_with_codex(segs, subtitle.Glossary({}, []))
+    assert out == segs
+    assert any("timeout" in r.message.lower() for r in caplog.records)
+
+
+@patch("video2yt.subtitle._invoke_codex")
+def test_cleanup_boundary_length_ratio_accepted(mock_codex):
+    """Length ratio of exactly 0.8 / 1.2 is accepted (closed boundary)."""
+    segs = [subtitle.FunASRSegment(0.0, 1.0, "abcde")]   # 5 effective chars (ASCII counts as 0.5 each → 2.5)
+    glossary = subtitle.Glossary({}, [])
+    # Replacement with same effective char count is trivially in-range
+    mock_codex.return_value = "abcde\n"
+    out = subtitle.cleanup_with_codex(segs, glossary)
+    assert out[0].text == "abcde"
