@@ -666,11 +666,13 @@ def split_segments(
 ) -> list[SrtEntry]:
     """Style-dependent split of FunASR-segment-granularity segments into final SRT
     entries. Spec §5.1 C — char-oversize is the SOLE trigger; duration alone never
-    triggers split. Hard floor applied to all entries post-split."""
-    raw_entries: list[SrtEntry] = []
+    triggers split. Hard floor applied PER FunASR segment so cascade overflow from
+    one segment cannot bleed into the next segment's audio time slot."""
+    out: list[SrtEntry] = []
     for seg in segments:
-        raw_entries.extend(_split_one_recursive(seg.start, seg.end, seg.text, max_line_chars))
-    return _apply_hard_floor(raw_entries)
+        seg_entries = _split_one_recursive(seg.start, seg.end, seg.text, max_line_chars)
+        out.extend(_apply_hard_floor(seg_entries))
+    return out
 
 
 def burn_subtitles(

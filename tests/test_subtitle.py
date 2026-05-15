@@ -530,6 +530,31 @@ def test_apply_hard_floor_cascade_exceeds_budget_no_invalid_ranges():
     assert out[-1].end <= 1.0 + 1e-9
 
 
+def test_split_hard_floor_cascade_does_not_bleed_into_next_segment():
+    """Cascade overflow from one FunASR segment must not push subsequent
+    segments' entries past their natural start. Spec §5.1 C — the cap
+    is per-segment, not per-overall-video."""
+    segs = [
+        subtitle.FunASRSegment(0.0, 1.0, "一二三。四五六。七八九。"),  # 3 short pieces
+        subtitle.FunASRSegment(1.0, 10.0, "下一段的字幕內容"),         # natural start at 1.0
+    ]
+    out = subtitle.split_segments(segs, max_line_chars=4)
+    # The entry corresponding to the second FunASR segment must start AT or AFTER 1.0
+    # (not pushed forward by the first segment's cascade).
+    # Find entries whose text is from segment 2:
+    seg2_entries = [e for e in out if "下一段" in e.text or "字幕內容" in e.text]
+    assert seg2_entries, "expected seg2 entries to survive splitting"
+    assert seg2_entries[0].start <= 1.0 + 1e-6, (
+        f"seg2's first entry got pushed past natural start: {seg2_entries[0]}"
+    )
+    # And no entry from seg1 should end past 1.0 (the seg1 boundary)
+    seg1_entries = [e for e in out if e not in seg2_entries]
+    for e in seg1_entries:
+        assert e.end <= 1.0 + 1e-6, (
+            f"seg1 entry bled past seg1.end=1.0: {e}"
+        )
+
+
 def test_split_threshold_is_strict_greater_than():
     """Exactly MAX_LINE_CHARS chars -> no split."""
     text = "一" * 30
