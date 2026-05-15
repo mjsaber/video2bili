@@ -426,3 +426,94 @@ def test_cleanup_boundary_length_ratio_accepted(mock_codex):
     mock_codex.return_value = "abcde\n"
     out = subtitle.cleanup_with_codex(segs, glossary)
     assert out[0].text == "abcde"
+
+
+# ---- Task 10: split_segments ----
+
+def test_split_char_ok_segment_unchanged():
+    """15 chars under MAX=30 -> single entry, identical timing."""
+    seg = subtitle.FunASRSegment(0.0, 3.0, "短短的一句話只有幾個字")
+    out = subtitle.split_segments([seg], max_line_chars=30)
+    assert len(out) == 1
+    assert out[0].start == 0.0 and out[0].end == 3.0
+    assert out[0].text == seg.text
+
+
+def test_split_long_duration_short_text_not_split():
+    """25 chars / 9 seconds / no punctuation -> kept as ONE entry (rule §5.1 C)."""
+    seg = subtitle.FunASRSegment(0.0, 9.0, "二十五個字大概就是這樣長的一句話可以讀完")
+    out = subtitle.split_segments([seg], max_line_chars=30)
+    assert len(out) == 1
+    assert out[0].end == 9.0
+
+
+def test_split_sentence_punctuation():
+    """45 chars with 。in middle -> Pass 1 useful split."""
+    text = "前半段大概有二十多個字。後半段也有差不多二十多個字。"
+    seg = subtitle.FunASRSegment(0.0, 6.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=20)
+    assert len(out) >= 2
+    assert "前半段" in out[0].text
+    assert out[-1].end == 6.0
+
+
+def test_split_clause_only():
+    """No 。 but has ，-> Pass 2 used."""
+    text = "前半段大概有二十多個字，後半段也有差不多二十多個字"
+    seg = subtitle.FunASRSegment(0.0, 6.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=20)
+    assert len(out) >= 2
+
+
+def test_split_no_punctuation_uses_midpoint():
+    """40+ chars with zero punctuation -> Pass 3 midpoint."""
+    text = "一" * 40
+    seg = subtitle.FunASRSegment(0.0, 4.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=10)
+    assert len(out) >= 4
+    assert all(len(e.text) <= 10 for e in out)
+    assert out[0].start == 0.0
+    assert out[-1].end == 4.0
+
+
+def test_split_termination_edge_punctuation_only_at_end():
+    """Was the infinite-recursion bug: '一'*99 + '。' must split via Pass 3, not loop."""
+    text = "一" * 99 + "。"
+    seg = subtitle.FunASRSegment(0.0, 10.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=30)
+    assert len(out) >= 4
+    assert all(len(e.text) <= 30 for e in out)
+
+
+def test_split_punctuation_only_at_start():
+    text = "。" + "一" * 99
+    seg = subtitle.FunASRSegment(0.0, 10.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=30)
+    # Useful Pass 1 split: ["。", "一"*99]; the long piece then recurses to Pass 3
+    assert len(out) >= 4
+
+
+def test_split_proportional_time_allocation():
+    """Pieces weighted by effective-char counts inside (0.0, 10.0)."""
+    text = "AAAA。BBB。CCC"
+    seg = subtitle.FunASRSegment(0.0, 10.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=2)
+    assert out[0].start == 0.0
+    assert out[-1].end == 10.0
+
+
+def test_split_hard_floor_extends_short_pieces():
+    """Pieces shorter than 0.8s get extended; cascade pushes forward, no overlap."""
+    text = "一二三四五。六七八九十。"
+    seg = subtitle.FunASRSegment(0.0, 1.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=4)
+    for prev, curr in zip(out, out[1:]):
+        assert curr.start >= prev.end - 1e-6
+
+
+def test_split_threshold_is_strict_greater_than():
+    """Exactly MAX_LINE_CHARS chars -> no split."""
+    text = "一" * 30
+    seg = subtitle.FunASRSegment(0.0, 3.0, text)
+    out = subtitle.split_segments([seg], max_line_chars=30)
+    assert len(out) == 1

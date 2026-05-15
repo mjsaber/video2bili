@@ -336,6 +336,13 @@ class FunASRSegment:
     text: str
 
 
+@dataclass(frozen=True)
+class SrtEntry:
+    start: float
+    end: float
+    text: str
+
+
 def _extract_wav(video_path: Path, dest_dir: Path) -> Path:
     """Extract a mono 16kHz wav using ffmpeg into ``dest_dir/audio.wav``."""
     out = dest_dir / "audio.wav"
@@ -528,3 +535,110 @@ def parse_srt_to_segments(srt_text: str) -> list[FunASRSegment]:
             continue
         segs.append(FunASRSegment(start, end, text))
     return segs
+
+
+def _is_useful_split(pieces: list[str] | None, parent: str) -> bool:
+    """A punctuation split is 'useful' iff it produced >=2 non-empty pieces
+    AND each is strictly shorter than the parent text. Termination invariant
+    for ``split_segments`` (spec §5.1 C)."""
+    if not pieces or len(pieces) < 2:
+        return False
+    parent_len = len(parent)
+    return all(0 < len(p) < parent_len for p in pieces)
+
+
+def _split_by_punctuation(text: str, punct_class: str) -> list[str]:
+    """Split text after each occurrence of any char in ``punct_class``,
+    keeping the punctuation glued to the preceding piece. Empty trailing
+    pieces are dropped."""
+    pieces: list[str] = []
+    buf: list[str] = []
+    for ch in text:
+        buf.append(ch)
+        if ch in punct_class:
+            pieces.append("".join(buf))
+            buf = []
+    if buf:
+        pieces.append("".join(buf))
+    return [p for p in pieces if p]
+
+
+def _split_at_effective_midpoint(text: str) -> list[str]:
+    """Split into exactly two non-empty pieces at the char index closest to len//2.
+    Pre: len(text) >= 2. Pass 3 of spec §5.1 C."""
+    n = len(text)
+    mid = n // 2
+    if mid == 0:
+        mid = 1
+    return [text[:mid], text[mid:]]
+
+
+def _allocate_time_proportionally(
+    start: float, end: float, pieces: list[str]
+) -> list[tuple[float, float, str]]:
+    """Allocate ``(end - start)`` across ``pieces`` weighted by effective-CJK-char count."""
+    duration = end - start
+    weights = [max(_count_effective_chars(p), 1) for p in pieces]  # min 1 prevents zero-weight
+    total = sum(weights)
+    timed: list[tuple[float, float, str]] = []
+    cum = 0
+    for p, w in zip(pieces, weights):
+        new_cum = cum + w
+        s = start + (cum / total) * duration
+        e = start + (new_cum / total) * duration
+        timed.append((s, e, p))
+        cum = new_cum
+    return timed
+
+
+def _apply_hard_floor(entries: list[SrtEntry]) -> list[SrtEntry]:
+    """Walk left-to-right; for any entry shorter than HARD_FLOOR_SECONDS, extend
+    its ``end`` forward and push the next entry's ``start`` forward by the same
+    amount. Never introduces overlap. Final-entry overflow is tolerated (the
+    spec accepts a final entry < floor if the whole segment is itself too short)."""
+    if not entries:
+        return entries
+    out = [SrtEntry(e.start, e.end, e.text) for e in entries]
+    for i in range(len(out) - 1):
+        cur = out[i]
+        needed = HARD_FLOOR_SECONDS - (cur.end - cur.start)
+        if needed > 0:
+            new_end = cur.end + needed
+            next_e = out[i + 1]
+            new_next_start = next_e.start + needed
+            out[i] = SrtEntry(cur.start, new_end, cur.text)
+            out[i + 1] = SrtEntry(new_next_start, next_e.end, next_e.text)
+    return out
+
+
+def _split_one_recursive(
+    start: float, end: float, text: str, max_line_chars: int
+) -> list[SrtEntry]:
+    """Recursive splitter for a single FunASR segment. Spec §5.1 C algorithm."""
+    if _count_effective_chars(text) <= max_line_chars:
+        return [SrtEntry(start, end, text)]
+    # Pass 1
+    pieces = _split_by_punctuation(text, SENTENCE_PUNCT)
+    if not _is_useful_split(pieces, text):
+        # Pass 2
+        pieces = _split_by_punctuation(text, CLAUSE_PUNCT)
+    if not _is_useful_split(pieces, text):
+        # Pass 3 — always useful
+        pieces = _split_at_effective_midpoint(text)
+    timed = _allocate_time_proportionally(start, end, pieces)
+    out: list[SrtEntry] = []
+    for s, e, t in timed:
+        out.extend(_split_one_recursive(s, e, t, max_line_chars))
+    return out
+
+
+def split_segments(
+    segments: list[FunASRSegment], max_line_chars: int
+) -> list[SrtEntry]:
+    """Style-dependent split of FunASR-segment-granularity segments into final SRT
+    entries. Spec §5.1 C — char-oversize is the SOLE trigger; duration alone never
+    triggers split. Hard floor applied to all entries post-split."""
+    raw_entries: list[SrtEntry] = []
+    for seg in segments:
+        raw_entries.extend(_split_one_recursive(seg.start, seg.end, seg.text, max_line_chars))
+    return _apply_hard_floor(raw_entries)
