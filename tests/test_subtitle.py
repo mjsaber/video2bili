@@ -614,3 +614,62 @@ def test_passthrough_overwrites_existing(tmp_path):
     dst.write_bytes(b"old")
     subtitle.passthrough(src, dst)
     assert dst.read_bytes() == b"new"
+
+
+from video2yt import subtitle_cli
+
+
+def test_parse_args_mutex_force_flags_rejected():
+    with pytest.raises(SystemExit):
+        subtitle_cli.parse_args(["seg.mp4", "--force-add", "--force-skip"])
+
+
+def test_parse_args_defaults():
+    args = subtitle_cli.parse_args(["seg.mp4"])
+    assert args.segment == Path("seg.mp4")
+    assert args.danmaku is None
+    assert args.glossary is None
+    assert args.force is None
+    assert args.ocr_interval == 5.0
+    assert args.danmaku_min_fixed == 10
+    assert args.danmaku_min_coverage == 30
+    assert args.skip_cleanup is False
+    assert args.font_face == "Hiragino Sans GB"
+    assert args.outline_px == 4
+    assert args.shadow_px == 2
+
+
+def test_parse_args_force_add():
+    args = subtitle_cli.parse_args(["seg.mp4", "--force-add"])
+    assert args.force == "add"
+
+
+def test_parse_args_force_skip():
+    args = subtitle_cli.parse_args(["seg.mp4", "--force-skip"])
+    assert args.force == "skip"
+
+
+def test_default_output_path_uses_subbed_suffix():
+    args = subtitle_cli.parse_args(["/tmp/seg.mp4"])
+    out = subtitle_cli._default_output(args.segment)
+    assert out == Path("/tmp/seg_subbed.mp4")
+
+
+@patch("video2yt.subtitle_cli.shutil.which")
+def test_preflight_fails_when_ffmpeg_missing(mock_which):
+    mock_which.return_value = None
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        subtitle_cli.preflight()
+
+
+@patch("video2yt.subtitle_cli.shutil.which", return_value="/usr/bin/found")
+@patch("builtins.__import__")
+def test_preflight_fails_with_helpful_message_when_extras_missing(mock_import, mock_which):
+    """When 'funasr' or 'rapidocr_onnxruntime' aren't installed, preflight says how to fix."""
+    def fake_import(name, *args, **kwargs):
+        if name in ("funasr", "rapidocr_onnxruntime"):
+            raise ImportError(name)
+        return __import__(name, *args, **kwargs)
+    mock_import.side_effect = fake_import
+    with pytest.raises(RuntimeError, match="subtitle.*extra"):
+        subtitle_cli.preflight()

@@ -23,6 +23,10 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+subtitle = [
+    "funasr>=1.2",
+    "rapidocr-onnxruntime>=1.4",
+]
 
 [project.scripts]
 video2yt = "video2yt.cli:main"
@@ -35,6 +39,7 @@ video2yt-tts = "video2yt.tts_cli:main"
 video2yt-image = "video2yt.image_gen_cli:main"
 video2yt-upload = "video2yt.upload_cli:main"
 video2yt-topic = "video2yt.topic_cli:main"
+video2yt-subtitle = "video2yt.subtitle_cli:main"
 
 [build-system]
 requires = ["hatchling"]
