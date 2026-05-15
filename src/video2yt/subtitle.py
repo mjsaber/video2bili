@@ -695,3 +695,21 @@ def burn_subtitles(
         cmd, check=True, capture_output=True, text=True,
         cwd=str(input_video.parent),
     )
+
+
+import os
+import shutil
+
+
+def passthrough(src: Path, dst: Path) -> None:
+    """Hardlink ``src`` to ``dst`` if possible; fall back to copy on EXDEV."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        dst.unlink()
+    try:
+        os.link(src, dst)
+    except OSError as e:
+        if e.errno == 18:    # EXDEV — cross-device
+            shutil.copy2(src, dst)
+        else:
+            raise

@@ -581,3 +581,36 @@ def test_burn_uses_audio_copy(mock_run, tmp_path):
     cmd = mock_run.call_args.kwargs.get("args") or mock_run.call_args.args[0]
     assert "-c:a" in cmd
     assert cmd[cmd.index("-c:a") + 1] == "copy"
+
+
+def test_passthrough_hardlinks_same_filesystem(tmp_path):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"hello")
+    dst = tmp_path / "seg_subbed.mp4"
+    subtitle.passthrough(src, dst)
+    assert dst.exists()
+    assert dst.read_bytes() == b"hello"
+    # On the same filesystem, hardlink: same inode
+    assert dst.stat().st_ino == src.stat().st_ino
+
+
+@patch("video2yt.subtitle.os.link")
+def test_passthrough_falls_back_to_copy_on_exdev(mock_link, tmp_path):
+    mock_link.side_effect = OSError(18, "Cross-device link not permitted")
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"data")
+    dst = tmp_path / "out.mp4"
+    subtitle.passthrough(src, dst)
+    assert dst.exists()
+    assert dst.read_bytes() == b"data"
+    # Different inodes because it's a copy
+    assert dst.stat().st_ino != src.stat().st_ino
+
+
+def test_passthrough_overwrites_existing(tmp_path):
+    src = tmp_path / "a.mp4"
+    src.write_bytes(b"new")
+    dst = tmp_path / "b.mp4"
+    dst.write_bytes(b"old")
+    subtitle.passthrough(src, dst)
+    assert dst.read_bytes() == b"new"
