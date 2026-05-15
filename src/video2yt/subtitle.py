@@ -597,21 +597,46 @@ def _allocate_time_proportionally(
 
 def _apply_hard_floor(entries: list[SrtEntry]) -> list[SrtEntry]:
     """Walk left-to-right; for any entry shorter than HARD_FLOOR_SECONDS, extend
-    its ``end`` forward and push the next entry's ``start`` forward by the same
-    amount. Never introduces overlap. Final-entry overflow is tolerated (the
-    spec accepts a final entry < floor if the whole segment is itself too short)."""
+    its ``end`` forward. The next entry's ``start`` is pushed forward to match,
+    so the cascade never introduces overlap.
+
+    Hard invariants (always satisfied):
+    1. ``start <= end`` for every emitted entry (no inverted ranges).
+    2. ``entries[i].start >= entries[i-1].end`` (no overlaps).
+    3. ``entries[-1].end <= original_overall_end`` (don't overrun the segment).
+
+    Soft goal (yields to hard invariants):
+    - Each emitted entry's duration ``>= HARD_FLOOR_SECONDS``.
+
+    Spec §5.1 C: if extending would push past the segment's overall end, the
+    cascade stops at the segment boundary and the final entry is emitted with
+    whatever duration remains (may still be < floor, possibly zero — rare;
+    only happens when the segment itself is too short to fit floor-padded
+    pieces, in which case the splitter shouldn't have been invoked anyway).
+    """
     if not entries:
         return entries
-    out = [SrtEntry(e.start, e.end, e.text) for e in entries]
-    for i in range(len(out) - 1):
-        cur = out[i]
-        needed = HARD_FLOOR_SECONDS - (cur.end - cur.start)
-        if needed > 0:
-            new_end = cur.end + needed
-            next_e = out[i + 1]
-            new_next_start = next_e.start + needed
-            out[i] = SrtEntry(cur.start, new_end, cur.text)
-            out[i + 1] = SrtEntry(new_next_start, next_e.end, next_e.text)
+    overall_end = entries[-1].end
+    out: list[SrtEntry] = []
+    for e in entries:
+        # Hard rule 2: never start before the previous entry's end.
+        prev_end = out[-1].end if out else e.start
+        start = max(e.start, prev_end)
+        # Hard rule 3: never start past the overall end.
+        if start > overall_end:
+            start = overall_end
+        # Hard rule 1: end must never precede start.
+        end = max(e.end, start)
+        # Soft rule: try to extend to floor, but cap at overall_end.
+        floor_end = start + HARD_FLOOR_SECONDS
+        if floor_end > end:
+            end = min(floor_end, overall_end)
+        # Belt-and-suspenders: clamp end into [start, overall_end].
+        if end < start:
+            end = start
+        if end > overall_end:
+            end = overall_end
+        out.append(SrtEntry(start, end, e.text))
     return out
 
 

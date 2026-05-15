@@ -511,6 +511,25 @@ def test_split_hard_floor_extends_short_pieces():
         assert curr.start >= prev.end - 1e-6
 
 
+def test_apply_hard_floor_cascade_exceeds_budget_no_invalid_ranges():
+    """When cascade would push downstream entries past their ends, the
+    result must still have valid time ranges (start <= end) and no overlaps."""
+    entries = [
+        subtitle.SrtEntry(0.0, 0.333, "a"),
+        subtitle.SrtEntry(0.333, 0.667, "b"),
+        subtitle.SrtEntry(0.667, 1.0, "c"),
+    ]
+    out = subtitle._apply_hard_floor(entries)
+    # Hard rule 1: no invalid ranges
+    for e in out:
+        assert e.start <= e.end, f"invalid range: {e}"
+    # Hard rule 2: no overlaps
+    for prev, curr in zip(out, out[1:]):
+        assert curr.start >= prev.end, f"overlap: {prev} -> {curr}"
+    # Hard rule 3: no overrun
+    assert out[-1].end <= 1.0 + 1e-9
+
+
 def test_split_threshold_is_strict_greater_than():
     """Exactly MAX_LINE_CHARS chars -> no split."""
     text = "一" * 30
