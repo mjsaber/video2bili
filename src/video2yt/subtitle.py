@@ -172,3 +172,156 @@ def decide(
             f"with stable bottom text ({ocr.stable_text_ratio * 100:.1f}%) → SKIP",
         )
     return Decision(True, "no existing-subtitle signal detected → ADD")
+
+
+import logging
+import subprocess
+
+_log = logging.getLogger(__name__)
+
+
+def _extract_frames(
+    video_path: Path, interval_seconds: float, duration: float
+) -> list[bytes]:
+    """ffmpeg-extract one JPEG per ``interval_seconds`` of the video to memory.
+
+    Returns a list of raw JPEG-encoded byte strings (one per sampled frame).
+    Frames are scaled by 0.5 to keep memory low; OCR doesn't need full-res.
+    """
+    count = max(1, int(duration / interval_seconds))
+    cmd = [
+        "ffmpeg", "-v", "error",
+        "-i", str(video_path.resolve()),
+        "-vf", f"fps=1/{interval_seconds},scale=iw/2:ih/2",
+        "-frames:v", str(count),
+        "-f", "image2pipe", "-vcodec", "mjpeg",
+        "-",
+    ]
+    result = subprocess.run(cmd, check=True, capture_output=True)
+    return _split_mjpeg_stream(result.stdout)
+
+
+def _split_mjpeg_stream(blob: bytes) -> list[bytes]:
+    """Split a concatenated MJPEG byte stream into individual JPEGs by SOI/EOI markers."""
+    SOI = b"\xff\xd8"
+    EOI = b"\xff\xd9"
+    frames = []
+    i = 0
+    while True:
+        start = blob.find(SOI, i)
+        if start == -1:
+            break
+        end = blob.find(EOI, start + 2)
+        if end == -1:
+            break
+        frames.append(blob[start : end + 2])
+        i = end + 2
+    return frames
+
+
+def _run_rapidocr(jpeg_bytes: bytes, crop_y_range: tuple[float, float]):
+    """Run RapidOCR on the bottom band of one JPEG frame.
+
+    Returns a list of (box, text, score) tuples for boxes whose vertical centroid
+    falls inside ``crop_y_range`` (fractions of frame height, e.g. (0.82, 0.98)).
+    Lazy import; the real engine lives in the optional ``subtitle`` extra.
+    """
+    from rapidocr_onnxruntime import RapidOCR
+    import numpy as np
+    from PIL import Image
+    import io
+    img = np.array(Image.open(io.BytesIO(jpeg_bytes)))
+    h = img.shape[0]
+    y_lo = int(h * crop_y_range[0])
+    y_hi = int(h * crop_y_range[1])
+    crop = img[y_lo:y_hi]
+    engine = RapidOCR()
+    raw, _ = engine(crop)
+    if not raw:
+        return []
+    # Translate box y-coords back into full-frame coords for cluster stability check.
+    boxes = []
+    for box, text, score in raw:
+        translated = tuple((x, y + y_lo) for x, y in box)
+        boxes.append((translated, text, score))
+    return boxes
+
+
+def sample_ocr(
+    video_path: Path,
+    segment_duration: float,
+    interval_seconds: float = 5.0,
+    min_stable_ratio: float = 0.30,
+    crop_y_range: tuple[float, float] = (0.82, 0.98),
+    cluster_y_tolerance: int = 40,
+) -> OcrSignal:
+    """Sample frames + OCR the bottom band + check if a y-position cluster is stable.
+
+    "Stable" = the same vertical position (within ``cluster_y_tolerance`` pixels)
+    has detected text in at least ``min_stable_ratio`` of sampled frames. This
+    distinguishes burned-in subtitles (stable position) from floating danmaku
+    (drifting position) per spec §5.1 / OCR detection.
+
+    Fail-open: any internal failure returns a no-hit signal rather than raising.
+    """
+    try:
+        frames = _extract_frames(video_path, interval_seconds, segment_duration)
+    except Exception as e:
+        _log.warning("ffmpeg frame extract failed: %s; treating as no-text-detected", e)
+        return OcrSignal(0, 0, 0.0, hit=False)
+
+    if not frames:
+        return OcrSignal(0, 0, 0.0, hit=False)
+
+    # For each frame, run OCR and record the y-centroids of detected boxes.
+    per_frame_y_centroids: list[list[int]] = []
+    for f in frames:
+        try:
+            boxes = _run_rapidocr(f, crop_y_range)
+        except Exception as e:
+            _log.warning("rapidocr failed on a frame: %s; skipping that frame", e)
+            per_frame_y_centroids.append([])
+            continue
+        ys = []
+        for box, _text, _score in boxes:
+            y_centroid = sum(p[1] for p in box) // len(box)
+            ys.append(y_centroid)
+        per_frame_y_centroids.append(ys)
+
+    # Cluster y-centroids across frames; pick the largest cluster.
+    all_ys = [y for ys in per_frame_y_centroids for y in ys]
+    if not all_ys:
+        return OcrSignal(len(frames), 0, 0.0, hit=False)
+
+    # Greedy 1D clustering by tolerance. A cluster's allowed span is anchored
+    # at its first (min) y: a new y joins only if it's within tolerance of the
+    # cluster's anchor, NOT of its last appended element. This prevents drifting
+    # boxes (each within tolerance of the previous one but spanning a wide
+    # range overall) from chaining into one cluster.
+    sorted_ys = sorted(all_ys)
+    clusters: list[list[int]] = [[sorted_ys[0]]]
+    for y in sorted_ys[1:]:
+        if y - clusters[-1][0] <= cluster_y_tolerance:
+            clusters[-1].append(y)
+        else:
+            clusters.append([y])
+
+    # Each cluster has a representative range; how many frames contributed?
+    best_frame_support = 0
+    for cl in clusters:
+        lo, hi = min(cl), max(cl)
+        support = sum(
+            1
+            for ys in per_frame_y_centroids
+            if any(lo <= y <= hi for y in ys)
+        )
+        best_frame_support = max(best_frame_support, support)
+
+    n = len(frames)
+    ratio = best_frame_support / n
+    return OcrSignal(
+        sampled_frames=n,
+        frames_with_stable_text=best_frame_support,
+        stable_text_ratio=ratio,
+        hit=ratio >= min_stable_ratio,
+    )

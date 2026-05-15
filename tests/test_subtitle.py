@@ -234,3 +234,71 @@ def test_decide_no_ocr_signal_uses_danmaku_only():
 def test_decide_invalid_force_raises():
     with pytest.raises(ValueError):
         subtitle.decide(force="bogus", danmaku=None, ocr=None)
+
+
+from unittest.mock import MagicMock, patch
+
+
+@patch("video2yt.subtitle._extract_frames")
+@patch("video2yt.subtitle._run_rapidocr")
+def test_sample_ocr_no_text_detected(mock_ocr, mock_extract):
+    """All sampled frames return no OCR boxes → stable_text_ratio=0, hit=False."""
+    mock_extract.return_value = [b"frame0_bytes"] * 10
+    mock_ocr.return_value = []   # no boxes detected
+    sig = subtitle.sample_ocr(
+        Path("seg.mp4"), segment_duration=50.0, interval_seconds=5.0,
+        min_stable_ratio=0.30,
+    )
+    assert sig.sampled_frames == 10
+    assert sig.frames_with_stable_text == 0
+    assert sig.hit is False
+
+
+@patch("video2yt.subtitle._extract_frames")
+@patch("video2yt.subtitle._run_rapidocr")
+def test_sample_ocr_stable_cluster_triggers_hit(mock_ocr, mock_extract):
+    """6 of 10 frames have a text box in the same y-position cluster → ratio=0.6 → hit."""
+    mock_extract.return_value = [b"f"] * 10
+    # Each call returns either [] or a box at y≈950 in the bottom band.
+    # Frames 0-5 (6 frames) have a stable box at y=950; frames 6-9 have nothing.
+    box_at_y950 = [(((100, 950), (300, 950), (300, 990), (100, 990)), "字幕", 0.9)]
+    mock_ocr.side_effect = [box_at_y950] * 6 + [[]] * 4
+    sig = subtitle.sample_ocr(
+        Path("seg.mp4"), segment_duration=50.0, interval_seconds=5.0,
+        min_stable_ratio=0.30,
+    )
+    assert sig.sampled_frames == 10
+    assert sig.frames_with_stable_text == 6
+    assert abs(sig.stable_text_ratio - 0.6) < 0.01
+    assert sig.hit is True
+
+
+@patch("video2yt.subtitle._extract_frames")
+@patch("video2yt.subtitle._run_rapidocr")
+def test_sample_ocr_drifting_boxes_not_stable(mock_ocr, mock_extract):
+    """Boxes detected but at different y-positions per frame (e.g. floating danmaku)
+    do NOT cluster as a stable subtitle position → ratio low → no hit."""
+    mock_extract.return_value = [b"f"] * 10
+    # Each frame has a box at a different y position (drifting downward)
+    def box_at(y: int) -> list:
+        return [(((100, y), (300, y), (300, y + 30), (100, y + 30)), "弹幕", 0.9)]
+    mock_ocr.side_effect = [box_at(900 + i * 30) for i in range(10)]
+    sig = subtitle.sample_ocr(
+        Path("seg.mp4"), segment_duration=50.0, interval_seconds=5.0,
+        min_stable_ratio=0.30,
+    )
+    # Each box is in a unique y-cluster of size 1 → no cluster has ≥30% support
+    assert sig.frames_with_stable_text < 3
+    assert sig.hit is False
+
+
+@patch("video2yt.subtitle._extract_frames")
+def test_sample_ocr_fails_open_on_extract_error(mock_extract):
+    """ffmpeg failure → fall back to no-detection (fail-open), not raise. Spec §7."""
+    mock_extract.side_effect = RuntimeError("ffmpeg crashed")
+    sig = subtitle.sample_ocr(
+        Path("seg.mp4"), segment_duration=50.0, interval_seconds=5.0,
+        min_stable_ratio=0.30,
+    )
+    assert sig.sampled_frames == 0
+    assert sig.hit is False
