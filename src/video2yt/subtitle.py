@@ -3,7 +3,9 @@
 Spec: docs/superpowers/specs/2026-05-14-video2yt-subtitle-design.md
 """
 
+import os
 import re
+import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -695,10 +697,6 @@ def burn_subtitles(
         cmd, check=True, capture_output=True, text=True,
         cwd=str(input_video.parent),
     )
-
-
-import os
-import shutil
 
 
 def passthrough(src: Path, dst: Path) -> None:
