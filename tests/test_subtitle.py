@@ -302,3 +302,27 @@ def test_sample_ocr_fails_open_on_extract_error(mock_extract):
     )
     assert sig.sampled_frames == 0
     assert sig.hit is False
+
+
+@patch("video2yt.subtitle._extract_wav")
+@patch("video2yt.subtitle._run_funasr")
+def test_transcribe_returns_funasr_segments(mock_funasr, mock_extract, tmp_path):
+    mock_extract.return_value = tmp_path / "audio.wav"
+    mock_funasr.return_value = [
+        (0.0, 2.5, "你好"),
+        (2.5, 5.0, "世界"),
+    ]
+    result = subtitle.transcribe(Path("seg.mp4"))
+    assert result == [
+        subtitle.FunASRSegment(0.0, 2.5, "你好"),
+        subtitle.FunASRSegment(2.5, 5.0, "世界"),
+    ]
+
+
+@patch("video2yt.subtitle._extract_wav")
+@patch("video2yt.subtitle._run_funasr")
+def test_transcribe_strips_whitespace(mock_funasr, mock_extract, tmp_path):
+    mock_extract.return_value = tmp_path / "audio.wav"
+    mock_funasr.return_value = [(0.0, 2.0, "  你好  ")]
+    result = subtitle.transcribe(Path("seg.mp4"))
+    assert result[0].text == "你好"

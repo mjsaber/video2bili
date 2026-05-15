@@ -3,6 +3,7 @@
 Spec: docs/superpowers/specs/2026-05-14-video2yt-subtitle-design.md
 """
 
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -325,3 +326,58 @@ def sample_ocr(
         stable_text_ratio=ratio,
         hit=ratio >= min_stable_ratio,
     )
+
+
+@dataclass(frozen=True)
+class FunASRSegment:
+    start: float
+    end: float
+    text: str
+
+
+def _extract_wav(video_path: Path, dest_dir: Path) -> Path:
+    """Extract a mono 16kHz wav using ffmpeg into ``dest_dir/audio.wav``."""
+    out = dest_dir / "audio.wav"
+    cmd = [
+        "ffmpeg", "-y", "-v", "error",
+        "-i", str(video_path.resolve()),
+        "-ac", "1", "-ar", "16000",
+        "-vn",
+        str(out.resolve()),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return out
+
+
+def _run_funasr(wav_path: Path) -> list[tuple[float, float, str]]:
+    """Run SenseVoice-Small on a wav file. Lazy import from the optional extra.
+
+    Returns list of (start_seconds, end_seconds, text). Each tuple is one
+    FunASR segment (sentence-level by default for SenseVoiceSmall).
+    """
+    from funasr import AutoModel
+    model = AutoModel(
+        model="iic/SenseVoiceSmall",
+        vad_model="fsmn-vad",
+        vad_kwargs={"max_single_segment_time": 15000},
+        trust_remote_code=True,
+    )
+    res = model.generate(input=str(wav_path), batch_size_s=60)
+    out: list[tuple[float, float, str]] = []
+    for item in res:
+        # FunASR returns dicts with 'timestamp' (ms pairs) and 'text' per segment
+        for seg in item.get("sentence_info", []) or []:
+            start_ms = seg.get("start", 0)
+            end_ms = seg.get("end", start_ms)
+            text = seg.get("text", "").strip()
+            if text:
+                out.append((start_ms / 1000.0, end_ms / 1000.0, text))
+    return out
+
+
+def transcribe(video_path: Path) -> list[FunASRSegment]:
+    """Run SenseVoice on the segment's audio. Returns FunASR-level segments."""
+    with tempfile.TemporaryDirectory() as td:
+        wav = _extract_wav(video_path, Path(td))
+        raw = _run_funasr(wav)
+    return [FunASRSegment(start, end, text.strip()) for (start, end, text) in raw]
