@@ -12,6 +12,7 @@ dependencies = [
     "google-genai>=1.73.1",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
     "requests>=2.33.1",
     "whisperx>=3.8.5",
     "yt-dlp>=2025.1.1",
@@ -41,3 +42,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/video2yt"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/video2yt/data/bg_glossary.yaml" = "video2yt/data/bg_glossary.yaml"

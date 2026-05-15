@@ -1,0 +1,28 @@
+# Hearthstone Battlegrounds STT terminology corrections.
+#
+# Left → right: errors that SenseVoice / whisper tend to produce, mapped to
+# the canonical Traditional-Chinese form used on this YouTube channel.
+# Add entries as new project topics surface new mistranscription patterns.
+corrections:
+  戰旗: 戰棋               # 战旗 (Stratego) → 战棋 (Hearthstone Battlegrounds)
+  护戒: 戒指龍              # ringnaga incident — "护戒" mistranscription for 戒指龍 / Ring Bearer
+  護戒: 戒指龍
+  拉法母: 拉法姆            # Rafaam, proper noun mishearing
+  加拉克朗: 加拉克隆        # Galakrond, proper noun mishearing
+  伊瑟拉: 伊瑟拉            # canonical (no change — keeps Codex from "correcting" it)
+
+# Canonical terms (no LHS error). Codex should bias toward these forms when it
+# encounters ambiguous transcription of these concepts.
+canonical:
+  - 爐石戰記
+  - 戰棋
+  - 酒館
+  - 隨從
+  - 餵牌
+  - 三星
+  - 吃雞
+  - 加血
+  - 上分
+  - 開酒館
+  - 護甲
+  - 法力水晶
