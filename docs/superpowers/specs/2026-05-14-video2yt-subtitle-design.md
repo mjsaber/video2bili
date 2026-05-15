@@ -221,31 +221,61 @@ is_char_oversize(s) := effective_cjk_chars(s) > MAX_LINE_CHARS
 
 Duration is NOT a split trigger. A long-duration, char-OK segment (e.g., 25 chars over 9 seconds) is emitted as a single SRT entry. Rationale: text fits on screen; the speaker just paused mid-sentence; cutting at an artificial boundary would create flicker. The natural fix for prolonged on-screen subtitles is a future whisperx alignment pass, not synthetic mid-text cuts.
 
-**Algorithm** (single pass, deterministic, terminates because Pass 3 strictly reduces character count):
+**Algorithm** (deterministic, provably terminates):
 
 ```python
 def split_segment(start: float, end: float, text: str) -> list[Entry]:
     if not is_char_oversize(text):
-        return [Entry(start, end, text)]      # base case
-    pieces = try_split_by_punctuation(text, [SENTENCE_PUNCT, CLAUSE_PUNCT])
-    if pieces is None:                         # no punctuation present
-        pieces = split_at_char_midpoint(text)  # Pass 3 (last resort)
-    timed = allocate_time_proportionally(start, end, pieces)
-    # Recurse on each piece; this terminates because every recursive call has
-    # strictly fewer characters than the parent.
+        return [Entry(start, end, text)]   # base case
+
+    # Try passes in order; ACCEPT a pass only if it produces a useful split.
+    # A useful split has ≥2 non-empty pieces, EACH strictly shorter than the
+    # parent. This is the load-bearing invariant for termination.
+    pieces = _pieces_from(text, SENTENCE_PUNCT)        # 。！？
+    if not _is_useful_split(pieces, text):
+        pieces = _pieces_from(text, CLAUSE_PUNCT)      # ；，、
+    if not _is_useful_split(pieces, text):
+        pieces = _split_at_effective_midpoint(text)    # Pass 3 — always useful
+
+    timed = _allocate_time_proportionally(start, end, pieces)
     result = []
     for (s_i, e_i, t_i) in timed:
-        result.extend(split_segment(s_i, e_i, t_i))
-    return apply_hard_floor(result)
+        result.extend(split_segment(s_i, e_i, t_i))    # recursion
+    return _apply_hard_floor(result)
+
+
+def _is_useful_split(pieces: list[str] | None, parent: str) -> bool:
+    """True iff pieces has ≥2 non-empty entries, EACH strictly shorter than parent."""
+    if not pieces or len(pieces) < 2:
+        return False
+    parent_len = len(parent)
+    return all(0 < len(p) < parent_len for p in pieces)
+
+
+def _split_at_effective_midpoint(text: str) -> list[str]:
+    """Split into TWO pieces at the index closest to the effective-CJK-char midpoint.
+    Pieces are non-empty and strictly shorter than parent (parent has length ≥ 2,
+    guaranteed by the is_char_oversize precondition + MAX_LINE_CHARS ≥ 1)."""
+    ...
 ```
 
-Three split strategies, tried in order inside `try_split_by_punctuation`:
+Three pass strategies:
 
-1. **Pass 1 — sentence punctuation `。！？`**: split after each occurrence (punctuation stays on the preceding piece). If the original text contains any of these, return the pieces. Recursion will further-split any still-oversize piece.
-2. **Pass 2 — clause punctuation `；，、`**: only tried if Pass 1 found no sentence punctuation. Same preservation rule.
-3. **Pass 3 — char midpoint (last resort, invoked from `split_at_char_midpoint`)**: only reached when no punctuation exists in the text. Split at the character index closest to the effective-CJK-char midpoint. Recursion handles further oversize.
+1. **Pass 1 — sentence punctuation `。！？`**: split after each occurrence (punctuation stays on the preceding piece). Accept only if `_is_useful_split` returns True. Rejected when, e.g., the only punctuation is at the very end and `_pieces_from` returns `[text]` unchanged.
+2. **Pass 2 — clause punctuation `；，、`**: same procedure with clause-level punctuation. Tried only if Pass 1 was not useful.
+3. **Pass 3 — effective-CJK-char midpoint**: produces exactly two non-empty pieces, each strictly shorter than parent. Always useful by construction. Reached only when neither punctuation pass produces a useful split.
 
-Pass 3 always terminates split decisions because it strictly halves character count. So there is no "unsplittable" case in v1.
+**Termination proof**:
+- `is_char_oversize` precondition + MAX_LINE_CHARS ≥ 1 implies `len(text) ≥ 2` whenever recursion is considered (a 1-char text can never exceed the threshold).
+- Whichever pass is accepted, every produced piece has `len(piece) < len(parent)` strictly.
+- Therefore every recursive call has strictly fewer characters than its parent.
+- Recursion depth is bounded by `len(initial_text)` (worst case: degenerates to 1-char pieces; impossible in practice since base case fires once a piece drops below MAX_LINE_CHARS).
+- In practice, depth ≤ `log2(len / MAX_LINE_CHARS) + small constant` for Pass 3, and shallower when punctuation is present.
+
+**Edge cases that previously could have looped forever** (now correctly handled by `_is_useful_split`):
+- Text ending in the only punctuation: `"AAAA...A。"` → Pass 1 yields `["AAAA...A。"]` (single piece, NOT useful) → Pass 2 yields same (no clause punctuation) → Pass 3 midpoint splits.
+- Punctuation only at the start: `"。AAAA...A"` → Pass 1 yields `["。", "AAAA...A"]` — both pieces non-empty AND strictly shorter than parent → useful, accepted. The `"AAAA...A"` piece recurses with no punctuation and goes to Pass 3.
+- All punctuation at one end clustered: `"AAAAA。。。"` → Pass 1 yields `["AAAAA。", "。", "。"]` if implementation splits at every occurrence, or `["AAAAA。。。"]` if implementation only splits between non-empty pieces — the former is useful, the latter is not and falls through. Implementations should use the former; the spec MUST cover this in tests.
 
 **Time allocation** — `allocate_time_proportionally(start, end, pieces)`:
 - `w_i = effective_cjk_chars(p_i)` (whitespace excluded, ASCII counted as 0.5, CJK as 1.0 — matches `compose._count_effective_chars`)
@@ -406,10 +436,13 @@ New file `tests/test_subtitle.py`, following the existing pattern of mocking at 
 **Post-cleanup split — exact algorithm (§5.1 C)**
 - Char-OK (15 chars, 3s) → 1 entry, unchanged regardless of duration
 - Char-OK long duration (25 chars, 9s, no punctuation) → 1 entry, NOT split (duration is not a trigger)
-- Char-oversize (45 chars, 3s) with `。` → Pass 1, all sub-pieces char-OK after recursion
-- Char-oversize (45 chars, 3s) with only `，` (no 。) → Pass 2 used
-- Char-oversize (45 chars, 3s) with zero punctuation → Pass 3 midpoint; recursion guaranteed to terminate (strictly halves)
-- Pass 3 termination property: 100-char no-punctuation text splits to ≤32 chars in ≤3 levels of recursion (assuming default MAX_LINE_CHARS=30)
+- Char-oversize (45 chars, 3s) with `。` mid-text → Pass 1, all sub-pieces char-OK after recursion
+- Char-oversize (45 chars, 3s) with only `，` (no 。) → Pass 1 not useful, Pass 2 used
+- Char-oversize (45 chars, 3s) with zero punctuation → Pass 1+2 not useful, Pass 3 midpoint
+- **Termination edge (was the bug)**: text = "A" * 99 + "。" with MAX=30 → Pass 1 yields single piece `[text]` → `_is_useful_split` returns False → Pass 2 yields same → False → Pass 3 splits at midpoint → recursion progresses. Final result: ≤4 entries.
+- **Punctuation at start**: text = "。" + "A" * 99 → Pass 1 yields ["。", "AAAA..."] → useful; recursion into "AAAA..." goes to Pass 3
+- **Multiple trailing punctuation**: "AAAAA。。。" → Pass 1 yields ["AAAAA。", "。", "。"] → useful (3 non-empty pieces, all strictly shorter)
+- Pass 3 termination property: 100-char no-punctuation text splits to ≤32 chars in ≤3 levels of recursion (default MAX_LINE_CHARS=30)
 - Char threshold uses strict `>` (exactly 30 chars at default → no split)
 - Proportional time allocation: pieces with weights [40, 30, 20] inside (0.0, 12.0) → boundaries at (0.0, 5.33), (5.33, 9.33), (9.33, 12.0)
 - Hard floor cascade: pieces (5.0, 5.3) → (5.6, 5.9) → ... walks forward, never overlaps. Final-entry-clipped-by-segment-end behavior verified
