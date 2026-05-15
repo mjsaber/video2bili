@@ -15,6 +15,16 @@ Download a Bilibili video and burn its danmaku (bullet comments) into a YouTube-
 uv sync
 ```
 
+### Optional: subtitle generation
+
+The `video2yt-subtitle` CLI uses SenseVoice (`funasr`) for STT and `rapidocr-onnxruntime` for bottom-band OCR detection. These pull in PyTorch + ONNX runtime (~2GB), so they're gated behind an optional extra:
+
+```bash
+uv sync --extra subtitle
+```
+
+It also requires the `codex` CLI for terminology cleanup (`brew install codex && codex login`).
+
 ## Quick start
 
 ```bash

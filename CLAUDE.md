@@ -18,6 +18,7 @@ uv run video2yt "<url>" -o output/<project>/                # nest into per-proj
 uv run python -m video2yt "<url>"                          # run as module
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # compose from stills
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --title "T"   # concat + progress bar + loudnorm + chapters
+uv run video2yt-subtitle seg.mp4 --danmaku raw.xml         # add STT subtitles if not already present
 uv run pytest                                              # run tests (230)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
@@ -69,7 +70,9 @@ src/video2yt/
 │                     # with concat + per-seg loudnorm + overlay + drawbox highlights, chapters file
 ├── merge_cli.py      # video2yt-merge entry point (parse_args/run/main)
 ├── validate.py       # ffprobe + source/ASS/output validators
-└── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
+├── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
+├── subtitle.py       # detect (danmaku XML + OCR) + SenseVoice ASR + Codex cleanup + split + burn
+└── subtitle_cli.py   # video2yt-subtitle entry point
 ```
 
 Tests live in `tests/test_smoke.py` (162 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.
