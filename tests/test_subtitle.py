@@ -152,3 +152,85 @@ def test_scan_danmaku_corrupted_xml_raises(tmp_path):
     xml.write_text("<i><d p='no commas here'>text</d></i>", encoding="utf-8")
     with pytest.raises(ValueError):
         subtitle.scan_danmaku(xml, segment_duration=100.0)
+
+
+def _dummy_danmaku(hit: bool, fixed: int = 0, cov: float = 0.0) -> subtitle.DanmakuSignal:
+    return subtitle.DanmakuSignal(
+        fixed_count=fixed,
+        coverage_seconds=cov,
+        coverage_ratio=cov / 100.0,
+        hit=hit,
+    )
+
+
+def _dummy_ocr(hit: bool, sampled: int = 10, stable: int = 0) -> subtitle.OcrSignal:
+    return subtitle.OcrSignal(
+        sampled_frames=sampled,
+        frames_with_stable_text=stable,
+        stable_text_ratio=stable / max(sampled, 1),
+        hit=hit,
+    )
+
+
+def test_decide_force_add_short_circuits():
+    d = subtitle.decide(
+        force="add",
+        danmaku=_dummy_danmaku(hit=True),
+        ocr=_dummy_ocr(hit=True),
+    )
+    assert d.add_subtitles is True
+    assert "force" in d.reason.lower()
+
+
+def test_decide_force_skip_short_circuits():
+    d = subtitle.decide(
+        force="skip",
+        danmaku=_dummy_danmaku(hit=False),
+        ocr=_dummy_ocr(hit=False),
+    )
+    assert d.add_subtitles is False
+    assert "force" in d.reason.lower()
+
+
+def test_decide_danmaku_hit_overrides_ocr_miss():
+    d = subtitle.decide(
+        force=None,
+        danmaku=_dummy_danmaku(hit=True, fixed=20, cov=40.0),
+        ocr=_dummy_ocr(hit=False),
+    )
+    assert d.add_subtitles is False
+    assert "danmaku" in d.reason.lower()
+
+
+def test_decide_ocr_hit_when_danmaku_miss():
+    d = subtitle.decide(
+        force=None,
+        danmaku=_dummy_danmaku(hit=False, fixed=2, cov=1.5),
+        ocr=_dummy_ocr(hit=True, sampled=20, stable=12),
+    )
+    assert d.add_subtitles is False
+    assert "ocr" in d.reason.lower()
+
+
+def test_decide_both_miss_returns_add():
+    d = subtitle.decide(
+        force=None,
+        danmaku=_dummy_danmaku(hit=False),
+        ocr=_dummy_ocr(hit=False),
+    )
+    assert d.add_subtitles is True
+
+
+def test_decide_no_danmaku_signal_uses_ocr_only():
+    d = subtitle.decide(force=None, danmaku=None, ocr=_dummy_ocr(hit=True))
+    assert d.add_subtitles is False
+
+
+def test_decide_no_ocr_signal_uses_danmaku_only():
+    d = subtitle.decide(force=None, danmaku=_dummy_danmaku(hit=False), ocr=None)
+    assert d.add_subtitles is True
+
+
+def test_decide_invalid_force_raises():
+    with pytest.raises(ValueError):
+        subtitle.decide(force="bogus", danmaku=None, ocr=None)

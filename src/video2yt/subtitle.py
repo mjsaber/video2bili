@@ -126,3 +126,49 @@ def scan_danmaku(
         coverage_ratio=ratio,
         hit=hit,
     )
+
+
+@dataclass(frozen=True)
+class OcrSignal:
+    sampled_frames: int
+    frames_with_stable_text: int
+    stable_text_ratio: float
+    hit: bool
+
+
+@dataclass(frozen=True)
+class Decision:
+    add_subtitles: bool
+    reason: str
+
+
+def decide(
+    force: str | None,
+    danmaku: DanmakuSignal | None,
+    ocr: OcrSignal | None,
+) -> Decision:
+    """Short-circuit decision. Priority: force > danmaku > OCR.
+
+    Any signal indicating "existing bottom subtitles present" → skip.
+    """
+    if force is not None:
+        if force == "add":
+            return Decision(True, "force=add (manual override)")
+        if force == "skip":
+            return Decision(False, "force=skip (manual override)")
+        raise ValueError(
+            f"invalid force value {force!r}; expected 'add', 'skip', or None"
+        )
+    if danmaku is not None and danmaku.hit:
+        return Decision(
+            False,
+            f"danmaku scan: {danmaku.fixed_count} type=4 fixed, "
+            f"{danmaku.coverage_ratio * 100:.1f}% coverage → SKIP",
+        )
+    if ocr is not None and ocr.hit:
+        return Decision(
+            False,
+            f"OCR sample: {ocr.frames_with_stable_text}/{ocr.sampled_frames} frames "
+            f"with stable bottom text ({ocr.stable_text_ratio * 100:.1f}%) → SKIP",
+        )
+    return Decision(True, "no existing-subtitle signal detected → ADD")
