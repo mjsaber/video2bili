@@ -178,13 +178,16 @@ def srt_to_ass(
     font_face: str,
     font_size: int,
     position: str = "center",
+    outline_px: int = 2,
+    shadow_px: int = 0,
 ) -> str:
     """Convert SRT text to ASS text with pixel-accurate script resolution.
 
     Sets ``PlayResX=video_width`` and ``PlayResY=video_height`` so ASS
     ``FontSize`` units equal display pixels exactly. Produces a single
     ``Default`` style with the given font and size, white primary colour,
-    black outline (2px), MarginV=80.
+    black outline (default 2px, configurable via ``outline_px``),
+    no shadow by default (``shadow_px`` configurable), MarginV=80.
 
     ``position`` maps to an ASS ``Alignment`` value: ``"bottom"`` -> 2
     (bottom centre), ``"center"`` -> 5 (middle centre), ``"top"`` -> 8 (top
@@ -265,7 +268,7 @@ def srt_to_ass(
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_face},{font_size},"
         "&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
-        f"0,0,0,0,100,100,0,0,1,2,0,{alignment},"
+        f"0,0,0,0,100,100,0,0,1,{outline_px},{shadow_px},{alignment},"
         f"{margin_l},{margin_r},{margin_v},1\n"
         "\n"
         "[Events]\n"
