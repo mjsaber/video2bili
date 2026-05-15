@@ -3,6 +3,7 @@
 Spec: docs/superpowers/specs/2026-05-14-video2yt-subtitle-design.md
 """
 
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -381,3 +382,59 @@ def transcribe(video_path: Path) -> list[FunASRSegment]:
         wav = _extract_wav(video_path, Path(td))
         raw = _run_funasr(wav)
     return [FunASRSegment(start, end, text.strip()) for (start, end, text) in raw]
+
+
+def _format_srt_time(seconds: float) -> str:
+    total_ms = int(round(seconds * 1000))
+    hh = total_ms // 3_600_000
+    mm = (total_ms % 3_600_000) // 60_000
+    ss = (total_ms % 60_000) // 1000
+    ms = total_ms % 1000
+    return f"{hh:02d}:{mm:02d}:{ss:02d},{ms:03d}"
+
+
+def _parse_srt_time(text: str) -> float:
+    m = re.match(r"(\d{2}):(\d{2}):(\d{2}),(\d{3})", text.strip())
+    if not m:
+        raise ValueError(f"invalid SRT timestamp: {text!r}")
+    hh, mm, ss, ms = (int(g) for g in m.groups())
+    return hh * 3600 + mm * 60 + ss + ms / 1000.0
+
+
+def segments_to_srt(segments: list[FunASRSegment]) -> str:
+    """Serialize FunASR segments as a standard SRT (one entry per segment)."""
+    lines = []
+    for i, seg in enumerate(segments, start=1):
+        lines.append(str(i))
+        lines.append(f"{_format_srt_time(seg.start)} --> {_format_srt_time(seg.end)}")
+        lines.append(seg.text)
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def parse_srt_to_segments(srt_text: str) -> list[FunASRSegment]:
+    """Parse a standard SRT (one entry per FunASR segment) back into segments.
+
+    Multi-line text bodies are joined with '\n'; the format we WRITE always uses
+    one line, but we tolerate hand-edited cache files.
+    """
+    blocks = re.split(r"\n\s*\n", srt_text.strip())
+    segs: list[FunASRSegment] = []
+    for block in blocks:
+        lines = [ln for ln in block.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            continue
+        # Optional numeric index
+        start_idx = 1 if lines[0].strip().isdigit() else 0
+        if start_idx >= len(lines):
+            continue
+        m = re.match(r"(\S+)\s*-->\s*(\S+)", lines[start_idx])
+        if not m:
+            continue
+        start = _parse_srt_time(m.group(1))
+        end = _parse_srt_time(m.group(2))
+        text = "\n".join(lines[start_idx + 1 :]).strip()
+        if not text:
+            continue
+        segs.append(FunASRSegment(start, end, text))
+    return segs

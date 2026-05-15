@@ -326,3 +326,30 @@ def test_transcribe_strips_whitespace(mock_funasr, mock_extract, tmp_path):
     mock_funasr.return_value = [(0.0, 2.0, "  你好  ")]
     result = subtitle.transcribe(Path("seg.mp4"))
     assert result[0].text == "你好"
+
+
+def test_segments_to_srt_roundtrip():
+    segs = [
+        subtitle.FunASRSegment(0.0, 2.5, "你好"),
+        subtitle.FunASRSegment(2.5, 5.0, "世界，再見。"),
+    ]
+    srt = subtitle.segments_to_srt(segs)
+    assert "1\n00:00:00,000 --> 00:00:02,500" in srt
+    assert "你好" in srt
+    assert "00:00:02,500 --> 00:00:05,000" in srt
+    parsed = subtitle.parse_srt_to_segments(srt)
+    assert parsed == segs
+
+
+def test_segments_to_srt_handles_fractional_seconds():
+    segs = [subtitle.FunASRSegment(1.234, 5.678, "abc")]
+    srt = subtitle.segments_to_srt(segs)
+    assert "00:00:01,234 --> 00:00:05,678" in srt
+
+
+def test_parse_srt_skips_empty_blocks():
+    srt = "1\n00:00:00,000 --> 00:00:01,000\nfoo\n\n\n2\n00:00:01,000 --> 00:00:02,000\nbar\n"
+    parsed = subtitle.parse_srt_to_segments(srt)
+    assert len(parsed) == 2
+    assert parsed[0].text == "foo"
+    assert parsed[1].text == "bar"
