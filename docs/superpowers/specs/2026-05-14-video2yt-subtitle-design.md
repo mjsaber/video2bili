@@ -112,32 +112,46 @@ INPUT: segment.mp4 + [--danmaku raw.xml] + [--force-add|--force-skip] + [--gloss
     ├─[3. ASR]
     │   - ffmpeg extract mono 16kHz wav to temp
     │   - funasr.AutoModel(model="SenseVoiceSmall", vad_model="fsmn-vad", trust_remote_code=True)
-    │   - Output: [(start_s, end_s, text), ...]
-    │   - Convert to SRT (sentence-level segments, no further splitting)
+    │   - Output: [(start_s, end_s, text), ...] at FunASR-segment granularity
+    │   - Write directly to SRT format (one SRT entry per FunASR segment,
+    │     NO splitting yet — splitting happens at step 5)
     │   - Cache: <segment_stem>.raw.srt next to input
     │   - --force-asr bypasses cache
     │
     ├─[4. Cleanup]
     │   - Load glossary from --glossary (or default packaged yaml)
+    │   - Read .raw.srt; extract M numbered text lines (timestamps preserved separately)
     │   - Build prompt:
     │       「以下是繁體中文爐石戰記戰棋實況解說的 STT 轉寫，每行一句。
-    │        只修正錯字、術語、人名；保持每行字數不變動超過 ±20%；
+    │        只修正錯字、術語、人名；
+    │        每行修正後的字數必須與原文相差不超過 ±20%；
     │        不改寫語意、不增刪句子、不合併或分割行。
     │        術語表（左 → 右）：
     │        <glossary entries>
-    │        輸入：
+    │        輸入（共 M 行，已編號）：
     │        <numbered transcript lines>
-    │        輸出：保持相同行數，每行對應的修正結果。」
-    │   - subprocess: codex exec --skip-git-repo-check (or equivalent non-interactive flag) with timeout=30s
-    │   - Parse output back to numbered lines, zip with original timestamps
-    │   - Sanity check per line: len_delta_ratio ≤ 0.20
-    │   - If sanity check fails OR Codex times out OR parsing fails:
-    │       → fallback to raw SRT, WARNING log, do not fail
-    │   - Cache: <segment_stem>.cleaned.srt
+    │        輸出：M 行修正結果，順序對應，不加編號。」
+    │   - subprocess: codex exec (non-interactive) with timeout=30s
+    │   - Parse output: M lines expected; zip text-only with original timestamps
+    │   - Sanity check (§5.1 B):
+    │       · line count == M
+    │       · per line: 0.8 ≤ len(cleaned) / max(len(raw), 1) ≤ 1.2
+    │     ANY violation → fallback to raw, WARNING log, do not fail
+    │   - Cache: <segment_stem>.cleaned.srt (still at FunASR-segment granularity)
     │   - --force-cleanup bypasses cache; --skip-cleanup short-circuits to raw
     │
-    └─[5. Burn]
-        - compose.srt_to_ass(srt, w, h, font_face, font_size,
+    ├─[5. Split]                                          (NEW — pure Python, no LLM)
+    │   - Read cleaned.srt (M segments)
+    │   - For each segment, apply punctuation/midpoint split (§5.1 C) using
+    │     style-dependent MAX_LINE_CHARS = compose._effective_chars_per_line(
+    │         font_size, video_width, margin_l=80, margin_r=80)
+    │   - Reallocate timestamps proportionally by effective-CJK-char weights
+    │   - Apply hard floor (0.8s) per piece
+    │   - Output: in-memory list of K ≥ M final SRT entries
+    │   - NOT cached separately (style-dependent; cheap to recompute from .cleaned.srt)
+    │
+    └─[6. Burn]
+        - compose.srt_to_ass(final_srt, w, h, font_face, font_size,
                               position="bottom", outline_px=4, shadow_px=2)
         - Write ASS to temp inside same directory as input
         - ffmpeg -i segment.mp4 -vf "subtitles=f='<ass_basename>'"
@@ -148,6 +162,7 @@ INPUT: segment.mp4 + [--danmaku raw.xml] + [--force-add|--force-skip] + [--gloss
 
 OUTPUT: segment_subbed.mp4 (or input copy/hardlink if skipped)
         Persisted intermediates: <stem>.raw.srt, <stem>.cleaned.srt
+                                 (both at FunASR-segment granularity — split is style-dependent)
 ```
 
 ### 5.1 Timeline handling — explicit contract
@@ -191,35 +206,58 @@ These are defense-in-depth: if Codex violates the N-in/N-out contract or wildly 
 
 Input to splitter: one cleaned FunASR segment `(start, end, text)`. Output: 1+ SRT entries with timestamps inside `[start, end)`.
 
-Style-dependent threshold:
+**Single trigger condition** — splitting happens only on **char-oversize**:
+
 ```
 MAX_LINE_CHARS = compose._effective_chars_per_line(
-    font_size=args.font_size,                  # CLI flag, default 42
-    video_width=video_width,                   # 1920 in this project
-    margin_l=80, margin_r=80,                  # same as compose.py
+    font_size=args.font_size,        # CLI flag, default 42
+    video_width=video_width,         # 1920
+    margin_l=80, margin_r=80,        # same as compose.py
 )
-# Yields ≈30 for font_size=42, ≈22 for font_size=56, etc.
+# Default ≈30 for font_size=42, ≈22 for font_size=56.
+
+is_char_oversize(s) := effective_cjk_chars(s) > MAX_LINE_CHARS
 ```
 
-Two thresholds combine:
-- **Char threshold**: a line is "too long" if `effective_cjk_chars(line) > MAX_LINE_CHARS`
-- **Duration threshold**: a line is "too long" if `end - start > MAX_DURATION` (constant 6.0s)
+Duration is NOT a split trigger. A long-duration, char-OK segment (e.g., 25 chars over 9 seconds) is emitted as a single SRT entry. Rationale: text fits on screen; the speaker just paused mid-sentence; cutting at an artificial boundary would create flicker. The natural fix for prolonged on-screen subtitles is a future whisperx alignment pass, not synthetic mid-text cuts.
 
-Split policy (applied recursively until every output line is acceptable on BOTH axes, or determined unsplittable):
+**Algorithm** (single pass, deterministic, terminates because Pass 3 strictly reduces character count):
 
-1. **Pass 1 — sentence-level**: split on `[。！？]` while preserving the punctuation on the preceding piece. If pass 1 produces sub-pieces that are all char-OK and duration-OK, done.
-2. **Pass 2 — clause-level**: for any remaining oversized piece, split on `[；，、]` (same preservation rule). If now all pieces are OK, done.
-3. **Pass 3 — char-midpoint (last resort)**: for any remaining piece that is **char-oversized** with no internal punctuation, split at the closest character index to `len // 2`, recursively. This is the unsplittable-text escape hatch from issue (3) in the spec review.
-4. **Duration-only oversize without char oversize** (e.g., 25 chars over 10s): **do NOT artificially split**. Emit as one entry. Rationale: text is readable in one screenful; the speaker just paused; cutting the SRT mid-phrase would create a flicker for a sub-second gap and confuse the viewer. The MAX_DURATION ceiling thus only triggers splitting when it co-occurs with char-oversize.
+```python
+def split_segment(start: float, end: float, text: str) -> list[Entry]:
+    if not is_char_oversize(text):
+        return [Entry(start, end, text)]      # base case
+    pieces = try_split_by_punctuation(text, [SENTENCE_PUNCT, CLAUSE_PUNCT])
+    if pieces is None:                         # no punctuation present
+        pieces = split_at_char_midpoint(text)  # Pass 3 (last resort)
+    timed = allocate_time_proportionally(start, end, pieces)
+    # Recurse on each piece; this terminates because every recursive call has
+    # strictly fewer characters than the parent.
+    result = []
+    for (s_i, e_i, t_i) in timed:
+        result.extend(split_segment(s_i, e_i, t_i))
+    return apply_hard_floor(result)
+```
 
-Time allocation when splitting (passes 1, 2, 3):
-- For pieces `p_0, p_1, ..., p_{n-1}` of cleaned segment `(start, end, text)`:
-- Compute char weights `w_i = effective_cjk_chars(p_i)` (whitespace excluded, ASCII counted as 0.5, CJK as 1.0 — matches `compose._count_effective_chars`)
-- Cumulative ratio `r_i = (Σ_{j ≤ i} w_j) / (Σ w)`
-- Piece `i` gets `[start + r_{i-1} * (end - start), start + r_i * (end - start))` (with `r_{-1} = 0`)
-- After split, apply **hard floor** to each piece: if `piece.end - piece.start < 0.8s`, extend `piece.end` (or `piece.start` for the first piece) to meet 0.8s, eating into the neighbor. If only one neighbor exists or both already are at the floor, just clamp to ≥0.8s and tolerate the overlap with the next piece by at most 0.2s (subtitle renderer handles small overlap by drawing the later line).
+Three split strategies, tried in order inside `try_split_by_punctuation`:
 
-This isn't word-aligned (SenseVoice doesn't give word timestamps); proportional-by-char-weight is the best we can do without a second alignment pass. A future enhancement: pipe the cleaned text + audio through whisperx's wav2vec2 aligner to get true word timestamps and reissue piece boundaries; out of scope for v1.
+1. **Pass 1 — sentence punctuation `。！？`**: split after each occurrence (punctuation stays on the preceding piece). If the original text contains any of these, return the pieces. Recursion will further-split any still-oversize piece.
+2. **Pass 2 — clause punctuation `；，、`**: only tried if Pass 1 found no sentence punctuation. Same preservation rule.
+3. **Pass 3 — char midpoint (last resort, invoked from `split_at_char_midpoint`)**: only reached when no punctuation exists in the text. Split at the character index closest to the effective-CJK-char midpoint. Recursion handles further oversize.
+
+Pass 3 always terminates split decisions because it strictly halves character count. So there is no "unsplittable" case in v1.
+
+**Time allocation** — `allocate_time_proportionally(start, end, pieces)`:
+- `w_i = effective_cjk_chars(p_i)` (whitespace excluded, ASCII counted as 0.5, CJK as 1.0 — matches `compose._count_effective_chars`)
+- `r_i = (Σ_{j ≤ i} w_j) / (Σ w)`
+- Piece `i` gets `[start + r_{i-1} * (end - start), start + r_i * (end - start))` with `r_{-1} = 0`
+
+**Hard floor (0.8s minimum display)** — `apply_hard_floor(entries)`:
+- Walk entries left-to-right; for each entry `e` shorter than 0.8s, extend `e.end` forward by `0.8 - (e.end - e.start)` and push the next entry's `start` forward by the same amount.
+- The cascade may reach the final entry; if extending it would push past the segment's overall `end`, the cascade stops at the segment boundary and the final entry is emitted with whatever duration remains (may still be < 0.8s — rare; only happens when the segment itself is too short to fit floor-padded pieces, in which case the splitter shouldn't have been invoked anyway).
+- Overlaps are NOT introduced; the cascade pushes forward instead of overlapping.
+
+This isn't word-aligned (SenseVoice doesn't give word timestamps); proportional-by-char-weight is the best we can do without a second alignment pass. A future enhancement: pipe the cleaned text + audio through whisperx's wav2vec2 aligner to get true word timestamps and reissue piece boundaries — out of scope for v1.
 
 **D. Danmaku coverage formula (detection signal)**
 
@@ -243,8 +281,9 @@ The 5.0 second assumption is documented as a constant `BILIBILI_FIXED_DANMAKU_SE
 
 - **Short-circuit decision, not voting**: any single signal saying SKIP triggers SKIP. Rationale: "don't add subtitles" is the safe undo-able state. Adding subtitles and getting them wrong (overlapping with existing burnt subs) is much harder to fix than realizing later you missed an opportunity.
 - **Cleanup before split (not after)**: the N-line invariant operates on FunASR-segment-granularity text (longer context → better terminology disambiguation by Codex). Splitting is purely mechanical (no LLM) and runs on cleaned text. See §5.1 A.
-- **Char-oversize triggers split; pure-duration-oversize does NOT**: a 25-char, 9-second segment stays as one entry. Cutting it mid-phrase to satisfy a 6s ceiling would create unreadable flicker. See §5.1 C rule 4.
-- **Last-resort midpoint split for punctuation-free oversized text**: ugly but bounded; produces lines that fit on screen even when ASR returns one massive sentence. Acceptable failure mode: a clause boundary that doesn't match prosody. See §5.1 C pass 3.
+- **Char-oversize is the SOLE split trigger**: duration is not a trigger. A 25-char, 9-second segment stays as one entry; the speaker just paused mid-sentence and a synthetic cut would cause flicker. There is no `MAX_DURATION` constant; the spec is intentionally simpler. See §5.1 C.
+- **Last-resort midpoint split for punctuation-free oversized text**: ugly but bounded; Pass 3 is guaranteed to terminate because each recursive call strictly halves character count. Acceptable failure mode: a clause boundary that doesn't match prosody. See §5.1 C Pass 3.
+- **Split is style-dependent and NOT cached**: `.raw.srt` and `.cleaned.srt` are stored at FunASR-segment granularity (the expensive-to-recompute level). Splitting is fast pure Python keyed on `--font-size`, so changing font size doesn't invalidate the ASR or cleanup caches.
 - **Cleanup is "quality bonus", not "correctness path"**: Codex failures fall back to raw ASR without failing the run. Better to ship slightly imperfect terminology than to block the pipeline.
 - **OCR failures fall open (toward "no text detected")**: opposite of fail-closed — we'd rather over-subtitle a clean segment than miss subtitling because an OCR bug crashed. The danmaku-XML path is the high-confidence signal; OCR is the fallback for the "原视频烧录" case.
 - **Cached SRT artifacts are SRT, not JSON**: makes them inspectable / hand-editable by the user. If `--force-cleanup` is rerun after the user manually fixes a few lines in `.cleaned.srt`, the user fix gets blown away — accept this; the user can move/rename the file to protect it.
@@ -365,15 +404,16 @@ New file `tests/test_subtitle.py`, following the existing pattern of mocking at 
 - Codex returns 1 line at len ratio 0.79 → reject, fallback
 
 **Post-cleanup split — exact algorithm (§5.1 C)**
-- Char-OK + dur-OK (15 chars, 3s) → 1 entry, unchanged
-- Char-oversize (45 chars, 3s) with 。 → pass-1 split, all pieces char-OK
-- Char-oversize (45 chars, 3s) with only ，→ pass-2 split
-- Char-oversize (45 chars, 3s) with NO punctuation → pass-3 midpoint split, recursive until char-OK
-- Dur-oversize but char-OK (25 chars, 9s, no punctuation) → emit as 1 entry, do NOT split (§5.1 C rule 4)
-- Char-oversize + dur-oversize + no punctuation → pass-3 midpoint split into pieces that each pass char check; duration check follows for free since pieces inherit proportional time
+- Char-OK (15 chars, 3s) → 1 entry, unchanged regardless of duration
+- Char-OK long duration (25 chars, 9s, no punctuation) → 1 entry, NOT split (duration is not a trigger)
+- Char-oversize (45 chars, 3s) with `。` → Pass 1, all sub-pieces char-OK after recursion
+- Char-oversize (45 chars, 3s) with only `，` (no 。) → Pass 2 used
+- Char-oversize (45 chars, 3s) with zero punctuation → Pass 3 midpoint; recursion guaranteed to terminate (strictly halves)
+- Pass 3 termination property: 100-char no-punctuation text splits to ≤32 chars in ≤3 levels of recursion (assuming default MAX_LINE_CHARS=30)
+- Char threshold uses strict `>` (exactly 30 chars at default → no split)
 - Proportional time allocation: pieces with weights [40, 30, 20] inside (0.0, 12.0) → boundaries at (0.0, 5.33), (5.33, 9.33), (9.33, 12.0)
-- Hard floor: piece at (5.0, 5.3) gets extended to (5.0, 5.8); subsequent piece start adjusted
-- MAX_LINE_CHARS is style-dependent: --font-size 56 should yield smaller threshold than default
+- Hard floor cascade: pieces (5.0, 5.3) → (5.6, 5.9) → ... walks forward, never overlaps. Final-entry-clipped-by-segment-end behavior verified
+- MAX_LINE_CHARS is style-dependent: --font-size 56 produces a smaller threshold than --font-size 42
 
 **Danmaku coverage (§5.1 D)**
 - Single type=4 at t=10 → coverage interval [10, 15] = 5s
