@@ -439,21 +439,22 @@ def _build_cleanup_prompt(segments: list[FunASRSegment], glossary: Glossary) -> 
     canonical_lines = "\n".join(f"  - {term}" for term in glossary.canonical)
     numbered = "\n".join(f"{i + 1}. {seg.text}" for i, seg in enumerate(segments))
     return (
-        "以下是繁體中文爐石戰記戰棋實況解說的 STT 轉寫，每行一句。\n"
-        "只修正錯字、術語、人名；\n"
-        "每行修正後的字數必須與原文相差不超過 ±20%；\n"
-        "不改寫語意、不增刪句子、不合併或分割行。\n"
+        "以下是简体中文炉石传说战棋实况解说的 STT 转写，每行一句。\n"
+        "只修正错字、术语、人名；\n"
+        "每行修正后的字数必须与原文相差不超过 ±20%；\n"
+        "不改写语意、不增删句子、不合并或分割行。\n"
+        "输出必须为简体中文；若输入夹杂繁体字，请一并转为简体。\n"
         "\n"
-        "術語對應表（左 → 右為錯誤 → 正確）：\n"
+        "术语对应表（左 → 右为错误 → 正确）：\n"
         f"{correction_lines}\n"
         "\n"
-        "首選用詞（若有歧義請偏向以下形式）：\n"
+        "首选用词（若有歧义请偏向以下形式）：\n"
         f"{canonical_lines}\n"
         "\n"
-        f"輸入（共 {len(segments)} 行，已編號）：\n"
+        f"输入（共 {len(segments)} 行，已编号）：\n"
         f"{numbered}\n"
         "\n"
-        f"輸出：請只輸出 {len(segments)} 行修正結果，順序與輸入對應，不要編號、不要說明、不要空行。"
+        f"输出：请只输出 {len(segments)} 行修正结果，顺序与输入对应，不要编号、不要说明、不要空行。"
     )
 
 
