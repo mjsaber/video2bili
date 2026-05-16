@@ -694,29 +694,46 @@ def test_burn_refuses_same_path_in_out_via_resolve(tmp_path):
     assert input_mp4.read_bytes() == b"precious"
 
 
-def test_burn_unlinks_output_when_hardlinked_to_input(tmp_path):
-    """Regression for the data-loss bug: when output is a hardlink to input
-    (left by a prior passthrough), ffmpeg -y would O_TRUNC the shared inode
-    and destroy the input. burn_subtitles MUST unlink the output path BEFORE
-    invoking ffmpeg.
-
-    Asserts ordering: when subprocess.run is called, output_video must already
-    have been unlinked (so ffmpeg's -y opens a brand-new inode, not the shared
-    one). Captures the inode shared-state at the moment of the subprocess call.
-    """
+def test_burn_refuses_hardlink_to_input(tmp_path):
+    """When output is a hardlink to input (passthrough leftover), burn_subtitles
+    refuses — does NOT attempt to disambiguate "safe to unlink" via nlink. The
+    nlink-based heuristic is fragile (TOCTOU race; NFS lies about nlink), so
+    we refuse all same-file cases. Callers that legitimately want to clean up
+    a passthrough leftover (the CLI's run()) must unlink explicitly first."""
     input_mp4 = tmp_path / "seg.mp4"
     input_mp4.write_bytes(b"original-source-data")
     output_mp4 = tmp_path / "seg_subbed.mp4"
     subtitle.passthrough(input_mp4, output_mp4)
-    input_ino = input_mp4.stat().st_ino
-    assert output_mp4.stat().st_ino == input_ino, "precondition: hardlinked"
+    assert output_mp4.samefile(input_mp4), "precondition: hardlinked"
 
-    output_state_at_subprocess_call = {}
+    entries = [subtitle.SrtEntry(0.0, 2.0, "abc")]
+    with pytest.raises(ValueError, match="same on-disk file"):
+        subtitle.burn_subtitles(
+            input_mp4, entries, output_mp4,
+            font_face="x", font_size=42, outline_px=4, shadow_px=2,
+            video_width=1920, video_height=1080,
+        )
+    # Input intact, output (hardlink) still in place
+    assert input_mp4.read_bytes() == b"original-source-data"
+    assert output_mp4.exists()
+
+
+@patch("subprocess.run")
+def test_burn_proceeds_when_output_unrelated_to_input(mock_run, tmp_path):
+    """When output is an unrelated existing file (not a hardlink to input),
+    burn_subtitles unlinks it and proceeds to ffmpeg. Verifies the existing
+    file at the output path is unlinked before subprocess.run."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"input-data")
+    output_mp4 = tmp_path / "seg_subbed.mp4"
+    output_mp4.write_bytes(b"unrelated-old-output")
+    assert not output_mp4.samefile(input_mp4)
+
+    output_state = {}
 
     def capture(cmd, **kwargs):
-        # At the moment ffmpeg is invoked, the output path must NOT exist
-        # (or at minimum must not share an inode with input).
-        output_state_at_subprocess_call["exists"] = output_mp4.exists()
+        output_state["exists_at_call"] = output_mp4.exists()
         return MagicMock(returncode=0, stdout="", stderr="")
 
     with patch("subprocess.run", side_effect=capture):
@@ -726,13 +743,8 @@ def test_burn_unlinks_output_when_hardlinked_to_input(tmp_path):
             font_face="x", font_size=42, outline_px=4, shadow_px=2,
             video_width=1920, video_height=1080,
         )
-
-    assert output_state_at_subprocess_call["exists"] is False, (
-        "burn_subtitles must unlink output_video before invoking ffmpeg"
-    )
-    # Input is intact (would have been guaranteed by the unlink-first invariant
-    # in production; under the mock it's trivially true, but we still assert it).
-    assert input_mp4.read_bytes() == b"original-source-data"
+    assert output_state["exists_at_call"] is False  # was unlinked
+    assert input_mp4.read_bytes() == b"input-data"  # input untouched
 
 
 def test_passthrough_hardlinks_same_filesystem(tmp_path):
