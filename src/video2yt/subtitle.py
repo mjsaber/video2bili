@@ -701,8 +701,16 @@ def burn_subtitles(
     Reuses ``compose.srt_to_ass`` for ASS templating. ffmpeg is invoked with
     ``cwd=input_video.parent`` and the ASS path referenced by basename to dodge
     the ``subtitles=`` filter's path-escape issues (same trick as ``burn.py``).
+
+    Data-loss safeguard: if ``output_video`` already exists, unlink it before
+    invoking ffmpeg. Otherwise ffmpeg's ``-y`` would use ``O_TRUNC`` on the
+    existing inode — and if ``output_video`` is a hardlink to ``input_video``
+    (e.g. left behind by a prior ``passthrough`` call), the truncate would
+    destroy the input. Discovered via live test 2026-05-15.
     """
     output_video.parent.mkdir(parents=True, exist_ok=True)
+    if output_video.exists():
+        output_video.unlink()
 
     # Serialize entries as SRT so we can reuse compose.srt_to_ass.
     srt_segs = [FunASRSegment(e.start, e.end, e.text) for e in entries]

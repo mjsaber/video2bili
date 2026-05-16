@@ -627,6 +627,47 @@ def test_burn_uses_audio_copy(mock_run, tmp_path):
     assert cmd[cmd.index("-c:a") + 1] == "copy"
 
 
+def test_burn_unlinks_output_when_hardlinked_to_input(tmp_path):
+    """Regression for the data-loss bug: when output is a hardlink to input
+    (left by a prior passthrough), ffmpeg -y would O_TRUNC the shared inode
+    and destroy the input. burn_subtitles MUST unlink the output path BEFORE
+    invoking ffmpeg.
+
+    Asserts ordering: when subprocess.run is called, output_video must already
+    have been unlinked (so ffmpeg's -y opens a brand-new inode, not the shared
+    one). Captures the inode shared-state at the moment of the subprocess call.
+    """
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"original-source-data")
+    output_mp4 = tmp_path / "seg_subbed.mp4"
+    subtitle.passthrough(input_mp4, output_mp4)
+    input_ino = input_mp4.stat().st_ino
+    assert output_mp4.stat().st_ino == input_ino, "precondition: hardlinked"
+
+    output_state_at_subprocess_call = {}
+
+    def capture(cmd, **kwargs):
+        # At the moment ffmpeg is invoked, the output path must NOT exist
+        # (or at minimum must not share an inode with input).
+        output_state_at_subprocess_call["exists"] = output_mp4.exists()
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=capture):
+        entries = [subtitle.SrtEntry(0.0, 2.0, "abc")]
+        subtitle.burn_subtitles(
+            input_mp4, entries, output_mp4,
+            font_face="x", font_size=42, outline_px=4, shadow_px=2,
+            video_width=1920, video_height=1080,
+        )
+
+    assert output_state_at_subprocess_call["exists"] is False, (
+        "burn_subtitles must unlink output_video before invoking ffmpeg"
+    )
+    # Input is intact (would have been guaranteed by the unlink-first invariant
+    # in production; under the mock it's trivially true, but we still assert it).
+    assert input_mp4.read_bytes() == b"original-source-data"
+
+
 def test_passthrough_hardlinks_same_filesystem(tmp_path):
     src = tmp_path / "seg.mp4"
     src.write_bytes(b"hello")
