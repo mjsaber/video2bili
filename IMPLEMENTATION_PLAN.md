@@ -51,7 +51,7 @@
 
 **Commit**: 无独立 commit（实测结果以聊天确认 + 本文件 Status 字段记录）
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
@@ -75,7 +75,7 @@
 
 **Commit**: `refactor(subtitle): codex prompt → simplified Chinese`
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
@@ -111,7 +111,7 @@
 
 **Commit**: `refactor(subtitle): glossary → simplified; clear stale corrections`
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
@@ -146,7 +146,7 @@
 
 **Commit**: `test(subtitle): translate fixtures and assertions to simplified Chinese`
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
@@ -172,7 +172,7 @@
 
 **Commit**: 不修代码则无 commit；若发现需要微调（如 prompt 措辞），单独 commit
 
-**Status**: Not Started
+**Status**: Complete
 
 ---
 
@@ -181,3 +181,26 @@
 - 战棋 glossary 实测扩充（英雄名 / 随从名 / 种族 / 关键动词）
 - whisperx GPU 加速 + 跨段模型缓存
 - wav2vec2 强制对齐以获得真实词级时间戳
+
+---
+
+## Phase 1 verification log
+
+**Verified**: 2026-05-16
+
+**Commits**:
+- `bdd38c3` Stage B（Codex prompt 简化；bundled with this plan file's initial commit）
+- `539666e` Stage C（glossary 简化）
+- `5bbb049` Stage D（tests 简化，460/460 passing）
+- `<this commit>` Stage E verification log
+
+**Stage A (whisperx 实测)**: 60s clip from `BV1Z4dLBLE9B.mp4`, whisperx large-v3 default → 100% Simplified output, 2 segments. Q1=A 决策成立。
+
+**Stage E (端到端冒烟)**: `uv run video2yt-subtitle /tmp/v2y_stageA/clip60.mp4 --force-add`
+- Wall-clock: 4 min 5 sec (ASR 46.7s + Codex 169.4s + split <1s + burn 13.7s) —— 远快于预估 13-20min；short prompt + 0 corrections is the reason
+- Segment count: 2 raw → 2 cleaned （preserved）
+- ±20% length check: passed for both segments (no fallback)
+- Traditional char scan on cleaned.srt: **0 matches** (grep over the common Traditional-only set 戰實這個還們應聲讓內讀見寫… returned no hits)
+- Output mp4: duration 47.067s vs input 47.07s (within CLI's ±1s tolerance)
+
+**观察**（Phase 2 motivation）: 即便 `corrections={}`，Codex 仍会主动重写专名（例：`独蒙格斯→胡蒙格斯`、`古本那加冥想者→四本娜迦宁静的冥想者`）。少数改对了（`视频方面→饰品方面`、`铁路宝钻针→铁炉堡锻砧`），更多是把一个错猜换成另一个错猜。Phase 2 用真实 .raw.srt 喂回 glossary 是关键。
