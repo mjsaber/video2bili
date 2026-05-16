@@ -29,8 +29,8 @@ It is invoked per-segment, not on the merged output, because detection signals o
 | Dimension | Decision | Rationale |
 |---|---|---|
 | Form factor | Independent CLI `video2yt-subtitle` | Single-responsibility, matches existing flat module pattern (compose/compose_cli, merge/merge_cli); cacheable per-segment; parallelizable; doesn't bloat merge.py |
-| Dependency gating | ML deps (`funasr`, `rapidocr-onnxruntime`) live in `[project.optional-dependencies] subtitle`, NOT top-level | These deps pull in PyTorch + ONNX runtime (~1.5-2GB). Other CLIs in this repo shouldn't be forced to install them. Install via `uv sync --extra subtitle`; lazy import + preflight check matches existing whisperx pattern |
-| ASR engine | Alibaba SenseVoice-Small via `funasr` | 2-4 pts lower Mandarin CER than whisper-large; ~5× faster; built-in VAD; mature open-source by 2026 |
+| Dependency gating | OCR dep (`rapidocr-onnxruntime`) lives in `[project.optional-dependencies] subtitle`, NOT top-level. ASR engine `whisperx` is already a top-level dep | The OCR dep pulls in ONNX runtime; users who don't need OCR detection shouldn't be forced to install it. Install via `uv sync --extra subtitle`; lazy import + preflight check matches existing whisperx pattern. (After the 2026-05-15 ASR swap, `funasr` was removed from this extra) |
+| ASR engine | OpenAI Whisper large-v3 via `whisperx` (revised 2026-05-15) | First end-to-end test exposed two SenseVoice deficiencies on real material: (1) the output format is one big string with inline `<|lang|>` tags, no per-segment timestamps — our split algorithm requires per-segment times; (2) on BGM-heavy game audio, the transcription degenerates to hallucinations like "Everybody love everybody". whisperx is already a top-level project dep (used by the intro flow), returns per-segment timestamps natively, and whisper-large-v3 is more robust to background music. The earlier `funasr` subtitle-extra dependency is dropped |
 | Cleanup | Codex CLI with in-repo glossary | Same auth path as image-gen (ChatGPT subscription); risk profile consistent with current project usage of Codex CLI; preserves option to migrate to direct API later |
 | Detection signals | a + b + c (danmaku XML scan + visual OCR sample + manual flag); **OCR is opt-in via `--enable-ocr`** (revised 2026-05-15) | Initial design enabled all three by default. First end-to-end test on a Hearthstone Battlegrounds segment exposed that the bottom-band OCR sample fires on the game's hand-card UI (always-on stable text at ~0.85-0.95 of frame height). OCR detection is now off by default; the danmaku XML scan and manual `--force-add`/`--force-skip` cover the normal BG workflow. Enable OCR for talking-head streams or other source material with a plain bottom band |
 | Subtitle style | Reuse `compose.srt_to_ass`, position="bottom", stronger outline (4px) + shadow (2px) | Game video background is busy; current intro style (2px outline, no shadow) is too weak for overlay on dynamic backgrounds; bottom is the conventional subtitle position |
@@ -61,20 +61,21 @@ dependencies = [
 
 [project.optional-dependencies]
 subtitle = [
-    "funasr>=1.2",            # SenseVoice-Small runtime + PyTorch transitively
     "rapidocr-onnxruntime>=1.4",  # ONNX runtime for OCR detection
 ]
+# Note: ASR engine is `whisperx`, already in top-level dependencies (used by
+# the intro flow as well). The earlier `funasr` entry was removed 2026-05-15.
 
 [project.scripts]
 video2yt-subtitle = "video2yt.subtitle_cli:main"
 ```
 
-**Dependency gating**: `funasr` and `rapidocr-onnxruntime` together pull in PyTorch + ONNX runtime, easily 1.5-2GB on disk. Users who only run `video2yt` / `video2yt-merge` / `video2yt-compose` should not be forced to install this stack. Therefore:
+**Dependency gating**: ASR (`whisperx`) is a top-level dep — the intro flow uses it too — so no gating there. Only the OCR dep (`rapidocr-onnxruntime`) lives in the optional `subtitle` extra; users who never run `--enable-ocr` don't pay the ONNX-runtime install cost. Therefore:
 
-- Heavy deps live in `[project.optional-dependencies] subtitle = [...]`
-- Install via `uv sync --extra subtitle` (or `uv add --extra subtitle video2yt`)
-- `subtitle.py` uses lazy imports (`import funasr` / `import rapidocr_onnxruntime` inside the functions that need them), matching the existing `transcribe.py` pattern with `whisperx`
-- `subtitle_cli.preflight()` does `try: import funasr; import rapidocr_onnxruntime; except ImportError → raise RuntimeError("subtitle extras not installed. Run: uv sync --extra subtitle")`
+- OCR dep lives in `[project.optional-dependencies] subtitle = [...]`
+- Install via `uv sync --extra subtitle` (or `uv add --extra subtitle video2yt`) when OCR detection is needed
+- `subtitle.py` uses lazy imports (`import whisperx` inside `_run_asr`, `import rapidocr_onnxruntime` inside `_run_rapidocr`), matching the existing `transcribe.py` pattern with `whisperx`
+- `subtitle_cli.preflight()` checks only that `whisperx` is importable (top-level dep, but check anyway for friendlier error). The `rapidocr_onnxruntime` import is left lazy: if the user passes `--enable-ocr` without the extra installed, the lazy import surfaces an actionable error
 - README documents this extra in the install section
 
 Rationale for flat module layout (not a `subtitle/` subpackage): every other module in the project is a single flat file. Introducing a subpackage here would be the first inconsistency. If `subtitle.py` grows past ~800 lines we revisit; not now.
@@ -111,7 +112,7 @@ INPUT: segment.mp4 + [--danmaku raw.xml] + [--force-add|--force-skip] + [--gloss
 └─[2b. ADD path]──────────────────────────────────────────────
     ├─[3. ASR]
     │   - ffmpeg extract mono 16kHz wav to temp
-    │   - funasr.AutoModel(model="SenseVoiceSmall", vad_model="fsmn-vad", trust_remote_code=True)
+    │   - whisperx.load_model("large-v3", device="cpu", compute_type="int8", language="zh")
     │   - Output: [(start_s, end_s, text), ...] at FunASR-segment granularity
     │   - Write directly to SRT format (one SRT entry per FunASR segment,
     │     NO splitting yet — splitting happens at step 5)
@@ -362,7 +363,7 @@ Output:
 | Code | Meaning |
 |---|---|
 | 0 | Success — subtitles added, OR detection said SKIP and passthrough succeeded |
-| 1 | Preflight failure (ffmpeg, ffprobe, codex, or funasr unavailable) |
+| 1 | Preflight failure (ffmpeg, ffprobe, codex, or whisperx unavailable) |
 | 2 | Input validation failure (file missing, not 1080p, mutex flag conflict, malformed danmaku XML) |
 | 3 | Runtime subprocess failure (ASR crash, ffmpeg burn failure) |
 
@@ -370,7 +371,7 @@ Output:
 
 SKIP path (existing subs detected):
 ```
-[video2yt-subtitle] preflight OK (ffmpeg, ffprobe, codex, funasr)
+[video2yt-subtitle] preflight OK (ffmpeg, ffprobe, codex, whisperx)
 [video2yt-subtitle] input: seg1_with_danmaku.mp4 (1920x1080 30fps, 487.32s)
 [video2yt-subtitle] danmaku scan: 47 type=4 fixed danmaku, 38.2% coverage → SKIP
 [video2yt-subtitle] passthrough -> seg1_with_danmaku_subbed.mp4
@@ -393,7 +394,8 @@ ADD path (no existing subs):
 |---|---|---|
 | `ffmpeg` / `ffprobe` not in PATH | preflight error, print install command | 1 |
 | `codex` CLI not in PATH | preflight error (still required even with --skip-cleanup, matches project convention) | 1 |
-| `funasr` / `rapidocr_onnxruntime` not importable | preflight error: `subtitle extras not installed. Run: uv sync --extra subtitle` | 1 |
+| `whisperx` not importable | preflight error: `whisperx not installed (this should be a top-level dep). Run: uv sync` | 1 |
+| `rapidocr_onnxruntime` not importable | only surfaces if `--enable-ocr` is set; lazy import raises with `Run: uv sync --extra subtitle` hint | 3 |
 | FunASR model not downloaded | Let FunASR auto-download on first run, log one line `[downloading SenseVoice-Small ~600MB...]`. Network failure during download surfaces as ASR runtime failure | 0 on success / 3 on network failure |
 | Input file missing / not 1080p | error with actual resolution | 2 |
 | `--danmaku` XML corrupted | error (fail fast — user passed bad input) | 2 |

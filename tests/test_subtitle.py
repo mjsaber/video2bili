@@ -307,10 +307,10 @@ def test_sample_ocr_fails_open_on_extract_error(mock_extract):
 
 
 @patch("video2yt.subtitle._extract_wav")
-@patch("video2yt.subtitle._run_funasr")
-def test_transcribe_returns_funasr_segments(mock_funasr, mock_extract, tmp_path):
+@patch("video2yt.subtitle._run_asr")
+def test_transcribe_returns_funasr_segments(mock_asr, mock_extract, tmp_path):
     mock_extract.return_value = tmp_path / "audio.wav"
-    mock_funasr.return_value = [
+    mock_asr.return_value = [
         (0.0, 2.5, "你好"),
         (2.5, 5.0, "世界"),
     ]
@@ -322,10 +322,10 @@ def test_transcribe_returns_funasr_segments(mock_funasr, mock_extract, tmp_path)
 
 
 @patch("video2yt.subtitle._extract_wav")
-@patch("video2yt.subtitle._run_funasr")
-def test_transcribe_strips_whitespace(mock_funasr, mock_extract, tmp_path):
+@patch("video2yt.subtitle._run_asr")
+def test_transcribe_strips_whitespace(mock_asr, mock_extract, tmp_path):
     mock_extract.return_value = tmp_path / "audio.wav"
-    mock_funasr.return_value = [(0.0, 2.0, "  你好  ")]
+    mock_asr.return_value = [(0.0, 2.0, "  你好  ")]
     result = subtitle.transcribe(Path("seg.mp4"))
     assert result[0].text == "你好"
 
@@ -714,12 +714,12 @@ def test_preflight_fails_when_ffmpeg_missing(mock_which):
 
 @patch("video2yt.subtitle_cli.shutil.which", return_value="/usr/bin/found")
 @patch("builtins.__import__")
-def test_preflight_fails_with_helpful_message_when_extras_missing(mock_import, mock_which):
-    """When 'funasr' or 'rapidocr_onnxruntime' aren't installed, preflight says how to fix."""
+def test_preflight_fails_with_helpful_message_when_whisperx_missing(mock_import, mock_which):
+    """When 'whisperx' isn't installed, preflight says how to fix."""
     def fake_import(name, *args, **kwargs):
-        if name in ("funasr", "rapidocr_onnxruntime"):
+        if name == "whisperx":
             raise ImportError(name)
         return __import__(name, *args, **kwargs)
     mock_import.side_effect = fake_import
-    with pytest.raises(RuntimeError, match="subtitle.*extra"):
+    with pytest.raises(RuntimeError, match="whisperx"):
         subtitle_cli.preflight()

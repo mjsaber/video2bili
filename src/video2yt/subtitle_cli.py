@@ -28,12 +28,11 @@ def preflight() -> None:
             "codex CLI not found in PATH. brew install codex && codex login"
         )
     try:
-        __import__("funasr")
-        __import__("rapidocr_onnxruntime")
+        __import__("whisperx")
     except ImportError as e:
         raise RuntimeError(
-            f"subtitle extras not installed ({e.name}). "
-            "Run: uv sync --extra subtitle"
+            "whisperx not installed (this should be a top-level dep). "
+            "Run: uv sync"
         ) from e
 
 
