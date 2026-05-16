@@ -695,15 +695,19 @@ def test_burn_refuses_same_path_in_out_via_resolve(tmp_path):
 
 
 def test_burn_refuses_hardlink_to_input(tmp_path):
-    """When output is a hardlink to input (passthrough leftover), burn_subtitles
-    refuses — does NOT attempt to disambiguate "safe to unlink" via nlink. The
-    nlink-based heuristic is fragile (TOCTOU race; NFS lies about nlink), so
-    we refuse all same-file cases. Callers that legitimately want to clean up
-    a passthrough leftover (the CLI's run()) must unlink explicitly first."""
+    """When output is a hardlink to input (e.g. user manually linked, or some
+    external tool did), burn_subtitles refuses — does NOT attempt to disambiguate
+    "safe to unlink" via nlink. The nlink-based heuristic is fragile (TOCTOU
+    race; NFS lies about nlink), so we refuse all same-file cases.
+
+    Note: ``passthrough`` no longer creates hardlinks (it always copies), so
+    this scenario is harder to hit accidentally — but the user / external tools
+    can still do it, and burn_subtitles must remain data-safe regardless."""
+    import os
     input_mp4 = tmp_path / "seg.mp4"
     input_mp4.write_bytes(b"original-source-data")
     output_mp4 = tmp_path / "seg_subbed.mp4"
-    subtitle.passthrough(input_mp4, output_mp4)
+    os.link(input_mp4, output_mp4)   # external hardlink, not via passthrough
     assert output_mp4.samefile(input_mp4), "precondition: hardlinked"
 
     entries = [subtitle.SrtEntry(0.0, 2.0, "abc")]
@@ -747,28 +751,22 @@ def test_burn_proceeds_when_output_unrelated_to_input(mock_run, tmp_path):
     assert input_mp4.read_bytes() == b"input-data"  # input untouched
 
 
-def test_passthrough_hardlinks_same_filesystem(tmp_path):
+def test_passthrough_copies_to_distinct_inode(tmp_path):
+    """passthrough copies (does NOT hardlink). The output is an independent
+    file with its own inode. Rationale: a hardlink at the output path used to
+    be a foot-gun — a subsequent run's burn step would clobber the shared
+    inode and destroy the input. A copy costs a few seconds; well worth it."""
     src = tmp_path / "seg.mp4"
     src.write_bytes(b"hello")
     dst = tmp_path / "seg_subbed.mp4"
     subtitle.passthrough(src, dst)
     assert dst.exists()
     assert dst.read_bytes() == b"hello"
-    # On the same filesystem, hardlink: same inode
-    assert dst.stat().st_ino == src.stat().st_ino
-
-
-@patch("video2yt.subtitle.os.link")
-def test_passthrough_falls_back_to_copy_on_exdev(mock_link, tmp_path):
-    mock_link.side_effect = OSError(18, "Cross-device link not permitted")
-    src = tmp_path / "seg.mp4"
-    src.write_bytes(b"data")
-    dst = tmp_path / "out.mp4"
-    subtitle.passthrough(src, dst)
-    assert dst.exists()
-    assert dst.read_bytes() == b"data"
-    # Different inodes because it's a copy
-    assert dst.stat().st_ino != src.stat().st_ino
+    assert dst.stat().st_ino != src.stat().st_ino, (
+        "passthrough must produce an independent inode (not a hardlink)"
+    )
+    # And the two files must NOT samefile (no shared inode by any mechanism)
+    assert not dst.samefile(src)
 
 
 def test_passthrough_overwrites_existing(tmp_path):

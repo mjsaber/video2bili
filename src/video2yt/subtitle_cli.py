@@ -200,19 +200,6 @@ def run(args: argparse.Namespace) -> Path:
     _log(f"split: {len(cleaned_segments)} cleaned → {len(final_entries)} final SRT entries (MAX_LINE_CHARS={max_line_chars})")
 
     # Burn
-    # Workflow-specific cleanup: a prior --enable-ocr / detection-HIT run on
-    # this segment would have left `output` as a hardlink to args.segment via
-    # passthrough. burn_subtitles refuses any samefile case (data safety), so
-    # remove the stale hardlink here — we know this is a benign cleanup because
-    # the user is now running the ADD path and clearly wants output overwritten.
-    if (
-        output.exists()
-        and not output.resolve() == args.segment.resolve()
-        and output.samefile(args.segment)
-    ):
-        _log(f"removing stale passthrough hardlink at output: {output.name}")
-        output.unlink()
-
     t0 = time.time()
     _log(f"burn: subtitles → {output}")
     subtitle.burn_subtitles(

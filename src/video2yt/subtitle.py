@@ -3,7 +3,6 @@
 Spec: docs/superpowers/specs/2026-05-14-video2yt-subtitle-design.md
 """
 
-import os
 import re
 import shutil
 import tempfile
@@ -773,14 +772,22 @@ def burn_subtitles(
 
 
 def passthrough(src: Path, dst: Path) -> None:
-    """Hardlink ``src`` to ``dst`` if possible; fall back to copy on EXDEV."""
+    """Copy ``src`` to ``dst`` (always copy; not hardlink).
+
+    Originally this used ``os.link`` with an EXDEV-copy fallback to save disk
+    space on the common same-filesystem case. But a hardlink at the output
+    path turned out to be a foot-gun: a subsequent ``video2yt-subtitle`` run on
+    the same input (with a different decision producing the ADD path) would
+    invoke ffmpeg with ``-y output.mp4`` and silently truncate the shared inode,
+    destroying the input. Defensive guards in ``burn_subtitles`` now refuse
+    same-file inputs, but a refusal is a UX regression: the user is forced to
+    manually clean up state between runs.
+
+    A full copy costs a few seconds per 600MB segment — negligible against the
+    multi-minute ASR + cleanup + burn pipeline that runs immediately after. The
+    cost is well worth eliminating the entire hardlink-leftover bug class.
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists():
         dst.unlink()
-    try:
-        os.link(src, dst)
-    except OSError as e:
-        if e.errno == 18:    # EXDEV — cross-device
-            shutil.copy2(src, dst)
-        else:
-            raise
+    shutil.copy2(src, dst)
