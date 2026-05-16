@@ -1,28 +1,38 @@
-# Hearthstone Battlegrounds STT terminology corrections.
+# Simplified Chinese terminology corrections for Hearthstone Battlegrounds.
 #
-# Left → right: errors that SenseVoice / whisper tend to produce, mapped to
-# the canonical Traditional-Chinese form used on this YouTube channel.
-# Add entries as new project topics surface new mistranscription patterns.
-corrections:
-  戰旗: 戰棋               # 战旗 (Stratego) → 战棋 (Hearthstone Battlegrounds)
-  护戒: 戒指龍              # ringnaga incident — "护戒" mistranscription for 戒指龍 / Ring Bearer
-  護戒: 戒指龍
-  拉法母: 拉法姆            # Rafaam, proper noun mishearing
-  加拉克朗: 加拉克隆        # Galakrond, proper noun mishearing
-  伊瑟拉: 伊瑟拉            # canonical (no change — keeps Codex from "correcting" it)
+# All entries use Simplified Chinese. The earlier Traditional Chinese entries
+# (战旗→战棋, 护戒→戒指龙, 拉法母→拉法姆, 加拉克朗→加拉克隆, 伊瑟拉 identity)
+# were dropped in Phase 1 because whisperx large-v3 outputs Simplified by
+# default and those specific mishearings are Traditional-environment patterns.
+# Re-seed corrections in Phase 2 from real .raw.srt observations.
+#
+# Note: this glossary serves the SUBTITLE pipeline only. YouTube title /
+# description / chapters remain Traditional (台服 "爐石戰記：英雄戰場" branding,
+# see docs/superpowers/specs/2026-04-18-video-production-workflow.md).
+corrections: {}
+  # Format when populated:
+  #   误识别词: 正确词       # 可选行内注释
+  # Example:
+  #   寒热骤变: 寒热剧变      # Phase 2 — observed in BV1Z4dLBLE9B
+  #
+  # Identity entries (LHS == RHS) are allowed; they tell Codex "this exact
+  # form is canonical, don't try to 'correct' it" — useful for proper names
+  # that the model otherwise rewrites.
 
-# Canonical terms (no LHS error). Codex should bias toward these forms when it
-# encounters ambiguous transcription of these concepts.
+# Canonical preferred forms (no LHS). Codex biases toward these when
+# disambiguating fuzzy transcriptions. Translated from the Traditional v0
+# list by literal t2s mapping. Product name is the 国服 form `炉石传说`
+# (字幕侧用国服译名；发布元信息侧另用台服 `爐石戰記`).
 canonical:
-  - 爐石戰記
-  - 戰棋
-  - 酒館
-  - 隨從
-  - 餵牌
+  - 炉石传说
+  - 战棋
+  - 酒馆
+  - 随从
+  - 喂牌
   - 三星
-  - 吃雞
+  - 吃鸡
   - 加血
   - 上分
-  - 開酒館
-  - 護甲
+  - 开酒馆
+  - 护甲
   - 法力水晶
