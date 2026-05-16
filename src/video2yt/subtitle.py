@@ -702,12 +702,29 @@ def burn_subtitles(
     ``cwd=input_video.parent`` and the ASS path referenced by basename to dodge
     the ``subtitles=`` filter's path-escape issues (same trick as ``burn.py``).
 
-    Data-loss safeguard: if ``output_video`` already exists, unlink it before
-    invoking ffmpeg. Otherwise ffmpeg's ``-y`` would use ``O_TRUNC`` on the
-    existing inode — and if ``output_video`` is a hardlink to ``input_video``
-    (e.g. left behind by a prior ``passthrough`` call), the truncate would
-    destroy the input. Discovered via live test 2026-05-15.
+    Data-loss safeguards (in order):
+
+    1. **Same-path refusal**: if ``output_video`` resolves to the same path
+       as ``input_video``, refuse to run. Both the unlink path below and the
+       ffmpeg ``-y`` overwrite would destroy the input; the only safe action
+       is to require a distinct output path.
+
+    2. **Output unlink before ffmpeg**: if ``output_video`` exists (but is a
+       different path than input), unlink it. If it was a hardlink to input
+       (e.g. left behind by a prior ``passthrough`` call), unlinking via the
+       output path is safe — the input path still references the inode, the
+       data survives. Then ffmpeg's ``-y`` opens a brand-new inode, leaving
+       input untouched.
+
+    Both safeguards exist because of a live-test 2026-05-15 data-loss
+    incident where step 2 alone was the proposed fix, but step 1 is required
+    to handle the user passing the same path for in/out.
     """
+    if output_video.resolve() == input_video.resolve():
+        raise ValueError(
+            f"output_video and input_video resolve to the same path "
+            f"({input_video.resolve()}); use a different output path"
+        )
     output_video.parent.mkdir(parents=True, exist_ok=True)
     if output_video.exists():
         output_video.unlink()

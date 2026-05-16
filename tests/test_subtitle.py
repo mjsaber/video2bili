@@ -627,6 +627,42 @@ def test_burn_uses_audio_copy(mock_run, tmp_path):
     assert cmd[cmd.index("-c:a") + 1] == "copy"
 
 
+def test_burn_refuses_same_path_in_out(tmp_path):
+    """Regression: if the caller passes the same path for input and output,
+    burn_subtitles must REFUSE (raise ValueError), not silently unlink the
+    input. This is the most extreme data-loss case — the original ffmpeg-only
+    bug would O_TRUNC the input; the naive unlink fix would unlink the input
+    directly. Only refusing is safe."""
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"precious-source-data")
+    entries = [subtitle.SrtEntry(0.0, 2.0, "abc")]
+    with pytest.raises(ValueError, match="same path"):
+        subtitle.burn_subtitles(
+            input_mp4, entries, input_mp4,
+            font_face="x", font_size=42, outline_px=4, shadow_px=2,
+            video_width=1920, video_height=1080,
+        )
+    # Input intact
+    assert input_mp4.read_bytes() == b"precious-source-data"
+
+
+def test_burn_refuses_same_path_in_out_via_resolve(tmp_path):
+    """Same as above but via a non-canonical path (./seg.mp4 vs absolute).
+    Path comparison must use .resolve()."""
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"precious")
+    # Construct a non-canonical version of the same path
+    output_alias = tmp_path / "." / "seg.mp4"
+    entries = [subtitle.SrtEntry(0.0, 2.0, "abc")]
+    with pytest.raises(ValueError, match="same path"):
+        subtitle.burn_subtitles(
+            input_mp4, entries, output_alias,
+            font_face="x", font_size=42, outline_px=4, shadow_px=2,
+            video_width=1920, video_height=1080,
+        )
+    assert input_mp4.read_bytes() == b"precious"
+
+
 def test_burn_unlinks_output_when_hardlinked_to_input(tmp_path):
     """Regression for the data-loss bug: when output is a hardlink to input
     (left by a prior passthrough), ffmpeg -y would O_TRUNC the shared inode
