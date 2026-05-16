@@ -24,7 +24,7 @@ HARD_FLOOR_SECONDS = 0.8
 
 # Codex CLI subprocess timeout per cleanup call. Spec §7 — failure here is
 # downgraded to WARNING + raw-ASR fallback.
-CLEANUP_TIMEOUT_SECONDS = 120
+CLEANUP_TIMEOUT_SECONDS = 1200
 
 # Split-stage punctuation classes (spec §5.1 C).
 SENTENCE_PUNCT = "。！？"
@@ -458,57 +458,33 @@ def _build_cleanup_prompt(segments: list[FunASRSegment], glossary: Glossary) -> 
 
 
 def _invoke_codex(prompt: str, timeout: int = CLEANUP_TIMEOUT_SECONDS) -> str:
-    """Run the codex CLI non-interactively. Returns the raw stdout text.
+    """Run ``codex exec`` and return ONLY the agent's final message.
 
-    Uses ``codex exec`` (the non-interactive subcommand). Stdin is unused;
-    prompt is passed as the positional argument.
+    Uses ``--output-last-message <tmpfile>`` so we don't have to parse codex's
+    structured stdout log (which interleaves echoed prompt, session metadata,
+    response, and trailing ERROR/tokens lines). The tmpfile receives exactly
+    the agent's last response text.
+
+    Discovered via live diagnostic 2026-05-15: on a real 31-line production
+    prompt, codex needs ~13 minutes wall-clock to produce the corrected output.
+    Default ``CLEANUP_TIMEOUT_SECONDS`` is sized accordingly (1200s = 20 min).
     """
-    result = subprocess.run(
-        ["codex", "exec", "--skip-git-repo-check", prompt],
-        check=True, capture_output=True, text=True, timeout=timeout,
-    )
-    return result.stdout
-
-
-def _extract_codex_response(raw_output: str) -> str:
-    """Extract just the response body from ``codex exec`` stdout.
-
-    Codex's stdout has structure (verified via live diagnostic 2026-05-15):
-
-        reasoning summaries: none
-        session id: <uuid>
-        --------
-        user
-        <echoed prompt text>
-        codex
-        <THE RESPONSE WE WANT, possibly multi-line>
-        2026-...Z ERROR codex_core::session: failed to record rollout items: ...
-        tokens used
-        <N>
-
-    The actual response sits between the literal ``codex`` marker line and the
-    trailing metadata (``ERROR ...`` or ``tokens used``).
-
-    If no ``codex`` marker is found (codex CLI output format may change), this
-    falls back to returning the raw stdout unchanged. Callers should still
-    sanity-check the returned text via line-count / per-line length checks.
-    """
-    lines = raw_output.splitlines()
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".codex.txt", delete=False, encoding="utf-8"
+    ) as f:
+        last_msg_path = Path(f.name)
     try:
-        start_idx = lines.index("codex") + 1
-    except ValueError:
-        return raw_output  # no marker; let caller's sanity checks decide
-    response_lines: list[str] = []
-    for ln in lines[start_idx:]:
-        # Stop at the trailing metadata: timestamp + ERROR line, or "tokens used"
-        stripped = ln.strip()
-        if stripped == "tokens used":
-            break
-        # ERROR codex_core::session lines start with an ISO timestamp
-        if " ERROR codex_core::session:" in ln:
-            break
-        response_lines.append(ln)
-    return "\n".join(response_lines)
+        subprocess.run(
+            [
+                "codex", "exec", "--skip-git-repo-check",
+                "--output-last-message", str(last_msg_path),
+                prompt,
+            ],
+            check=True, capture_output=True, text=True, timeout=timeout,
+        )
+        return last_msg_path.read_text(encoding="utf-8")
+    finally:
+        last_msg_path.unlink(missing_ok=True)
 
 
 def cleanup_with_codex(
@@ -537,8 +513,7 @@ def cleanup_with_codex(
         _log.warning("codex CLI not found; using raw ASR")
         return segments
 
-    response_body = _extract_codex_response(raw_output)
-    cleaned_lines = [ln.strip() for ln in response_body.splitlines() if ln.strip()]
+    cleaned_lines = [ln.strip() for ln in raw_output.splitlines() if ln.strip()]
     if len(cleaned_lines) != len(segments):
         _log.warning(
             "codex output line count %d != input %d; using raw ASR",
