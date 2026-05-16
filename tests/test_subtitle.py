@@ -674,6 +674,7 @@ def test_parse_args_defaults():
     assert args.danmaku is None
     assert args.glossary is None
     assert args.force is None
+    assert args.enable_ocr is False
     assert args.ocr_interval == 5.0
     assert args.danmaku_min_fixed == 10
     assert args.danmaku_min_coverage == 30
@@ -681,6 +682,11 @@ def test_parse_args_defaults():
     assert args.font_face == "Hiragino Sans GB"
     assert args.outline_px == 4
     assert args.shadow_px == 2
+
+
+def test_parse_args_enable_ocr():
+    args = subtitle_cli.parse_args(["seg.mp4", "--enable-ocr"])
+    assert args.enable_ocr is True
 
 
 def test_parse_args_force_add():

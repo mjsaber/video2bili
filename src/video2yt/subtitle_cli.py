@@ -73,7 +73,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip detection and passthrough",
     )
 
-    parser.add_argument("--ocr-interval", type=float, default=5.0)
+    parser.add_argument(
+        "--enable-ocr", action="store_true",
+        help=(
+            "Enable OCR-based detection of pre-burned bottom subtitles. "
+            "OFF by default: game UI (e.g. Hearthstone Battlegrounds hand cards) "
+            "is also stable bottom text and triggers false positives. "
+            "Turn on for source material where the bottom of the frame is plain "
+            "(e.g. talking-head streams) and you want to detect burnt-in subs."
+        ),
+    )
+    parser.add_argument("--ocr-interval", type=float, default=5.0,
+                        help="Only meaningful with --enable-ocr")
     parser.add_argument("--danmaku-min-fixed", type=int, default=10)
     parser.add_argument("--danmaku-min-coverage", type=float, default=30,
                         help="Coverage percentage threshold (0-100)")
@@ -126,7 +137,7 @@ def run(args: argparse.Namespace) -> Path:
         )
 
     ocr_signal = None
-    if args.force is None and (danmaku_signal is None or not danmaku_signal.hit):
+    if args.enable_ocr and args.force is None and (danmaku_signal is None or not danmaku_signal.hit):
         ocr_signal = subtitle.sample_ocr(
             args.segment, segment_duration=info.duration,
             interval_seconds=args.ocr_interval,
