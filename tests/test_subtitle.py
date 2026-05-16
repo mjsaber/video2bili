@@ -769,6 +769,49 @@ def test_passthrough_copies_to_distinct_inode(tmp_path):
     assert not dst.samefile(src)
 
 
+def test_passthrough_refuses_same_path(tmp_path):
+    """passthrough(src, src) would delete src via dst.unlink() before copy.
+    Must refuse with a clear error and leave src intact."""
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"precious")
+    with pytest.raises(ValueError, match="same path"):
+        subtitle.passthrough(src, src)
+    assert src.read_bytes() == b"precious"
+
+
+def test_passthrough_refuses_case_insensitive_alias(tmp_path):
+    """On case-insensitive filesystems (macOS APFS), Path('seg.mp4') and
+    Path('SEG.mp4') are the same file. .resolve() comparison won't catch it;
+    samefile() does. Skips on case-sensitive filesystems."""
+    probe = tmp_path / "probe"
+    probe.write_text("x")
+    fs_is_case_insensitive = (tmp_path / "PROBE").exists()
+    probe.unlink()
+    if not fs_is_case_insensitive:
+        pytest.skip("filesystem is case-sensitive")
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"precious")
+    with pytest.raises(ValueError, match="same on-disk file"):
+        subtitle.passthrough(src, tmp_path / "SEG.mp4")
+    assert src.read_bytes() == b"precious"
+
+
+def test_passthrough_overwrites_external_hardlink_safely(tmp_path):
+    """If dst is an external hardlink to src (e.g., user `ln src dst` manually),
+    passthrough must refuse rather than unlink dst (which would drop a link;
+    src would survive in this case, but the policy is to refuse all same-file
+    cases for predictability)."""
+    import os
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"src-data")
+    dst = tmp_path / "seg_aliased.mp4"
+    os.link(src, dst)
+    with pytest.raises(ValueError, match="same on-disk file"):
+        subtitle.passthrough(src, dst)
+    assert src.read_bytes() == b"src-data"
+    assert dst.read_bytes() == b"src-data"
+
+
 def test_passthrough_overwrites_existing(tmp_path):
     src = tmp_path / "a.mp4"
     src.write_bytes(b"new")

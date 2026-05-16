@@ -788,6 +788,21 @@ def passthrough(src: Path, dst: Path) -> None:
     cost is well worth eliminating the entire hardlink-leftover bug class.
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
+
+    # Same-file safeguard (mirrors burn_subtitles): refuse if dst aliases src.
+    # Otherwise the dst.unlink() below would destroy the source (case-fold alias,
+    # Unicode alias, or user passing the same path) before shutil.copy2 could
+    # read it. The samefile check covers all aliasing mechanisms uniformly.
+    if dst.resolve() == src.resolve():
+        raise ValueError(
+            f"dst and src resolve to the same path ({src.resolve()}); "
+            "passthrough cannot copy a file to itself"
+        )
+    if dst.exists() and dst.samefile(src):
+        raise ValueError(
+            f"dst ({dst}) refers to the same on-disk file as src ({src}); "
+            "passthrough cannot copy a file to itself"
+        )
     if dst.exists():
         dst.unlink()
     shutil.copy2(src, dst)
