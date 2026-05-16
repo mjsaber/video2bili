@@ -46,7 +46,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=(
             "Detect whether a Bilibili segment already has bottom subtitles "
             "(via danmaku XML scan, visual OCR sample, or manual flag); "
-            "if not, add STT-generated subtitles via SenseVoice + Codex cleanup."
+            "if not, add STT-generated subtitles via whisperx + Codex cleanup."
         ),
     )
     parser.add_argument(
@@ -164,7 +164,7 @@ def run(args: argparse.Namespace) -> Path:
         )
     else:
         t0 = time.time()
-        _log(f"ASR: SenseVoice-Small on {info.duration:.2f}s audio...")
+        _log(f"ASR: whisperx (large-v3) on {info.duration:.2f}s audio...")
         raw_segments = subtitle.transcribe(args.segment)
         raw_srt_path.write_text(
             subtitle.segments_to_srt(raw_segments), encoding="utf-8"
