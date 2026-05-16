@@ -646,6 +646,37 @@ def test_burn_refuses_same_path_in_out(tmp_path):
     assert input_mp4.read_bytes() == b"precious-source-data"
 
 
+def test_burn_refuses_case_insensitive_same_file(tmp_path):
+    """On case-insensitive filesystems (macOS APFS default, Windows NTFS),
+    Path('seg.mp4') and Path('SEG.mp4') refer to the same on-disk file. The
+    resolve()-based path-string check doesn't catch this because the strings
+    differ. samefile() + st_nlink == 1 does. Test self-skips on case-sensitive
+    filesystems (typical Linux ext4)."""
+    probe_lower = tmp_path / "probe"
+    probe_lower.write_text("x")
+    probe_upper = tmp_path / "PROBE"
+    fs_is_case_insensitive = probe_upper.exists()
+    probe_lower.unlink()
+    if not fs_is_case_insensitive:
+        pytest.skip("filesystem is case-sensitive — case-fold same-file path not reachable here")
+
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"data")
+    output_alias = tmp_path / "SEG.mp4"
+    # Sanity: this filesystem treats them as the same file
+    assert output_alias.samefile(input_mp4)
+    assert input_mp4.stat().st_nlink == 1  # single directory entry
+
+    entries = [subtitle.SrtEntry(0.0, 2.0, "abc")]
+    with pytest.raises(ValueError, match="same on-disk file"):
+        subtitle.burn_subtitles(
+            input_mp4, entries, output_alias,
+            font_face="x", font_size=42, outline_px=4, shadow_px=2,
+            video_width=1920, video_height=1080,
+        )
+    assert input_mp4.read_bytes() == b"data"
+
+
 def test_burn_refuses_same_path_in_out_via_resolve(tmp_path):
     """Same as above but via a non-canonical path (./seg.mp4 vs absolute).
     Path comparison must use .resolve()."""

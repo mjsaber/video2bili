@@ -720,13 +720,33 @@ def burn_subtitles(
     incident where step 2 alone was the proposed fix, but step 1 is required
     to handle the user passing the same path for in/out.
     """
+    output_video.parent.mkdir(parents=True, exist_ok=True)
+
+    # Same-file safeguard, two layers (the resolve() check alone is bypassable
+    # on macOS APFS / Windows NTFS / case-folding filesystems where two distinct
+    # path strings can refer to the same on-disk file):
+    #
+    # 1. resolve() string equality — catches the user passing the same path
+    #    (after symlinks/.. resolution).
+    # 2. samefile() + st_nlink == 1 — catches case-insensitive filesystems and
+    #    Unicode-normalization aliases. We require nlink == 1 here to distinguish
+    #    from the legitimate hardlink case (e.g. passthrough left a hardlink at
+    #    the output path): when nlink >= 2, unlinking via the output path drops
+    #    only one of multiple links and the input data survives via its own link.
     if output_video.resolve() == input_video.resolve():
         raise ValueError(
             f"output_video and input_video resolve to the same path "
             f"({input_video.resolve()}); use a different output path"
         )
-    output_video.parent.mkdir(parents=True, exist_ok=True)
     if output_video.exists():
+        if (
+            output_video.samefile(input_video)
+            and output_video.stat().st_nlink == 1
+        ):
+            raise ValueError(
+                f"output_video refers to the same on-disk file as input_video "
+                f"on this filesystem ({output_video}); use a different output path"
+            )
         output_video.unlink()
 
     # Serialize entries as SRT so we can reuse compose.srt_to_ass.
