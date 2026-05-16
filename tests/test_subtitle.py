@@ -12,7 +12,7 @@ from video2yt import subtitle
 def test_constants_exist():
     assert subtitle.BILIBILI_FIXED_DANMAKU_SECONDS == 5.0
     assert subtitle.HARD_FLOOR_SECONDS == 0.8
-    assert subtitle.CLEANUP_TIMEOUT_SECONDS == 30
+    assert subtitle.CLEANUP_TIMEOUT_SECONDS == 120
     assert subtitle.SENTENCE_PUNCT == "。！？"
     assert subtitle.CLAUSE_PUNCT == "；，、"
 
@@ -359,6 +359,10 @@ def test_parse_srt_skips_empty_blocks():
 
 @patch("video2yt.subtitle._invoke_codex")
 def test_cleanup_happy_path_replaces_text(mock_codex):
+    """Mocks _invoke_codex with a REALISTIC codex stdout (full structured log
+    captured from a live `codex exec` 2026-05-15) — verifies that
+    cleanup_with_codex extracts just the response body, not the echoed prompt
+    or metadata."""
     segs = [
         subtitle.FunASRSegment(0.0, 2.0, "戰旗很有趣"),
         subtitle.FunASRSegment(2.0, 5.0, "拉法母真的強"),
@@ -367,13 +371,66 @@ def test_cleanup_happy_path_replaces_text(mock_codex):
         corrections={"戰旗": "戰棋", "拉法母": "拉法姆"},
         canonical=[],
     )
-    mock_codex.return_value = "戰棋很有趣\n拉法姆真的強\n"
+    # Real codex output shape: header lines, echoed prompt, "codex" marker,
+    # response lines, ERROR session line, tokens used. cleanup_with_codex must
+    # extract only the 2 response lines.
+    mock_codex.return_value = (
+        "reasoning summaries: none\n"
+        "session id: 019e2f70-5ec7-7173-af02-cb84a2ae8f3f\n"
+        "--------\n"
+        "user\n"
+        "以下是繁體中文爐石戰記戰棋實況解說的 STT 轉寫...\n"
+        "輸入（共 2 行，已編號）：\n"
+        "1. 戰旗很有趣\n"
+        "2. 拉法母真的強\n"
+        "輸出：請只輸出 2 行修正結果...\n"
+        "codex\n"
+        "戰棋很有趣\n"
+        "拉法姆真的強\n"
+        "2026-05-15T22:19:28.245436Z ERROR codex_core::session: failed to record rollout items: thread x not found\n"
+        "tokens used\n"
+        "13,226\n"
+    )
     out = subtitle.cleanup_with_codex(segs, glossary)
     assert out[0].text == "戰棋很有趣"
     assert out[1].text == "拉法姆真的強"
     # Timestamps preserved exactly
     assert out[0].start == 0.0 and out[0].end == 2.0
     assert out[1].start == 2.0 and out[1].end == 5.0
+
+
+def test_extract_codex_response_handles_real_log():
+    """The structured-log parser used by cleanup_with_codex."""
+    raw = (
+        "reasoning summaries: none\n"
+        "session id: abc\n"
+        "--------\n"
+        "user\n"
+        "<echoed prompt>\n"
+        "codex\n"
+        "line one\n"
+        "line two\n"
+        "line three\n"
+        "2026-05-15T22:19:28.245436Z ERROR codex_core::session: failed to record\n"
+        "tokens used\n"
+        "12345\n"
+    )
+    body = subtitle._extract_codex_response(raw)
+    assert body == "line one\nline two\nline three"
+
+
+def test_extract_codex_response_no_marker_returns_input():
+    """If codex output format changes and no 'codex' marker is found, the
+    parser falls back to returning input unchanged — caller's sanity checks
+    will then catch the mismatch and trigger raw-ASR fallback."""
+    raw = "just some text\nwithout the marker\n"
+    assert subtitle._extract_codex_response(raw) == raw
+
+
+def test_cleanup_timeout_default_is_120s():
+    """Live test showed 30s was insufficient for 31-line cleanups; default
+    bumped to 120s. Regression to prevent accidental rollback."""
+    assert subtitle.CLEANUP_TIMEOUT_SECONDS == 120
 
 
 @patch("video2yt.subtitle._invoke_codex")

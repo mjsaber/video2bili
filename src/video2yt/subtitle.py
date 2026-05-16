@@ -24,7 +24,7 @@ HARD_FLOOR_SECONDS = 0.8
 
 # Codex CLI subprocess timeout per cleanup call. Spec §7 — failure here is
 # downgraded to WARNING + raw-ASR fallback.
-CLEANUP_TIMEOUT_SECONDS = 30
+CLEANUP_TIMEOUT_SECONDS = 120
 
 # Split-stage punctuation classes (spec §5.1 C).
 SENTENCE_PUNCT = "。！？"
@@ -470,6 +470,47 @@ def _invoke_codex(prompt: str, timeout: int = CLEANUP_TIMEOUT_SECONDS) -> str:
     return result.stdout
 
 
+def _extract_codex_response(raw_output: str) -> str:
+    """Extract just the response body from ``codex exec`` stdout.
+
+    Codex's stdout has structure (verified via live diagnostic 2026-05-15):
+
+        reasoning summaries: none
+        session id: <uuid>
+        --------
+        user
+        <echoed prompt text>
+        codex
+        <THE RESPONSE WE WANT, possibly multi-line>
+        2026-...Z ERROR codex_core::session: failed to record rollout items: ...
+        tokens used
+        <N>
+
+    The actual response sits between the literal ``codex`` marker line and the
+    trailing metadata (``ERROR ...`` or ``tokens used``).
+
+    If no ``codex`` marker is found (codex CLI output format may change), this
+    falls back to returning the raw stdout unchanged. Callers should still
+    sanity-check the returned text via line-count / per-line length checks.
+    """
+    lines = raw_output.splitlines()
+    try:
+        start_idx = lines.index("codex") + 1
+    except ValueError:
+        return raw_output  # no marker; let caller's sanity checks decide
+    response_lines: list[str] = []
+    for ln in lines[start_idx:]:
+        # Stop at the trailing metadata: timestamp + ERROR line, or "tokens used"
+        stripped = ln.strip()
+        if stripped == "tokens used":
+            break
+        # ERROR codex_core::session lines start with an ISO timestamp
+        if " ERROR codex_core::session:" in ln:
+            break
+        response_lines.append(ln)
+    return "\n".join(response_lines)
+
+
 def cleanup_with_codex(
     segments: list[FunASRSegment],
     glossary: Glossary,
@@ -496,7 +537,8 @@ def cleanup_with_codex(
         _log.warning("codex CLI not found; using raw ASR")
         return segments
 
-    cleaned_lines = [ln.strip() for ln in raw_output.splitlines() if ln.strip()]
+    response_body = _extract_codex_response(raw_output)
+    cleaned_lines = [ln.strip() for ln in response_body.splitlines() if ln.strip()]
     if len(cleaned_lines) != len(segments):
         _log.warning(
             "codex output line count %d != input %d; using raw ASR",
