@@ -32,11 +32,17 @@ def test_packaged_glossary_yaml_exists_and_parses():
 
 
 def test_load_glossary_default():
-    """Calling load_glossary with no path loads the packaged yaml."""
+    """Calling load_glossary with no path loads the packaged yaml.
+
+    The packaged glossary is Simplified Chinese (Phase 1 migration). Corrections
+    are intentionally empty at v0 — to be re-seeded from real .raw.srt observations
+    in Phase 2."""
     g = subtitle.load_glossary(None)
     assert isinstance(g, subtitle.Glossary)
-    assert g.corrections.get("戰旗") == "戰棋"
-    assert "酒館" in g.canonical
+    assert g.corrections == {}
+    assert "战棋" in g.canonical
+    assert "酒馆" in g.canonical
+    assert "炉石传说" in g.canonical
 
 
 def test_load_glossary_custom_path(tmp_path: Path):
@@ -333,7 +339,7 @@ def test_transcribe_strips_whitespace(mock_asr, mock_extract, tmp_path):
 def test_segments_to_srt_roundtrip():
     segs = [
         subtitle.FunASRSegment(0.0, 2.5, "你好"),
-        subtitle.FunASRSegment(2.5, 5.0, "世界，再見。"),
+        subtitle.FunASRSegment(2.5, 5.0, "世界，再见。"),
     ]
     srt = subtitle.segments_to_srt(segs)
     assert "1\n00:00:00,000 --> 00:00:02,500" in srt
@@ -363,17 +369,17 @@ def test_cleanup_happy_path_replaces_text(mock_codex):
     agent's response text (no echoed prompt, no session metadata). The mock
     returns the plain response."""
     segs = [
-        subtitle.FunASRSegment(0.0, 2.0, "戰旗很有趣"),
-        subtitle.FunASRSegment(2.0, 5.0, "拉法母真的強"),
+        subtitle.FunASRSegment(0.0, 2.0, "战旗很有趣"),
+        subtitle.FunASRSegment(2.0, 5.0, "拉法母真的强"),
     ]
     glossary = subtitle.Glossary(
-        corrections={"戰旗": "戰棋", "拉法母": "拉法姆"},
+        corrections={"战旗": "战棋", "拉法母": "拉法姆"},
         canonical=[],
     )
-    mock_codex.return_value = "戰棋很有趣\n拉法姆真的強\n"
+    mock_codex.return_value = "战棋很有趣\n拉法姆真的强\n"
     out = subtitle.cleanup_with_codex(segs, glossary)
-    assert out[0].text == "戰棋很有趣"
-    assert out[1].text == "拉法姆真的強"
+    assert out[0].text == "战棋很有趣"
+    assert out[1].text == "拉法姆真的强"
     # Timestamps preserved exactly
     assert out[0].start == 0.0 and out[0].end == 2.0
     assert out[1].start == 2.0 and out[1].end == 5.0
@@ -410,7 +416,7 @@ def test_cleanup_length_blown_per_line_falls_back(mock_codex, caplog):
     ]
     glossary = subtitle.Glossary({}, [])
     # Line 2 expanded from 2 chars to 10 chars → ratio 5.0, way over 1.2
-    mock_codex.return_value = "短\n這是個被改寫太多的句子\n"
+    mock_codex.return_value = "短\n这是个被改写太多的句子\n"
     with caplog.at_level(logging.WARNING):
         out = subtitle.cleanup_with_codex(segs, glossary)
     assert out == segs
@@ -442,7 +448,7 @@ def test_cleanup_boundary_length_ratio_accepted(mock_codex):
 
 def test_split_char_ok_segment_unchanged():
     """15 chars under MAX=30 -> single entry, identical timing."""
-    seg = subtitle.FunASRSegment(0.0, 3.0, "短短的一句話只有幾個字")
+    seg = subtitle.FunASRSegment(0.0, 3.0, "短短的一句话只有几个字")
     out = subtitle.split_segments([seg], max_line_chars=30)
     assert len(out) == 1
     assert out[0].start == 0.0 and out[0].end == 3.0
@@ -451,7 +457,7 @@ def test_split_char_ok_segment_unchanged():
 
 def test_split_long_duration_short_text_not_split():
     """25 chars / 9 seconds / no punctuation -> kept as ONE entry (rule §5.1 C)."""
-    seg = subtitle.FunASRSegment(0.0, 9.0, "二十五個字大概就是這樣長的一句話可以讀完")
+    seg = subtitle.FunASRSegment(0.0, 9.0, "二十五个字大概就是这样长的一句话可以读完")
     out = subtitle.split_segments([seg], max_line_chars=30)
     assert len(out) == 1
     assert out[0].end == 9.0
@@ -459,7 +465,7 @@ def test_split_long_duration_short_text_not_split():
 
 def test_split_sentence_punctuation():
     """45 chars with 。in middle -> Pass 1 useful split."""
-    text = "前半段大概有二十多個字。後半段也有差不多二十多個字。"
+    text = "前半段大概有二十多个字。后半段也有差不多二十多个字。"
     seg = subtitle.FunASRSegment(0.0, 6.0, text)
     out = subtitle.split_segments([seg], max_line_chars=20)
     assert len(out) >= 2
@@ -469,7 +475,7 @@ def test_split_sentence_punctuation():
 
 def test_split_clause_only():
     """No 。 but has ，-> Pass 2 used."""
-    text = "前半段大概有二十多個字，後半段也有差不多二十多個字"
+    text = "前半段大概有二十多个字，后半段也有差不多二十多个字"
     seg = subtitle.FunASRSegment(0.0, 6.0, text)
     out = subtitle.split_segments([seg], max_line_chars=20)
     assert len(out) >= 2
@@ -546,13 +552,13 @@ def test_split_hard_floor_cascade_does_not_bleed_into_next_segment():
     is per-segment, not per-overall-video."""
     segs = [
         subtitle.FunASRSegment(0.0, 1.0, "一二三。四五六。七八九。"),  # 3 short pieces
-        subtitle.FunASRSegment(1.0, 10.0, "下一段的字幕內容"),         # natural start at 1.0
+        subtitle.FunASRSegment(1.0, 10.0, "下一段的字幕内容"),         # natural start at 1.0
     ]
     out = subtitle.split_segments(segs, max_line_chars=4)
     # The entry corresponding to the second FunASR segment must start AT or AFTER 1.0
     # (not pushed forward by the first segment's cascade).
     # Find entries whose text is from segment 2:
-    seg2_entries = [e for e in out if "下一段" in e.text or "字幕內容" in e.text]
+    seg2_entries = [e for e in out if "下一段" in e.text or "字幕内容" in e.text]
     assert seg2_entries, "expected seg2 entries to survive splitting"
     assert seg2_entries[0].start <= 1.0 + 1e-6, (
         f"seg2's first entry got pushed past natural start: {seg2_entries[0]}"
