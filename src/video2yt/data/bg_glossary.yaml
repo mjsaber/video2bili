@@ -68,7 +68,6 @@ canonical:
     - 劫匪之王托瓦格尔
     - 厄祖玛特
     - 厨师曲奇
-    - 古
     - 古夫·符文图腾
     - 吉姆·雷诺
     - 吉恩，狼人国王
@@ -732,17 +731,58 @@ canonical:
     - 黄金吊坠
     - 黄金残片
 
-  # race — to be populated in F-2 (after user reviews candidates)
+  race:
+    - 海盗
+    - 野兽
+    - 恶魔
+    - 机械
+    - 元素
+    - 亡灵
+    - 龙
+    - 娜迦
+    - 鱼人
+    - 野猪人
 
   mechanic:
+    # game-state nouns / resources
     - 酒馆
     - 随从
-    - 喂牌
     - 三星
-    - 开酒馆
+    - 喂牌
+    - 加血
     - 护甲
     - 法力水晶
-    - 加血
+    # keyword abilities
+    - 战吼
+    - 亡语
+    - 圣盾
+    - 嘲讽
+    - 剧毒
+    - 嗜血
+    - 风怒
+    - 偷取
+    - 超杀
+    - 反应
+    - 重生
+    # actions / verbs
+    - 开酒馆
+    - 抢酒馆
+    - 酒馆升级
+    - 升级
+    - 升等
+    - 刷新
+    - 冻结
+    - 三连
+    - 发现
+    - 招募
+    - 卖
+    - 买
+    - 过秤
+    - 跳费
+    - 压等
+    # battle phases
+    - 战斗
+    - 准备阶段
 
   meta:
     - 炉石传说
