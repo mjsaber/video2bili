@@ -791,5 +791,55 @@ canonical:
   # english — to be populated in F-4 (after user reviews candidates)
 
   slang:
+    # strategy / 流派
+    - 戒指龙流
+    - 戒指龙
+    - 背靠背
+    - 二鸟
+    - 三鸟
+    - 九鸡野兽
+    - 雪球流
+    - 火车流
+    - 刷子流
+    - 单核流
+    - 鬼装流
+    # card / state descriptors
+    - 白板
+    - 鬼装
+    - 金身
+    - 大金
+    - 小金
+    - 暴毙
+    - 爆牌
+    - 翻车
+    - 上车
+    - 跳神
+    - 阴间
+    - 大哥
+    - 二哥
+    # action / verb
+    - 卡五
+    - 卡六
+    - 卡七
+    - 上等
+    - 刷新一发
+    - 抢三星
+    - 翻倍
+    - 加血站桩
+    - 收割
+    - 上鸡
+    - 掉分
+    - 嗨过头
+    # ranking / result
     - 吃鸡
     - 上分
+    - 八强
+    - 四强
+    - "64 强"
+    - 杨梅杯
+    - 段位
+    # misc
+    - 喂养
+    - 翻盘
+    - 稳吃鸡
+    - 全战
