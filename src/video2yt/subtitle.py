@@ -30,6 +30,15 @@ CLEANUP_TIMEOUT_SECONDS = 1200
 SENTENCE_PUNCT = "。！？"
 CLAUSE_PUNCT = "；，、"
 
+# Glossary canonical categories (Phase 2 schema v1, 2026-05-16). The reader
+# flattens v1 grouped YAML into a single list in THIS order; adding a new
+# category requires updating both the YAML schema and this tuple. Categories
+# outside this whitelist are rejected (defense against typos in the YAML).
+CANONICAL_CATEGORIES: tuple[str, ...] = (
+    "hero", "minion", "spell", "trinket",
+    "race", "mechanic", "meta", "english", "slang",
+)
+
 
 @dataclass(frozen=True)
 class Glossary:
@@ -38,7 +47,19 @@ class Glossary:
 
 
 def load_glossary(path: Path | None) -> Glossary:
-    """Load a glossary YAML. ``None`` → packaged default ``bg_glossary.yaml``."""
+    """Load a glossary YAML. ``None`` → packaged default ``bg_glossary.yaml``.
+
+    Supports two ``canonical`` formats for backward compatibility:
+
+    - v0 (Phase 1): ``canonical`` is a flat ``list[str]``. Used as-is.
+    - v1 (Phase 2+): ``canonical`` is a ``dict[str, list[str]]`` keyed by
+      category name from ``CANONICAL_CATEGORIES``. Flattened in
+      CANONICAL_CATEGORIES order; items within each category preserve their
+      YAML order.
+
+    Categories outside the whitelist are rejected so a typo (``minions:``
+    instead of ``minion:``) doesn't silently drop a whole category.
+    """
     if path is None:
         import importlib.resources
         text = (
@@ -51,11 +72,37 @@ def load_glossary(path: Path | None) -> Glossary:
         text = path.read_text(encoding="utf-8")
     data = yaml.safe_load(text) or {}
     corrections = data.get("corrections", {})
-    canonical = data.get("canonical", [])
+    canonical_raw = data.get("canonical", [])
     if not isinstance(corrections, dict):
-        raise ValueError(f"glossary 'corrections' must be a mapping, got {type(corrections).__name__}")
-    if not isinstance(canonical, list):
-        raise ValueError(f"glossary 'canonical' must be a list, got {type(canonical).__name__}")
+        raise ValueError(
+            f"glossary 'corrections' must be a mapping, got {type(corrections).__name__}"
+        )
+
+    if isinstance(canonical_raw, list):
+        # v0 flat format — accept as-is.
+        canonical = list(canonical_raw)
+    elif isinstance(canonical_raw, dict):
+        # v1 grouped format — validate categories and flatten in fixed order.
+        unknown = set(canonical_raw) - set(CANONICAL_CATEGORIES)
+        if unknown:
+            raise ValueError(
+                f"glossary 'canonical' has unknown categories {sorted(unknown)}; "
+                f"allowed: {list(CANONICAL_CATEGORIES)}"
+            )
+        canonical = []
+        for cat in CANONICAL_CATEGORIES:
+            items = canonical_raw.get(cat, [])
+            if not isinstance(items, list):
+                raise ValueError(
+                    f"glossary 'canonical.{cat}' must be a list, "
+                    f"got {type(items).__name__}"
+                )
+            canonical.extend(items)
+    else:
+        raise ValueError(
+            f"glossary 'canonical' must be a list (v0) or mapping (v1), "
+            f"got {type(canonical_raw).__name__}"
+        )
     return Glossary(corrections=corrections, canonical=canonical)
 
 

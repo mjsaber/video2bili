@@ -18,7 +18,12 @@ def test_constants_exist():
 
 
 def test_packaged_glossary_yaml_exists_and_parses():
-    """The default glossary ships inside the package and can be located."""
+    """The default glossary ships inside the package and can be located.
+
+    Schema v1 (Phase 2): canonical is a category-grouped dict. The reader
+    flattens it; this test checks the raw YAML shape, so we accept dict here.
+    Tolerates v0 flat list too (the reader supports both formats — see
+    test_load_glossary_v0_flat_canonical_backward_compat)."""
     import importlib.resources
     files = importlib.resources.files("video2yt.data")
     glossary_path = files / "bg_glossary.yaml"
@@ -28,7 +33,23 @@ def test_packaged_glossary_yaml_exists_and_parses():
     assert "corrections" in data
     assert "canonical" in data
     assert isinstance(data["corrections"], dict)
-    assert isinstance(data["canonical"], list)
+    assert isinstance(data["canonical"], (list, dict))   # v0 list or v1 dict
+
+
+def test_packaged_glossary_uses_v1_grouped_schema():
+    """The shipped bg_glossary.yaml must be v1 (grouped). Regression guard
+    against accidentally reverting the file to a flat list."""
+    import importlib.resources
+    import yaml
+    files = importlib.resources.files("video2yt.data")
+    glossary_path = files / "bg_glossary.yaml"
+    data = yaml.safe_load(glossary_path.read_text(encoding="utf-8"))
+    assert isinstance(data["canonical"], dict), (
+        "packaged glossary must use schema v1 (canonical: dict by category)"
+    )
+    # Every category in the packaged file must be in the whitelist.
+    unknown = set(data["canonical"]) - set(subtitle.CANONICAL_CATEGORIES)
+    assert not unknown, f"packaged glossary has unknown categories: {unknown}"
 
 
 def test_load_glossary_default():
@@ -66,6 +87,82 @@ def test_load_glossary_malformed_yaml_raises(tmp_path: Path):
     p.write_text("corrections: [this is a list not a dict]\n", encoding="utf-8")
     with pytest.raises(ValueError):
         subtitle.load_glossary(p)
+
+
+def test_load_glossary_v1_grouped_flattens_in_category_order(tmp_path: Path):
+    """v1 grouped schema: reader flattens categories in CANONICAL_CATEGORIES
+    order, preserving each category's YAML insertion order."""
+    p = tmp_path / "g.yaml"
+    p.write_text(
+        "corrections: {}\n"
+        "canonical:\n"
+        "  slang: [bingo, fast]\n"     # appears AFTER mechanic in CANONICAL_CATEGORIES
+        "  mechanic: [refresh, freeze]\n"
+        "  hero: [alice, bob]\n"        # appears FIRST in CANONICAL_CATEGORIES
+        "  meta: [game, mode]\n",
+        encoding="utf-8",
+    )
+    g = subtitle.load_glossary(p)
+    # Expected order: hero, then mechanic, then meta, then slang
+    # (heroes appear first per CANONICAL_CATEGORIES regardless of YAML order)
+    assert g.canonical == [
+        "alice", "bob",          # hero (first in CANONICAL_CATEGORIES)
+        "refresh", "freeze",     # mechanic
+        "game", "mode",          # meta
+        "bingo", "fast",         # slang (last)
+    ]
+
+
+def test_load_glossary_v0_flat_canonical_backward_compat(tmp_path: Path):
+    """v0 flat list format must still load (precondition: existing user
+    glossaries written before Phase 2 keep working)."""
+    p = tmp_path / "g.yaml"
+    p.write_text(
+        "corrections:\n  foo: bar\n"
+        "canonical:\n  - one\n  - two\n  - three\n",
+        encoding="utf-8",
+    )
+    g = subtitle.load_glossary(p)
+    assert g.corrections == {"foo": "bar"}
+    assert g.canonical == ["one", "two", "three"]
+
+
+def test_load_glossary_v1_unknown_category_raises(tmp_path: Path):
+    """Typo guard: 'minions' instead of 'minion' must raise, not silently drop."""
+    p = tmp_path / "g.yaml"
+    p.write_text(
+        "corrections: {}\ncanonical:\n  minions:\n    - bob\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown categor"):
+        subtitle.load_glossary(p)
+
+
+def test_load_glossary_v1_category_not_list_raises(tmp_path: Path):
+    """Schema discipline: each category's value must be a list."""
+    p = tmp_path / "g.yaml"
+    p.write_text(
+        "corrections: {}\ncanonical:\n  hero: not_a_list\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="canonical.hero"):
+        subtitle.load_glossary(p)
+
+
+def test_load_glossary_v1_canonical_neither_list_nor_dict_raises(tmp_path: Path):
+    """canonical: 42 (a scalar) → ValueError pinpointing the type mismatch."""
+    p = tmp_path / "g.yaml"
+    p.write_text("corrections: {}\ncanonical: 42\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="list .v0. or mapping .v1."):
+        subtitle.load_glossary(p)
+
+
+def test_canonical_categories_whitelist_contains_expected_9():
+    """The whitelist itself is part of the schema contract; lock it down."""
+    assert subtitle.CANONICAL_CATEGORIES == (
+        "hero", "minion", "spell", "trinket",
+        "race", "mechanic", "meta", "english", "slang",
+    )
 
 
 DANMAKU_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>

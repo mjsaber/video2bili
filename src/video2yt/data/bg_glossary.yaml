@@ -1,38 +1,49 @@
 # Simplified Chinese terminology corrections for Hearthstone Battlegrounds.
 #
-# All entries use Simplified Chinese. The earlier Traditional Chinese entries
-# (战旗→战棋, 护戒→戒指龙, 拉法母→拉法姆, 加拉克朗→加拉克隆, 伊瑟拉 identity)
-# were dropped in Phase 1 because whisperx large-v3 outputs Simplified by
-# default and those specific mishearings are Traditional-environment patterns.
-# Re-seed corrections in Phase 2 from real .raw.srt observations.
+# Schema v1 (Phase 2, 2026-05-16). All entries use Simplified Chinese.
+#
+# Top-level structure:
+#   corrections: dict   {误识别: 正确}  — both Simplified
+#   canonical:   dict   keyed by category from the whitelist:
+#                       hero, minion, spell, trinket, race, mechanic,
+#                       meta, english, slang
+#   (reader: see CANONICAL_CATEGORIES in src/video2yt/subtitle.py)
+#
+# Reader still supports v0 (flat canonical list) for backward compat, but new
+# additions must use the grouped format.
 #
 # Note: this glossary serves the SUBTITLE pipeline only. YouTube title /
 # description / chapters remain Traditional (台服 "爐石戰記：英雄戰場" branding,
 # see docs/superpowers/specs/2026-04-18-video-production-workflow.md).
-corrections: {}
-  # Format when populated:
-  #   误识别词: 正确词       # 可选行内注释
-  # Example:
-  #   寒热骤变: 寒热剧变      # Phase 2 — observed in BV1Z4dLBLE9B
-  #
-  # Identity entries (LHS == RHS) are allowed; they tell Codex "this exact
-  # form is canonical, don't try to 'correct' it" — useful for proper names
-  # that the model otherwise rewrites.
 
-# Canonical preferred forms (no LHS). Codex biases toward these when
-# disambiguating fuzzy transcriptions. Translated from the Traditional v0
-# list by literal t2s mapping. Product name is the 国服 form `炉石传说`
-# (字幕侧用国服译名；发布元信息侧另用台服 `爐石戰記`).
+# corrections: error → correct (both simplified)
+# Phase 2 v1: empty at F-0 (no new entries). Stage F-2+ will populate from
+# Stage E observations (BV1Z4dLBLE9B, 2026-05-16):
+#   寒热骤变 → 寒热剧变  (spell)
+#   铁路宝钻针 → 铁炉堡锻砧  (trinket)
+#   古本那加 → ?  (minion, awaiting user judgment)
+#   独蒙格斯 → ?  (proper noun, awaiting user judgment)
+#   附魔少卫 → ?  (minion, awaiting user judgment)
+#   植物学家浅奇 → ?  (minion, awaiting user judgment)
+#   宝钻针 → ?  (trinket, partial match of 铁路宝钻针)
+corrections: {}
+
+# canonical: category-grouped (schema v1, 2026-05-16).
+# F-0 redistributes the Phase 1 v0 entries (12 terms) into meta/mechanic/slang.
+# F-2/F-3/F-4 expand each category via reviewed candidate lists.
 canonical:
-  - 炉石传说
-  - 战棋
-  - 酒馆
-  - 随从
-  - 喂牌
-  - 三星
-  - 吃鸡
-  - 加血
-  - 上分
-  - 开酒馆
-  - 护甲
-  - 法力水晶
+  meta:
+    - 炉石传说
+    - 战棋
+  mechanic:
+    - 酒馆
+    - 随从
+    - 喂牌
+    - 三星
+    - 开酒馆
+    - 护甲
+    - 法力水晶
+    - 加血
+  slang:
+    - 吃鸡
+    - 上分
