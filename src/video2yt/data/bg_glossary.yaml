@@ -788,7 +788,45 @@ canonical:
     - 炉石传说
     - 战棋
 
-  # english — to be populated in F-4 (after user reviews candidates)
+  english:
+    # mechanic / action verbs (high-frequency mix-ins)
+    - Buff
+    - Debuff
+    - Discover
+    - Eco
+    - Freeze
+    - Pool
+    - Refresh
+    - Tempo
+    - Triple
+    # playstyle / strategy
+    - All-in
+    - Cleave
+    - Greed
+    - Highroll
+    - Lowroll
+    - Magnetic
+    # character names commonly said in English
+    - Bob
+    - Brann
+    - Khadgar
+    - LK
+    - Patches
+    - Reno
+    - "Y'Shaarj"   # apostrophe → YAML double-quote
+    - Yogg
+    # game-state / data
+    - ATK
+    - BG
+    - HP
+    - "Top 4"      # 'Top X' placeholder expanded to concrete forms
+    - "Top 8"
+    # misc
+    - Combo
+    - Curve
+    - Lobby
+    - Pivot
+    - Tier
 
   slang:
     # strategy / 流派
