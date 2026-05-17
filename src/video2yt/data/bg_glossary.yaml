@@ -24,24 +24,24 @@
 #   english:                         curated manually (Phase 2 F-4)
 
 # corrections: error → correct (both simplified)
-# Phase 2 v1: empty at F-1 (no entries added yet).
 #
-# Note on Stage E (BV1Z4dLBLE9B, 2026-05-16) observations: cross-referenced
-# with the harvested canonical data, MOST "mishearings" we initially flagged
-# turn out to be real card names — ASR was correct, not Codex:
-#   寒热骤变      — real BG spell (canonical.spell line ~453)
-#   邪火咒龙      — real BG minion (canonical.minion)
-#   宁静的冥想者   — real BG minion (Codex saw it correctly as part of 古本那加冥想者
-#                                    but over-extended to "四本娜迦宁静的冥想者")
-#   胡蒙格斯      — real BG hero; Codex's 独蒙格斯→胡蒙格斯 was correct
-#   附魔哨卫      — real BG minion; Codex's 附魔少卫→附魔哨卫 was correct
-#   铁炉堡锻砧    — real BG trinket; Codex's 铁路宝钻针→铁炉堡锻砧 was correct
+# Phase 2 v1 (F-1 → F-6, 2026-05-16): empty. Stage E observations were
+# false alarms — most of those "mishearings" turned out to be real BG cards
+# (寒热骤变, 邪火咒龙, 宁静的冥想者, 胡蒙格斯, 附魔哨卫, 铁炉堡锻砧 all
+# exist in HSJSON). With a populated canonical, Codex needed no explicit
+# corrections to land on the right answer.
 #
-# Genuine corrections candidates (where ASR is wrong AND we know the right
-# answer) will be added in F-2 based on future raw.srt observations. The
-# above suggests with a populated canonical, Codex needs FEWER explicit
-# corrections — the canonical list itself does the heavy lifting.
-corrections: {}
+# Phase 2.5 first-pass (kalecgos-dual-build, 2026-05-17): the first end-to-end
+# run on 20+ min real videos surfaced 4 cases where Codex repeatedly
+# *invented* wrong forms despite the populated canonical. These are added
+# below — both LHS values are observed Codex outputs (NOT raw ASR), because
+# raw ASR's mistakes were already absorbed by Codex into these canonical-
+# adjacent wrong choices.
+corrections:
+  倒赚: 倒转           # Codex over-corrected the BG mechanic 倒转 ('flip/reverse') to 倒赚 ('reverse profit')
+  水手玺戒: 水滴肖像   # Codex invented this trinket name; real trinket is 水滴肖像
+  船工龙: 传功龙       # Codex over-extended 'boat worker' → invented 'boat-worker dragon'; intended player slang is 传功龙 (= 骨火巨龙夜之魇)
+  船工农: 传功龙       # raw ASR mishearing for 传功龙
 
 # canonical: category-grouped (schema v1, 2026-05-16).
 # Reader (subtitle.load_glossary) flattens these in CANONICAL_CATEGORIES order
@@ -438,6 +438,8 @@ canonical:
     - 黑曜石掠夺者
     - 黑色多彩幼龙
     - 龙族看护员
+    # Phase 2.5 first-pass (kalecgos-dual-build, 2026-05-17):
+    - 星元
 
   spell:
     - 主厨甄选
@@ -730,6 +732,8 @@ canonical:
     - 麦迪文之书
     - 黄金吊坠
     - 黄金残片
+    # Phase 2.5 first-pass (kalecgos-dual-build, 2026-05-17):
+    - 水滴肖像
 
   race:
     - 海盗
@@ -783,6 +787,8 @@ canonical:
     # battle phases
     - 战斗
     - 准备阶段
+    # Phase 2.5 first-pass (kalecgos-dual-build, 2026-05-17):
+    - 倒转
 
   meta:
     - 炉石传说
@@ -881,3 +887,5 @@ canonical:
     - 翻盘
     - 稳吃鸡
     - 全战
+    # Phase 2.5 first-pass (kalecgos-dual-build, 2026-05-17):
+    - 传功龙   # player nickname for 骨火巨龙夜之魇 (T6)

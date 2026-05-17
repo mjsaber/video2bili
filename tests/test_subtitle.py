@@ -55,15 +55,26 @@ def test_packaged_glossary_uses_v1_grouped_schema():
 def test_load_glossary_default():
     """Calling load_glossary with no path loads the packaged yaml.
 
-    The packaged glossary is Simplified Chinese (Phase 1 migration). Corrections
-    are intentionally empty at v0 — to be re-seeded from real .raw.srt observations
-    in Phase 2."""
+    The packaged glossary is Simplified Chinese (Phase 1 migration). Phase 2.5
+    first-pass added 4 corrections from the kalecgos-dual-build project
+    (2026-05-17) where Codex repeatedly invented wrong forms despite the
+    populated canonical. Lock these down as a regression guard."""
     g = subtitle.load_glossary(None)
     assert isinstance(g, subtitle.Glossary)
-    assert g.corrections == {}
+    # Phase 2.5 corrections
+    assert g.corrections.get("倒赚") == "倒转"
+    assert g.corrections.get("水手玺戒") == "水滴肖像"
+    assert g.corrections.get("船工龙") == "传功龙"
+    assert g.corrections.get("船工农") == "传功龙"
+    # Phase 1 + 2 canonical sanity
     assert "战棋" in g.canonical
     assert "酒馆" in g.canonical
     assert "炉石传说" in g.canonical
+    # Phase 2.5 canonical additions
+    assert "星元" in g.canonical
+    assert "水滴肖像" in g.canonical
+    assert "倒转" in g.canonical
+    assert "传功龙" in g.canonical
 
 
 def test_load_glossary_custom_path(tmp_path: Path):
