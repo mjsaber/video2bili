@@ -32,6 +32,13 @@ uv add <pkg>                                               # add a dep (NEVER ed
 
 When working on a multi-step video project (intro + multiple burnt segments + final merge), pass `-o output/<project>/` to every `video2yt` / `video2yt-compose` / `video2yt-merge` invocation so all artifacts land under one folder. Example: `output/back2back/` contains `intro.mp4`, segment subfolders, the final merged MP4, the YouTube thumbnail, and any scratch files. This keeps unrelated projects isolated and makes cleanup easy.
 
+**⚠️ Worktree cwd hazard**: `video2yt` / `video2yt-compose` / `video2yt-topic` default to a relative `./output` (see `cli.py:144`, `compose_cli.py:52`, `topic_cli.py:50,111`). Running them from inside `.claude/worktrees/<wt>/` puts artifacts in the worktree's local `output/` instead of the main repo's `output/`, splitting them off from every other project's history. **Always do one of**:
+
+- `cd /Users/jun/code/video2yt && uv run video2yt ...` (preferred — main repo cwd)
+- or pass `-o /Users/jun/code/video2yt/output/<project>/` with an absolute path
+
+`video2yt-merge` and `video2yt-subtitle` are NOT affected — their output paths derive from input file locations. Historical incident: `kalecgos-dual-build` (2026-05-17) had to be manually `mv`'d from worktree to main repo on first project run.
+
 ## Battlegrounds workflow rule (intro-script drafting)
 
 For Hearthstone Battlegrounds video projects, **never draft the intro script before verifying the topic's terminology**. After the `ringnaga` mistake (drafted assuming "護戒" was a Spellcraft buff when it actually meant the card 戒指龍 / Ring Bearer), this is hard rule:
