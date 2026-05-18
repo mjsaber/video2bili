@@ -416,6 +416,17 @@ def _run_asr(wav_path: Path, model_name: str = "large-v3") -> list[tuple[float, 
     - no_speech_threshold raised slightly above default
     - compression_ratio_threshold default
     - whisperx's built-in VAD pre-filtering kills most music-only chunks
+
+    VAD merge window:
+    - chunk_size=4 (whisperx default is 30) — tighten the VAD chunk-merge
+      cap so consecutive speech runs aren't glued into 30-second blocks.
+      With the default, an entry might span [0s..30s] even when the speaker
+      paused at 5s and 15s, leaving the subtitle pinned to the screen
+      across the pauses. 4s aligns chunks roughly with one short clause
+      and lets subtitles cycle off during natural breaks. Chosen
+      empirically over 6/8/10 for the snappiest caption-to-speech feel.
+      Cost: ~2-3× more SRT entries per video; slight ASR overhead from
+      more per-chunk whisper calls.
     """
     import whisperx
 
@@ -425,6 +436,9 @@ def _run_asr(wav_path: Path, model_name: str = "large-v3") -> list[tuple[float, 
         asr_options={
             "no_speech_threshold": 0.7,        # stricter — drop music-only segments
             "compression_ratio_threshold": 2.4, # whisper default; drops loopy hallucinations
+        },
+        vad_options={
+            "chunk_size": 4,  # see docstring "VAD merge window" above
         },
     )
     result = model.transcribe(audio, language="zh")
