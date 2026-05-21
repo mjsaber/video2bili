@@ -5958,3 +5958,31 @@ def test_topic_cli_main_returns_0_on_success(tmp_path, monkeypatch):
         "--report", str(tmp_path / "r.md"),
     ])
     assert rc == 0
+
+
+from video2yt import music_library
+
+
+def test_load_manifest_parses_tracks(tmp_path):
+    manifest = tmp_path / "m.json"
+    manifest.write_text(
+        '{"tracks": [{"name": "a", "url": "http://x/a.mp3", '
+        '"sha256": "ab", "duration": 120.0, "license": "CC0"}]}',
+        encoding="utf-8",
+    )
+    tracks = music_library.load_manifest(manifest)
+    assert len(tracks) == 1
+    assert tracks[0]["name"] == "a"
+
+
+def test_load_manifest_empty_is_ok(tmp_path):
+    manifest = tmp_path / "m.json"
+    manifest.write_text('{"tracks": []}', encoding="utf-8")
+    assert music_library.load_manifest(manifest) == []
+
+
+def test_load_manifest_malformed_raises(tmp_path):
+    manifest = tmp_path / "m.json"
+    manifest.write_text("not json", encoding="utf-8")
+    with pytest.raises(ValueError):
+        music_library.load_manifest(manifest)

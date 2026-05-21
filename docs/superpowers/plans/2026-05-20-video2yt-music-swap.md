@@ -97,7 +97,7 @@ git commit -m "chore: add demucs dep + music-swap entry point + empty manifest"
 - Create: `src/video2yt/music_library.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -130,12 +130,12 @@ def test_load_manifest_malformed_raises(tmp_path):
         music_library.load_manifest(manifest)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k load_manifest -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'video2yt.music_library'`.
 
-- [ ] **Step 3: Create the module with `load_manifest`**
+- [x] **Step 3: Create the module with `load_manifest`**
 
 Create `src/video2yt/music_library.py`:
 
@@ -186,12 +186,12 @@ def load_manifest(manifest_path: Path | None = None) -> list[dict]:
     return list(data["tracks"])
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k load_manifest -v`
 Expected: 3 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_library.py tests/test_smoke.py
