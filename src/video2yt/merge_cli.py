@@ -1,8 +1,8 @@
 """CLI entry point for ``video2yt-merge``.
 
-Concatenates multiple 1920x1080 30fps h264 MP4 segments into one video with a
-static progress bar + segment labels, per-segment loudness-normalized audio,
-and a YouTube chapters file.
+Concatenates multiple 1920x1080 30fps h264 MP4 segments into one video with
+per-segment loudness-normalized audio, chapter markers embedded into the MP4,
+and a YouTube chapters text file.
 """
 
 import argparse
@@ -24,10 +24,6 @@ def preflight() -> None:
         raise RuntimeError("ffmpeg not found in PATH. brew install ffmpeg")
     if shutil.which("ffprobe") is None:
         raise RuntimeError("ffprobe not found in PATH")
-    try:
-        import PIL  # noqa: F401
-    except ImportError as e:
-        raise RuntimeError("Pillow not installed. uv add Pillow") from e
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -35,8 +31,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="video2yt-merge",
         description=(
             "Concatenate multiple 1920x1080 h264 MP4 segments into one video "
-            "with a static progress bar (segment labels), -14 LUFS audio, "
-            "and a YouTube chapters file."
+            "with -14 LUFS audio, chapter markers embedded into the MP4, "
+            "and a YouTube chapters text file."
         ),
     )
     parser.add_argument(
@@ -45,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--label", action="append", default=[],
-        help="Label for the corresponding --segment. Repeatable, must pair with --segment.",
+        help="Chapter label for the corresponding --segment. Repeatable, must pair with --segment.",
     )
     parser.add_argument(
         "--title", required=True,
@@ -54,14 +50,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "-o", "--output", type=Path, default=None,
         help="Output MP4 file path. Default: <first_segment_parent>/<sanitized_title>.mp4",
-    )
-    parser.add_argument(
-        "--label-font-face", default="Hiragino Sans GB",
-        help="Font family for progress bar labels",
-    )
-    parser.add_argument(
-        "--label-font-size", type=int, default=20,
-        help="Font size for progress bar labels (pixels, default 20)",
     )
     return parser.parse_args(argv)
 
@@ -74,8 +62,11 @@ def run(args: argparse.Namespace) -> Path:
             f"--segment ({len(args.segment)}) and --label ({len(args.label)}) "
             f"counts must match"
         )
-    if len(args.segment) < 2:
-        raise ValueError("at least 2 segments are required to merge")
+    if len(args.segment) < 3:
+        raise ValueError(
+            "at least 3 segments are required to merge: each segment becomes one "
+            "chapter, and YouTube only renders chapter segmentation with 3+ chapters"
+        )
 
     segments = [
         merge.Segment(path=p, label=lbl)
@@ -98,12 +89,7 @@ def run(args: argparse.Namespace) -> Path:
         output_path = segments[0].path.parent / f"{safe_title}.mp4"
 
     _log(f"rendering -> {output_path}")
-    merge_inputs = merge.MergeInputs(
-        segments=segments,
-        title=args.title,
-        label_font_face=args.label_font_face,
-        label_font_size=args.label_font_size,
-    )
+    merge_inputs = merge.MergeInputs(segments=segments, title=args.title)
     merge.render(merge_inputs, output_path)
 
     # Validate output

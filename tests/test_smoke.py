@@ -3424,36 +3424,6 @@ def test_transcribe_script_passes_max_block_chars(monkeypatch):
 # =========================================================================
 
 
-def test_fit_label_short_text_not_truncated(tmp_path):
-    from PIL import Image, ImageDraw
-    from video2yt.merge import _fit_label_to_width, _load_font
-    img = Image.new("RGBA", (100, 100))
-    draw = ImageDraw.Draw(img)
-    font = _load_font("Hiragino Sans GB", 20)
-    assert _fit_label_to_width("短", font, 1000, draw) == "短"
-
-
-def test_fit_label_long_text_truncated(tmp_path):
-    from PIL import Image, ImageDraw
-    from video2yt.merge import _fit_label_to_width, _load_font
-    img = Image.new("RGBA", (100, 100))
-    draw = ImageDraw.Draw(img)
-    font = _load_font("Hiragino Sans GB", 20)
-    text = "这是一个非常长的标签名称"
-    result = _fit_label_to_width(text, font, 60, draw)
-    assert result != text  # got truncated
-    assert result.endswith("…") or result == ""
-
-
-def test_fit_label_zero_width_returns_empty(tmp_path):
-    from PIL import Image, ImageDraw
-    from video2yt.merge import _fit_label_to_width, _load_font
-    img = Image.new("RGBA", (100, 100))
-    draw = ImageDraw.Draw(img)
-    font = _load_font("Hiragino Sans GB", 20)
-    assert _fit_label_to_width("anything", font, 0, draw) == ""
-
-
 def test_format_chapter_time_under_hour():
     from video2yt.merge import _format_chapter_time
     assert _format_chapter_time(0) == "00:00"
@@ -3483,88 +3453,72 @@ def test_generate_chapters_text_three_segments():
     assert lines[2] == "05:25 实战"
 
 
-def test_generate_progress_bar_png_produces_1920x1080_rgba(tmp_path):
-    from PIL import Image
-    from video2yt.merge import generate_progress_bar_png, Segment
+def test_generate_ffmetadata_three_segments():
+    from video2yt.merge import generate_ffmetadata, Segment
+    from pathlib import Path as P
     segs = [
-        Segment(tmp_path / "a.mp4", "Intro", duration=25.0),
-        Segment(tmp_path / "b.mp4", "恶魔解析", duration=300.0),
-        Segment(tmp_path / "c.mp4", "实战", duration=400.0),
+        Segment(P("a.mp4"), "Intro", duration=25.0),
+        Segment(P("b.mp4"), "恶魔解析", duration=300.0),
+        Segment(P("c.mp4"), "实战", duration=400.0),
     ]
-    png_path = tmp_path / "bar.png"
-    generate_progress_bar_png(segs, png_path)
-    img = Image.open(png_path)
-    assert img.size == (1920, 1080)
-    assert img.mode == "RGBA"
-    # Top area should be transparent (alpha=0)
-    top_pixel = img.getpixel((960, 100))
-    assert top_pixel[3] == 0, f"top area should be transparent, got {top_pixel}"
-    # Bar area should have visible pixels
-    bar_y = 1080 - 20 - 12 + 6  # middle of bar
-    bar_pixel = img.getpixel((960, bar_y))
-    assert bar_pixel[3] > 100, f"bar should be visible, got {bar_pixel}"
+    text = generate_ffmetadata(segs)
+    assert text.startswith(";FFMETADATA1\n")
+    assert text.count("[CHAPTER]") == 3
+    assert text.count("TIMEBASE=1/1000") == 3
+    # First chapter spans 0..25000 ms, contiguous with the next.
+    assert "START=0\nEND=25000\ntitle=Intro" in text
+    assert "START=25000\nEND=325000\ntitle=恶魔解析" in text
+    assert "START=325000\nEND=725000\ntitle=实战" in text
 
 
-def test_generate_progress_bar_png_zero_duration_raises(tmp_path):
-    from video2yt.merge import generate_progress_bar_png, Segment
-    segs = [Segment(tmp_path / "a.mp4", "x", duration=0.0)]
-    with pytest.raises(ValueError, match="positive"):
-        generate_progress_bar_png(segs, tmp_path / "bar.png")
-
-
-def test_generate_progress_bar_png_tiny_segment_still_has_label(tmp_path):
-    """A segment whose bar width is much smaller than its label's natural
-    width should still render the label above the bar, allowed to overflow
-    the segment's own x range."""
-    from PIL import Image
-    from video2yt.merge import generate_progress_bar_png, Segment
-    # Segment 1 is 1% of total → ~17 px bar width, way too narrow for the label
+def test_merge_render_embeds_chapter_metadata(tmp_path, monkeypatch):
+    """render() must pass the ffmetadata file as an input and -map_metadata it
+    so YouTube reads chapter markers straight from the uploaded MP4."""
+    from video2yt import merge
     segs = [
-        Segment(tmp_path / "a.mp4", "Intro", duration=10.0),
-        Segment(tmp_path / "b.mp4", "Main content", duration=990.0),
+        merge.Segment(tmp_path / "a.mp4", "Intro", duration=25.0),
+        merge.Segment(tmp_path / "b.mp4", "实战", duration=300.0),
     ]
-    png_path = tmp_path / "bar.png"
-    generate_progress_bar_png(segs, png_path)
-    img = Image.open(png_path)
-    # The "Intro" label should paint SOME visible pixels in the label strip
-    # above the bar, near the leftmost x region (around the first segment's center).
-    # Bar: y=1048..1060. Labels sit just above at roughly y=1020..1045.
-    # Scan a horizontal band for any non-transparent pixel in the left area.
-    label_band_y = 1030
-    found_label_pixel = False
-    for x in range(0, 300):  # leftmost 300 px of frame
-        pixel = img.getpixel((x, label_band_y))
-        if pixel[3] > 100:  # visible (not transparent)
-            found_label_pixel = True
-            break
-    assert found_label_pixel, (
-        "Expected 'Intro' label pixels to be visible in the leftmost 300 px "
-        "above the bar for the tiny first segment"
-    )
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock()
+
+    monkeypatch.setattr("video2yt.merge.subprocess.run", fake_run)
+    output_path = tmp_path / "out.mp4"
+    merge.render(merge.MergeInputs(segments=segs, title="T"), output_path)
+
+    cmd = captured["cmd"]
+    ffmeta_path = tmp_path / "out_ffmeta.txt"
+    assert ffmeta_path.exists()
+    assert str(ffmeta_path.resolve()) in cmd
+    # -map_metadata and -map_chapters both point at the ffmetadata input index
+    # (the trailing input, after the segments). -map_chapters must be explicit:
+    # otherwise ffmpeg falls back to copying chapters from the first input that
+    # happens to have any.
+    ffmeta_idx = str(len(segs))
+    assert "-map_metadata" in cmd
+    assert cmd[cmd.index("-map_metadata") + 1] == ffmeta_idx
+    assert "-map_chapters" in cmd
+    assert cmd[cmd.index("-map_chapters") + 1] == ffmeta_idx
 
 
-def test_build_filter_complex_has_concat_loudnorm_overlay_drawbox():
+def test_build_filter_complex_has_concat_and_loudnorm():
     from video2yt.merge import _build_filter_complex, Segment
     from pathlib import Path as P
     segs = [
         Segment(P("a.mp4"), "Intro", duration=25.0),
         Segment(P("b.mp4"), "Main", duration=300.0),
     ]
-    fc = _build_filter_complex(segs, progress_bar_input_idx=2)
+    fc = _build_filter_complex(segs)
     # loudnorm applied to each audio input
     assert fc.count("loudnorm=I=-14:TP=-1:LRA=11") == 2
-    # concat of 2 inputs
-    assert "concat=n=2:v=1:a=1" in fc
-    # overlay of progress bar PNG
-    assert "[cv][2:v]overlay" in fc
-    # drawbox with enable='between(t,0,25' for first segment
-    assert "drawbox" in fc
-    assert "enable='between(t,0.000,25.000)" in fc
-    assert "enable='between(t,25.000,325.000)" in fc
-    # final label is [outv]
-    assert "[outv]" in fc
-    # audio output label
-    assert "[outa]" in fc
+    # concat of 2 inputs straight to the final output labels
+    assert "concat=n=2:v=1:a=1[outv][outa]" in fc
+    # no burned-in progress bar overlay / highlight anymore
+    assert "overlay" not in fc
+    assert "drawbox" not in fc
 
 
 def test_validate_segments_strict_rejects_wrong_resolution(tmp_path, monkeypatch):
@@ -3627,6 +3581,28 @@ def test_validate_segments_strict_accepts_valid_input(tmp_path, monkeypatch):
     assert seg.duration == 60.5
 
 
+def test_validate_segments_strict_rejects_sub_10s_segment(tmp_path, monkeypatch):
+    """Each chapter must be at least 10s — YouTube discards the entire chapter
+    list otherwise. Segments shorter than that are rejected up front."""
+    from video2yt.merge import validate_segments_strict, Segment
+    seg = Segment(tmp_path / "short.mp4", "x")
+    (tmp_path / "short.mp4").write_bytes(b"fake")
+    def fake_run(cmd, **kwargs):
+        import json
+        result = MagicMock()
+        result.stdout = json.dumps({
+            "streams": [
+                {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "r_frame_rate": "30/1"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ],
+            "format": {"duration": "7.4"},
+        })
+        return result
+    monkeypatch.setattr("video2yt.merge.subprocess.run", fake_run)
+    with pytest.raises(ValueError, match="< 10s"):
+        validate_segments_strict([seg])
+
+
 def test_merge_cli_parse_args_defaults():
     from video2yt import merge_cli
     args = merge_cli.parse_args([
@@ -3638,7 +3614,6 @@ def test_merge_cli_parse_args_defaults():
     assert args.label == ["A", "B"]
     assert args.title == "T"
     assert args.output is None
-    assert args.label_font_face == "Hiragino Sans GB"
 
 
 def test_merge_cli_run_mismatched_counts_raises(monkeypatch):
@@ -3654,15 +3629,18 @@ def test_merge_cli_run_mismatched_counts_raises(monkeypatch):
         merge_cli.run(args)
 
 
-def test_merge_cli_run_single_segment_raises(monkeypatch):
+def test_merge_cli_run_too_few_segments_raises(monkeypatch):
+    """Fewer than 3 segments means fewer than 3 chapters — YouTube won't render
+    chapter segmentation, so the merge is rejected up front."""
     from video2yt import merge_cli
     monkeypatch.setattr("video2yt.merge_cli.preflight", lambda: None)
-    args = merge_cli.parse_args([
-        "--segment", "a.mp4", "--label", "A",
-        "--title", "T",
-    ])
-    with pytest.raises(ValueError, match="at least 2"):
-        merge_cli.run(args)
+    for seg_args in (
+        ["--segment", "a.mp4", "--label", "A"],
+        ["--segment", "a.mp4", "--label", "A", "--segment", "b.mp4", "--label", "B"],
+    ):
+        args = merge_cli.parse_args([*seg_args, "--title", "T"])
+        with pytest.raises(ValueError, match="at least 3 segments"):
+            merge_cli.run(args)
 
 
 def test_merge_cli_run_happy_path_default_output_in_first_segment_dir(tmp_path, monkeypatch):
@@ -3674,6 +3652,8 @@ def test_merge_cli_run_happy_path_default_output_in_first_segment_dir(tmp_path, 
     a.write_bytes(b"fake")
     b = seg_dir / "b.mp4"
     b.write_bytes(b"fake")
+    c = seg_dir / "c.mp4"
+    c.write_bytes(b"fake")
 
     monkeypatch.setattr("video2yt.merge_cli.preflight", lambda: None)
 
@@ -3691,7 +3671,7 @@ def test_merge_cli_run_happy_path_default_output_in_first_segment_dir(tmp_path, 
     monkeypatch.setattr("video2yt.merge_cli.merge.render", fake_render)
 
     fake_info = MediaInfo(
-        duration=60.0, width=1920, height=1080,
+        duration=90.0, width=1920, height=1080,
         has_video=True, has_audio=True,
         vcodec="h264", acodec="aac", size_bytes=1_000_000,
     )
@@ -3700,6 +3680,7 @@ def test_merge_cli_run_happy_path_default_output_in_first_segment_dir(tmp_path, 
     args = merge_cli.parse_args([
         "--segment", str(a), "--label", "A",
         "--segment", str(b), "--label", "B",
+        "--segment", str(c), "--label", "C",
         "--title", "Test Merge",
     ])
     result = merge_cli.run(args)

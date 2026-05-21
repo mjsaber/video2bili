@@ -17,7 +17,7 @@ uv run video2yt "<url>" --font-size 48 --codec h265        # style overrides
 uv run video2yt "<url>" -o output/<project>/                # nest into per-project folder (recommended)
 uv run python -m video2yt "<url>"                          # run as module
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # compose from stills
-uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --title "T"   # concat + progress bar + loudnorm + chapters
+uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --segment c.mp4 --label "C" --title "T"   # concat + loudnorm + chapters (≥3 segments, each ≥10s)
 uv run video2yt-subtitle seg.mp4 --danmaku raw.xml         # add STT subtitles if not already present
 uv run pytest                                              # run tests (230)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
@@ -53,8 +53,8 @@ For Hearthstone Battlegrounds video projects, **never draft the intro script bef
 - **Agent E2E test rule**: DO NOT run `rm -rf output/` or `rm -rf temp/` during E2E tests — that wipes every cached raw download and the outputs of unrelated videos. Clean only the specific `temp/<subfolder>/` under test, or just let the cache hit on the next run. This is a workflow rule, not a code invariant.
 - **Output filename suffixes**: `_cut`, `_<speed>x`, `_preview` get appended to `<bv>_with_danmaku.mp4` based on flags, so different parameter combos coexist. Default (no modifiers) keeps the original filename. See `cli._build_output_filename`.
 - **compose SRT path escaping**: `compose.render` uses `cwd=<srt.parent>` and references the SRT by basename in the `subtitles` filter (same trick as `burn.py`). Absolute paths for `-i` inputs are fine because `-i` doesn't go through filter_complex.
-- **merge strict mode**: all `--segment` inputs must be 1920x1080 30fps h264. No auto-normalization. Fail fast with all violations listed.
-- **merge progress bar**: base bar rendered by Pillow to PNG; current-segment highlight done by ffmpeg `drawbox` with `enable='between(t,S,E)'` per segment.
+- **merge strict mode**: all `--segment` inputs must be 1920x1080 30fps h264 AND ≥10s long, and there must be ≥3 segments. The 10s/3-segment rules mirror YouTube's chapter requirements — fewer/shorter chapters means YouTube discards the chapter list. No auto-normalization. Fail fast with all violations listed.
+- **merge chapters**: there is no burned-in progress bar — segmentation is delivered as chapter markers. The **only officially-supported** YouTube chapter source is timestamps in the video description (≥3 ascending, first at 00:00, each ≥10s, exactly one block). merge produces two outputs: `<title>_chapters.txt` is the description paste (this is the supported path); `<title>_ffmeta.txt` is embedded into the MP4 via `-map_metadata`/`-map_chapters` as a best-effort extra — YouTube does NOT officially document reading embedded chapter atoms, so do NOT treat the embed as a safety net. Common breakage: a description with two timestamp blocks (繁體 + 简体) is not strictly ascending and YouTube discards the whole list — keep the block to exactly one occurrence.
 
 ## Architecture
 
@@ -66,8 +66,8 @@ src/video2yt/
 ├── burn.py           # ffmpeg wrapper (simple -vf path + filter_complex path for cuts)
 ├── compose.py        # ffmpeg wrapper for audio+image+SRT -> 1080p MP4 (standalone from burn.py)
 ├── compose_cli.py    # video2yt-compose entry point (parse_args/run/main)
-├── merge.py          # strict segment validation, Pillow progress bar PNG, ffmpeg filter_complex
-│                     # with concat + per-seg loudnorm + overlay + drawbox highlights, chapters file
+├── merge.py          # strict segment validation, ffmpeg filter_complex with concat + per-seg
+│                     # loudnorm, chapters.txt + ffmetadata embedded into the MP4 via -map_chapters
 ├── merge_cli.py      # video2yt-merge entry point (parse_args/run/main)
 ├── validate.py       # ffprobe + source/ASS/output validators
 ├── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter

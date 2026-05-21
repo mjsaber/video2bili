@@ -199,7 +199,7 @@ The final MP4 goes to `<output_dir>/<sanitized_title>/<sanitized_title>.mp4`.
 
 ## Merge segments into one video
 
-Concatenate multiple 1080p h264 segments with a static progress bar, per-segment labels, loudness-normalized audio, and an auto-generated YouTube chapters file.
+Concatenate multiple 1080p h264 segments with loudness-normalized audio and chapter markers — embedded into the output MP4 and also written as a YouTube chapters text file.
 
 ### Usage
 
@@ -216,24 +216,21 @@ uv run video2yt-merge \
 | Flag | Required | Description |
 |---|---|---|
 | `--segment PATH` | yes (repeatable) | Input segment. Must be 1920x1080 30fps h264. |
-| `--label TEXT` | yes (repeatable) | Label for the corresponding segment, shown on the progress bar. |
+| `--label TEXT` | yes (repeatable) | Chapter label for the corresponding segment. |
 | `--title TITLE` | yes | Output filename stem and chapters file prefix. |
 | `-o, --output PATH` | no | Output MP4 path. Default: first segment's parent directory + `<title>.mp4`. |
-| `--label-font-face NAME` | no | Progress bar label font (default: Hiragino Sans GB). |
-| `--label-font-size N` | no | Progress bar label pixel size (default: 20). |
 
 ### Outputs
 
-- `<output_dir>/<title>.mp4` — final merged video
+- `<output_dir>/<title>.mp4` — final merged video, with chapter markers embedded in its metadata
 - `<output_dir>/<title>_chapters.txt` — YouTube-format chapter markers (paste into video description)
-- `<output_dir>/<title>_progress_bar.png` — the rendered base progress bar (kept for inspection)
+- `<output_dir>/<title>_ffmeta.txt` — the ffmetadata file embedded into the MP4 (kept for inspection)
 
 ### Behavior
 
-- **Strict input validation**: all segments must be 1920x1080 30fps h264 with an audio stream; otherwise fail with a list of violations.
+- **Strict input validation**: all segments must be 1920x1080 30fps h264 with an audio stream AND ≥10 seconds long, and there must be at least 3 segments. The duration / segment-count rules mirror YouTube's chapter requirements — anything else and YouTube discards the chapter list. Fail with a list of violations.
 - **Per-segment audio normalization**: each segment's audio goes through `loudnorm=I=-14:TP=-1:LRA=11` (YouTube reference loudness) before concatenation.
-- **Progress bar**: thin (12 px) strip at the bottom of the frame, with segment width proportional to duration, labels above each segment, and a highlighted fill on the currently-playing segment (via ffmpeg `drawbox` per segment).
-- **Chapters**: auto-generated in YouTube's format (first chapter always at `00:00`).
+- **Chapters**: each segment becomes one chapter. The officially-supported way to get chapters onto YouTube is via the video description, so `<title>_chapters.txt` is written in YouTube's text format (first chapter at `00:00`) — paste it into the description as a single ascending block. The same chapters are also embedded into the output MP4 (`-map_metadata`/`-map_chapters`) as a best-effort extra; this isn't officially documented as supported by YouTube, so don't treat it as a fallback for a missing/broken description block.
 
 ## Development
 

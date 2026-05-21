@@ -10,7 +10,7 @@ Take a topical brief (e.g. "S13 最強輪椅 背靠背流派 教程") and produc
 
 - A short (~30s) original spoken intro
 - One or more burnt-in Bilibili source segments (with danmaku) as the body
-- A concatenated final MP4 with progress bar + chapter markers + loudness normalization
+- A concatenated final MP4 with chapter markers + loudness normalization
 - A YouTube thumbnail
 - Localized title / description / tags
 - Uploaded to YouTube via API with all metadata pre-filled
@@ -43,8 +43,8 @@ output/back2back/
 ├── <uploader>：<title>/          # Step 6 burnt segment 2
 │   └── BV...._with_danmaku_*.mp4
 ├── back2back_final.mp4           # Step 7 merged final video
-├── back2back_final_chapters.txt  # Step 7 YouTube chapters
-├── back2back_final_progress_bar.png
+├── back2back_final_chapters.txt  # Step 7 YouTube chapters (description paste)
+├── back2back_final_ffmeta.txt    # Step 7 ffmetadata embedded into the MP4
 ├── youtube_metadata.txt          # Step 8 human-readable
 ├── youtube_metadata.json         # Step 8 machine-readable (for Step 9)
 └── (uploaded video URL)          # Step 9 stdout
@@ -190,7 +190,7 @@ Each segment becomes a 1920x1080 30fps h264 MP4 with danmaku burnt in. The outpu
 ### Step 7 — Merge into final video
 
 **Input**: ordered list of `--segment` + `--label` pairs (intro first), plus a working title.
-**Output**: `output/<project>/<title>.mp4` + `<title>_chapters.txt` + `<title>_progress_bar.png`.
+**Output**: `output/<project>/<title>.mp4` + `<title>_chapters.txt` + `<title>_ffmeta.txt`.
 **Tool**: existing `video2yt-merge`.
 
 ```bash
@@ -202,7 +202,7 @@ uv run video2yt-merge \
   -o        output/<project>/<project>_final.mp4
 ```
 
-All `--segment` inputs MUST be 1920x1080 30fps h264 (strict). Output: concat + per-segment loudnorm to -14 LUFS + Pillow-rendered progress bar overlaid as PNG + ffmpeg `drawbox` highlighting current segment.
+All `--segment` inputs MUST be 1920x1080 30fps h264 (strict) AND ≥10s long, with at least 3 segments total (those rules mirror YouTube's chapter requirements; see Step 8). Output: concat + per-segment loudnorm to -14 LUFS. There is no burned-in progress bar — segmentation must be delivered through the description chapter block written in Step 8. merge writes `<title>_chapters.txt` for that paste, and also embeds the same chapters into the MP4 via `<title>_ffmeta.txt` + `-map_metadata`/`-map_chapters` as a best-effort extra (YouTube does not officially document reading embedded chapter atoms, so this is NOT a safety net for a missing description block).
 
 ### Step 8 — Generate YouTube metadata
 
@@ -227,7 +227,17 @@ All `--segment` inputs MUST be 1920x1080 30fps h264 (strict). Output: concat + p
 }
 ```
 
-Title format used in this project: `[爐石戰棋]S13 <topic> | <streamer name> 實戰 [彈幕]`. Description should include the chapter list (so YouTube renders chapter markers). For Taiwan audience, primary description is 繁體 with TW grammar; append 简体 below as secondary.
+Title format used in this project: `[爐石戰棋]S13 <topic> | <streamer name> 實戰 [彈幕]`. For Taiwan audience, primary description is 繁體 with TW grammar; append 简体 below as secondary.
+
+**Chapter timestamps in the description — required, exactly one ascending block.** The description is the **only officially-supported** way to get the YouTube progress-bar segmentation. Rules YouTube enforces:
+
+1. At least 3 timestamps.
+2. First timestamp is `00:00`.
+3. All timestamps strictly ascending, on their own lines.
+4. Each chapter ≥10 seconds.
+5. The whole list lives in **one** block — there must not be a second block that resets to `00:00`.
+
+A duplicated block (e.g. one under 繁體, another under 简体) makes the sequence jump backwards to `00:00` and YouTube discards the whole list — that is the `back2back`/`ringnaga`/`chickenking` bug. So put the `時間軸：` block **once** and do **not** repeat it inside the 简体 section. Copy directly from `<title>_chapters.txt` produced by merge — that file is already formatted correctly. merge also embeds the same chapters into the MP4 itself as a best-effort extra, but YouTube does NOT officially support reading embedded chapter atoms, so don't rely on it as a fallback — get the description block right.
 
 ### Bonus — YouTube thumbnail
 
