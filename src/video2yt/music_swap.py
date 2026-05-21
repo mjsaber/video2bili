@@ -181,3 +181,25 @@ def mix(
         str(mixed_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def remux(input_path: Path, mixed_path: Path, output_path: Path) -> None:
+    """Combine the original video stream with the new mixed audio.
+
+    The video stream is stream-copied (``-c:v copy``) — no re-encode — and the
+    new audio is encoded to AAC 192k. The original audio stream is dropped.
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(input_path),
+        "-i", str(mixed_path),
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)

@@ -6243,3 +6243,22 @@ def test_mix_without_ducking(tmp_path, monkeypatch):
     assert "sidechaincompress" not in joined  # flat mix
     assert "volume=0.3" in joined
     assert "amix" in joined
+
+
+def test_remux_copies_video_and_encodes_aac(tmp_path, monkeypatch):
+    video = tmp_path / "seg.mp4"
+    audio = tmp_path / "mixed.wav"
+    out = tmp_path / "seg_clean.mp4"
+    captured = {}
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run",
+                        lambda cmd, **k: captured.setdefault("cmd", cmd)
+                        or MagicMock(returncode=0))
+    music_swap.remux(video, audio, out)
+    cmd = captured["cmd"]
+    assert cmd[0] == "ffmpeg"
+    # video copied, not re-encoded
+    assert "copy" in cmd
+    assert "aac" in cmd
+    assert str(video) in cmd
+    assert str(audio) in cmd
+    assert str(out) in cmd

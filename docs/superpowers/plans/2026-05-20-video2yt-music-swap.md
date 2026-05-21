@@ -1000,7 +1000,7 @@ git commit -m "feat(music_swap): add mix with sidechain ducking"
 - Modify: `src/video2yt/music_swap.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_smoke.py`:
 
@@ -1024,12 +1024,12 @@ def test_remux_copies_video_and_encodes_aac(tmp_path, monkeypatch):
     assert str(out) in cmd
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_smoke.py -k test_remux -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'remux'`.
 
-- [ ] **Step 3: Implement `remux`**
+- [x] **Step 3: Implement `remux`**
 
 Append to `src/video2yt/music_swap.py`:
 
@@ -1056,12 +1056,12 @@ def remux(input_path: Path, mixed_path: Path, output_path: Path) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_smoke.py -k test_remux -v`
 Expected: 1 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_swap.py tests/test_smoke.py
