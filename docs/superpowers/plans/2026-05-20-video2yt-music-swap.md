@@ -475,6 +475,24 @@ def test_select_sequence_repeats_pool_when_short():
                                         crossfade=2.0, seed=1)
     assert len(seq) >= 4  # 30s track must repeat to cover 120s
     assert all(t.name == "only.mp3" for t in seq)
+
+
+def test_select_sequence_rejects_tracks_not_longer_than_crossfade():
+    # A track whose duration <= crossfade would contribute <= 0 per cycle and
+    # loop forever. Such tracks must be dropped; an all-short pool must raise.
+    pool = [_track("tiny.mp3", 2.0), _track("zero.mp3", 0.0)]
+    with pytest.raises(ValueError, match="too short"):
+        music_library.select_sequence(pool, target_duration=120.0,
+                                      crossfade=2.0, seed=1)
+
+
+def test_select_sequence_drops_short_tracks_keeps_usable_ones():
+    # The 1s track must be dropped; the 60s track alone still fills the target.
+    pool = [_track("tiny.mp3", 1.0), _track("good.mp3", 60.0)]
+    seq = music_library.select_sequence(pool, target_duration=120.0,
+                                        crossfade=2.0, seed=1)
+    assert seq  # terminates, does not hang
+    assert all(t.name == "good.mp3" for t in seq)
 ```
 
 - [x] **Step 2: Run tests to verify they fail**
@@ -500,10 +518,22 @@ def select_sequence(
     the stitched length reaches the target. Stitching consecutive tracks with
     an ``acrossfade`` of ``crossfade`` seconds overlaps them, so the effective
     length of N tracks is ``sum(durations) - (N-1) * crossfade``.
+
+    Tracks whose duration is not greater than ``crossfade`` are dropped first:
+    each one would contribute ``duration - crossfade <= 0`` to the running
+    total, so keeping them could loop forever, and ``acrossfade`` itself
+    requires inputs longer than the crossfade. Raises ``ValueError`` if the
+    pool is empty or every track is too short to use.
     """
     if not pool:
         raise ValueError("cannot select from an empty track pool")
-    order = list(pool)
+    usable = [t for t in pool if t.duration > crossfade]
+    if not usable:
+        raise ValueError(
+            f"no cached music track is longer than the {crossfade}s "
+            f"crossfade — every track is too short to use"
+        )
+    order = list(usable)
     random.Random(seed).shuffle(order)
 
     seq: list[Track] = []

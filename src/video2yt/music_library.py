@@ -127,10 +127,22 @@ def select_sequence(
     the stitched length reaches the target. Stitching consecutive tracks with
     an ``acrossfade`` of ``crossfade`` seconds overlaps them, so the effective
     length of N tracks is ``sum(durations) - (N-1) * crossfade``.
+
+    Tracks whose duration is not greater than ``crossfade`` are dropped first:
+    each one would contribute ``duration - crossfade <= 0`` to the running
+    total, so keeping them could loop forever, and ``acrossfade`` itself
+    requires inputs longer than the crossfade. Raises ``ValueError`` if the
+    pool is empty or every track is too short to use.
     """
     if not pool:
         raise ValueError("cannot select from an empty track pool")
-    order = list(pool)
+    usable = [t for t in pool if t.duration > crossfade]
+    if not usable:
+        raise ValueError(
+            f"no cached music track is longer than the {crossfade}s "
+            f"crossfade — every track is too short to use"
+        )
+    order = list(usable)
     random.Random(seed).shuffle(order)
 
     seq: list[Track] = []

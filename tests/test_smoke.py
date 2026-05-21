@@ -6118,6 +6118,24 @@ def test_select_sequence_repeats_pool_when_short():
     assert all(t.name == "only.mp3" for t in seq)
 
 
+def test_select_sequence_rejects_tracks_not_longer_than_crossfade():
+    # A track whose duration <= crossfade would contribute <= 0 per cycle and
+    # loop forever. Such tracks must be dropped; an all-short pool must raise.
+    pool = [_track("tiny.mp3", 2.0), _track("zero.mp3", 0.0)]
+    with pytest.raises(ValueError, match="too short"):
+        music_library.select_sequence(pool, target_duration=120.0,
+                                      crossfade=2.0, seed=1)
+
+
+def test_select_sequence_drops_short_tracks_keeps_usable_ones():
+    # The 1s track must be dropped; the 60s track alone still fills the target.
+    pool = [_track("tiny.mp3", 1.0), _track("good.mp3", 60.0)]
+    seq = music_library.select_sequence(pool, target_duration=120.0,
+                                        crossfade=2.0, seed=1)
+    assert seq  # terminates, does not hang
+    assert all(t.name == "good.mp3" for t in seq)
+
+
 from video2yt import music_swap
 
 
