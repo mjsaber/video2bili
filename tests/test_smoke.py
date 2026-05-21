@@ -6173,3 +6173,42 @@ def test_separate_vocals_raises_if_vocals_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.music_swap._pick_device", lambda: "cpu")
     with pytest.raises(ValueError, match="vocals"):
         music_swap.separate_vocals(wav, "htdemucs", tmp_path / "out")
+
+
+def test_build_music_bed_multi_track_crossfades(tmp_path, monkeypatch):
+    seq = [_track(str(tmp_path / "a.mp3"), 100.0),
+           _track(str(tmp_path / "b.mp3"), 100.0)]
+    bed = tmp_path / "bed.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.build_music_bed(seq, target_duration=150.0,
+                               bed_path=bed, crossfade=2.0)
+    cmd = captured["cmd"]
+    joined = " ".join(cmd)
+    assert cmd[0] == "ffmpeg"
+    assert "-i" in cmd  # both tracks fed as inputs
+    assert cmd.count("-i") == 2
+    assert "acrossfade" in joined
+    assert "afade" in joined          # tail fade-out
+    assert "-t" in cmd                # trimmed to exact target
+    assert str(bed) in cmd
+
+
+def test_build_music_bed_single_track_no_crossfade(tmp_path, monkeypatch):
+    seq = [_track(str(tmp_path / "only.mp3"), 400.0)]
+    bed = tmp_path / "bed.wav"
+    captured = {}
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run",
+                        lambda cmd, **k: captured.setdefault("cmd", cmd)
+                        or MagicMock(returncode=0))
+    music_swap.build_music_bed(seq, target_duration=120.0,
+                               bed_path=bed, crossfade=2.0)
+    joined = " ".join(captured["cmd"])
+    assert "acrossfade" not in joined  # one track -> nothing to crossfade
+    assert "afade" in joined
+    assert captured["cmd"].count("-i") == 1

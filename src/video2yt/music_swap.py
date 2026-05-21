@@ -86,3 +86,57 @@ def separate_vocals(wav_path: Path, model: str, out_dir: Path) -> Path:
             f"Demucs did not produce {vocals} — separation failed"
         )
     return vocals
+
+
+def build_music_bed(
+    tracks: list,
+    target_duration: float,
+    bed_path: Path,
+    crossfade: float = 2.0,
+) -> None:
+    """Stitch ``tracks`` into a single music bed of exactly ``target_duration``.
+
+    Consecutive tracks are joined with an ``acrossfade`` of ``crossfade``
+    seconds. The result is trimmed to the target with ``-t`` and a
+    ``crossfade``-second ``afade`` out is applied at the tail. ``tracks`` is a
+    non-empty list of ``music_library.Track``.
+    """
+    if not tracks:
+        raise ValueError("cannot build a music bed from an empty track list")
+
+    cmd = ["ffmpeg", "-y"]
+    for t in tracks:
+        cmd += ["-i", str(t.path)]
+
+    fade_start = max(0.0, target_duration - crossfade)
+    if len(tracks) == 1:
+        # Single track: loop it to be safe, then fade + trim.
+        filtergraph = (
+            f"[0:a]aloop=loop=-1:size=2e9,"
+            f"afade=t=out:st={fade_start:.3f}:d={crossfade:.3f}[out]"
+        )
+    else:
+        # Chain acrossfade across all inputs: [0][1]->[a1], [a1][2]->[a2], ...
+        steps = []
+        prev = "[0:a]"
+        for idx in range(1, len(tracks)):
+            label = "[out]" if idx == len(tracks) - 1 else f"[a{idx}]"
+            steps.append(
+                f"{prev}[{idx}:a]acrossfade=d={crossfade:.3f}:c1=tri:c2=tri{label}"
+            )
+            prev = label
+        # Append the tail fade as a second branch off the final label.
+        joined = ";".join(steps)
+        filtergraph = (
+            joined.replace("[out]", "[mix]")
+            + f";[mix]afade=t=out:st={fade_start:.3f}:d={crossfade:.3f}[out]"
+        )
+
+    cmd += [
+        "-filter_complex", filtergraph,
+        "-map", "[out]",
+        "-t", f"{target_duration:.3f}",
+        "-c:a", "pcm_s16le",
+        str(bed_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)

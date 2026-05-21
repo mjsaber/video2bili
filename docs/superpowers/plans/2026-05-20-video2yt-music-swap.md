@@ -765,7 +765,7 @@ git commit -m "feat(music_swap): add separate_vocals via Demucs"
 - Modify: `src/video2yt/music_swap.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -809,12 +809,12 @@ def test_build_music_bed_single_track_no_crossfade(tmp_path, monkeypatch):
     assert captured["cmd"].count("-i") == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k build_music_bed -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'build_music_bed'`.
 
-- [ ] **Step 3: Implement `build_music_bed`**
+- [x] **Step 3: Implement `build_music_bed`**
 
 Append to `src/video2yt/music_swap.py`:
 
@@ -873,12 +873,12 @@ def build_music_bed(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k build_music_bed -v`
 Expected: 2 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_swap.py tests/test_smoke.py
