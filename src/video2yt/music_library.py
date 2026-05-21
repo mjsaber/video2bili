@@ -1,10 +1,13 @@
-"""CC0 royalty-free music library: manifest, download cache, track selection.
+"""Royalty-free music library: manifest, download cache, track selection.
 
 The cache directory ``~/.cache/video2yt/music/`` is the source of truth — the
 music bed is built from every audio file present there. The committed manifest
 (``data/music_library.json``) is an auto-fill convenience that downloads
-redistributable CC0 tracks into the cache on first use. Users may also drop
-their own tracks into the cache directory by hand.
+redistributable royalty-free tracks into the cache on first use; the shipped
+set is calm Kevin MacLeod tracks from the Internet Archive, licensed CC BY 3.0
+(attribution required — see ``attribution_lines``). Users may also drop their
+own tracks into the cache directory by hand (e.g. YouTube Audio Library
+tracks, which need no attribution).
 """
 from __future__ import annotations
 
