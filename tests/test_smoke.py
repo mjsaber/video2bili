@@ -6326,3 +6326,67 @@ def test_render_rejects_input_with_no_audio(tmp_path, monkeypatch):
                                         output_path=tmp_path / "o.mp4")
     with pytest.raises(ValueError, match="audio"):
         music_swap.render(inputs)
+
+
+from video2yt import music_swap_cli
+
+
+def test_cli_parse_args_defaults():
+    args = music_swap_cli.parse_args(["seg.mp4"])
+    assert args.input == Path("seg.mp4")
+    assert args.output is None
+    assert args.music_volume == 0.25
+    assert args.no_duck is False
+    assert args.model == "htdemucs"
+    assert args.seed is None
+    assert args.keep_temp is False
+
+
+def test_cli_parse_args_all_flags():
+    args = music_swap_cli.parse_args([
+        "seg.mp4", "-o", "out.mp4", "--music-volume", "0.4",
+        "--no-duck", "--model", "htdemucs_ft", "--seed", "7", "--keep-temp",
+    ])
+    assert args.output == Path("out.mp4")
+    assert args.music_volume == 0.4
+    assert args.no_duck is True
+    assert args.model == "htdemucs_ft"
+    assert args.seed == 7
+    assert args.keep_temp is True
+
+
+def test_cli_preflight_fails_without_ffmpeg(monkeypatch):
+    monkeypatch.setattr("video2yt.music_swap_cli.shutil.which",
+                        lambda name: None)
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        music_swap_cli.preflight()
+
+
+def test_cli_preflight_fails_without_demucs(monkeypatch):
+    monkeypatch.setattr("video2yt.music_swap_cli.shutil.which",
+                        lambda name: f"/usr/local/bin/{name}")
+    monkeypatch.setattr("video2yt.music_swap_cli.importlib.util.find_spec",
+                        lambda name: None)
+    with pytest.raises(RuntimeError, match="demucs"):
+        music_swap_cli.preflight()
+
+
+def test_cli_run_derives_default_output(tmp_path, monkeypatch):
+    src = tmp_path / "BV123_with_danmaku.mp4"
+    src.write_bytes(b"x")
+    captured = {}
+    monkeypatch.setattr("video2yt.music_swap_cli.preflight", lambda: None)
+    monkeypatch.setattr("video2yt.music_swap_cli.music_swap.render",
+                        lambda inputs: captured.setdefault("inputs", inputs)
+                        or inputs.output_path)
+    args = music_swap_cli.parse_args([str(src)])
+    music_swap_cli.run(args)
+    assert captured["inputs"].output_path == src.with_name(
+        "BV123_with_danmaku_clean.mp4")
+
+
+def test_cli_run_rejects_missing_input(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.music_swap_cli.preflight", lambda: None)
+    args = music_swap_cli.parse_args([str(tmp_path / "nope.mp4")])
+    with pytest.raises(FileNotFoundError):
+        music_swap_cli.run(args)

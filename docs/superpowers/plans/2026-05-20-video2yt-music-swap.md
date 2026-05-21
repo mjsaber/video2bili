@@ -1243,7 +1243,7 @@ git commit -m "feat(music_swap): add render orchestration + validation"
 - Create: `src/video2yt/music_swap_cli.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -1312,12 +1312,12 @@ def test_cli_run_rejects_missing_input(tmp_path, monkeypatch):
         music_swap_cli.run(args)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k "test_cli_" -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'video2yt.music_swap_cli'`.
 
-- [ ] **Step 3: Create the CLI module**
+- [x] **Step 3: Create the CLI module**
 
 Create `src/video2yt/music_swap_cli.py`:
 
@@ -1428,12 +1428,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k "test_cli_" -v`
 Expected: 6 passed.
 
-- [ ] **Step 5: Run the whole suite + verify the console script resolves**
+- [x] **Step 5: Run the whole suite + verify the console script resolves**
 
 Run: `uv run pytest`
 Expected: all tests pass (the original 162+ plus the new ones).
@@ -1441,7 +1441,7 @@ Expected: all tests pass (the original 162+ plus the new ones).
 Run: `uv run video2yt-music-swap --help`
 Expected: the argparse help text prints, exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/video2yt/music_swap_cli.py tests/test_smoke.py
