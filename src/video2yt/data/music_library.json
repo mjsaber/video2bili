@@ -1,3 +1,101 @@
 {
-  "tracks": []
+  "_comment": "Curated calm/instrumental tracks by Kevin MacLeod, mirrored on the Internet Archive (archive.org/details/Incompetech). All licensed Creative Commons Attribution 3.0 — using any track REQUIRES crediting it in the YouTube description. video2yt-music-swap writes the required credit lines to <output>_music_credits.txt. To expand this library: add more entries here (any archive.org direct-MP3 URL with a real sha256 + duration), or drop your own files into ~/.cache/video2yt/music/ (e.g. tracks downloaded from the YouTube Audio Library, which need no attribution).",
+  "tracks": [
+    {
+      "name": "at_rest",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/At%20Rest.mp3",
+      "sha256": "ec30f84d2acd6ddaefbb16246b050ba89e26e7396a2d48d7e0d0eccaff51f141",
+      "duration": 206.6,
+      "license": "CC BY 3.0",
+      "attribution": "\"At Rest\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "atlantean_twilight",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Atlantean%20Twilight.mp3",
+      "sha256": "a3ad327aa9661d95ab701860e5583dac2a59b710af6d204316ff6043ee7205d3",
+      "duration": 171.2,
+      "license": "CC BY 3.0",
+      "attribution": "\"Atlantean Twilight\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "air_prelude",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Air%20Prelude.mp3",
+      "sha256": "e62da99f2d05622d950a65b2582dc2314d230da1e8024f15c7fc45a0af842f2b",
+      "duration": 341.2,
+      "license": "CC BY 3.0",
+      "attribution": "\"Air Prelude\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "airport_lounge",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Airport%20Lounge.mp3",
+      "sha256": "e20d316b541c72690a3b0311c9f3d40fd00717359ab7567d7df82a9316c1dec4",
+      "duration": 307.7,
+      "license": "CC BY 3.0",
+      "attribution": "\"Airport Lounge\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "airship_serenity",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Airship%20Serenity.mp3",
+      "sha256": "da92d172ea2c1bff452e0ae077ca2eff1be00f1a4b68955269a4ee16f37e1a69",
+      "duration": 240.1,
+      "license": "CC BY 3.0",
+      "attribution": "\"Airship Serenity\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "aretes",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Aretes.mp3",
+      "sha256": "8ef8fefbdde57c96d55baa3c0907f8e16a7457b70f2567ded2fcdc3567e25219",
+      "duration": 276.4,
+      "license": "CC BY 3.0",
+      "attribution": "\"Aretes\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "arcane",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Arcane.mp3",
+      "sha256": "6ec26e2fddb1694aa1a652583c2234e6182883bbf6f508f2b967ea9864b30bd9",
+      "duration": 322.6,
+      "license": "CC BY 3.0",
+      "attribution": "\"Arcane\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "babylon",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Babylon.mp3",
+      "sha256": "542fc9b76e7648684f8232495fd22f0d1a87ed2a77db36e72f69a766113128a1",
+      "duration": 255.3,
+      "license": "CC BY 3.0",
+      "attribution": "\"Babylon\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "acid_jazz",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/AcidJazz.mp3",
+      "sha256": "5e0843d42e22b175b7975c5567c91a21d2ebec5cdbc9749bce5e5179c1eb6cf0",
+      "duration": 208.2,
+      "license": "CC BY 3.0",
+      "attribution": "\"AcidJazz\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "awesome_call",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Awesome%20Call.mp3",
+      "sha256": "a08b613cdbddd887ac9fc03311f8c08b587da9d1b8b44b06ca92b235560aab1d",
+      "duration": 152.1,
+      "license": "CC BY 3.0",
+      "attribution": "\"Awesome Call\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "awaiting_return",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Awaiting%20Return.mp3",
+      "sha256": "8395e0215b8fc392cf5a402d46e779e88ea271b7027973152c6a9d44285370b9",
+      "duration": 105.4,
+      "license": "CC BY 3.0",
+      "attribution": "\"Awaiting Return\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "arcadia",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Arcadia.mp3",
+      "sha256": "56050eaa1caa52ba40b1da97eb914683cea8b5d6cc6088f2ddb0e84fee77c93a",
+      "duration": 97.6,
+      "license": "CC BY 3.0",
+      "attribution": "\"Arcadia\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    }
+  ]
 }

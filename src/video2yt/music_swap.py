@@ -205,13 +205,32 @@ def remux(input_path: Path, mixed_path: Path, output_path: Path) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def _write_credits(output_path: Path, credit_lines: list[str]) -> Path:
+    """Write the music attribution lines to a ``<output>_music_credits.txt``
+    sidecar beside the output, ready to paste into the YouTube description."""
+    credits_path = output_path.with_name(
+        f"{output_path.stem}_music_credits.txt"
+    )
+    body = (
+        "Music credits — paste these lines into the YouTube video "
+        "description and keep them there.\n"
+        "The background music is royalty-free but licensed under Creative "
+        "Commons Attribution, so the credit is required.\n\n"
+        + "\n".join(credit_lines)
+        + "\n"
+    )
+    credits_path.write_text(body, encoding="utf-8")
+    return credits_path
+
+
 def render(inputs: MusicSwapInputs) -> Path:
     """Run the full music-swap pipeline and return the output path.
 
     Steps: probe input -> extract audio -> Demucs vocal isolation -> build the
-    CC0 music bed -> mix (with ducking) -> remux into the video -> validate.
-    Temp files go in a scratch directory removed afterwards unless
-    ``keep_temp`` is set. Final loudness is left to ``video2yt-merge``.
+    royalty-free music bed -> mix (with ducking) -> remux into the video ->
+    validate -> write the music-credits sidecar. Temp files go in a scratch
+    directory removed afterwards unless ``keep_temp`` is set. Final loudness is
+    left to ``video2yt-merge``.
     """
     src_info = validate.probe(inputs.input_path)
     if not src_info.has_video:
@@ -230,9 +249,8 @@ def render(inputs: MusicSwapInputs) -> Path:
         vocals = separate_vocals(wav, inputs.model, demucs_out)
 
         _log("building royalty-free music bed")
-        music_library.ensure_manifest_cached(
-            music_library.load_manifest(), music_library.CACHE_DIR
-        )
+        manifest = music_library.load_manifest()
+        music_library.ensure_manifest_cached(manifest, music_library.CACHE_DIR)
         pool = music_library.scan_cache(music_library.CACHE_DIR)
         sequence = music_library.select_sequence(
             pool, src_info.duration, crossfade=2.0, seed=inputs.seed
@@ -261,6 +279,15 @@ def render(inputs: MusicSwapInputs) -> Path:
                 f"output duration {out_info.duration:.2f}s differs from input "
                 f"{src_info.duration:.2f}s by more than 1 second"
             )
+
+        credits = music_library.attribution_lines(sequence, manifest)
+        if credits:
+            credits_path = _write_credits(inputs.output_path, credits)
+            _log(
+                f"music credits written to {credits_path.name} — paste them "
+                f"into the YouTube description"
+            )
+
         _log(f"success: {inputs.output_path}")
         return inputs.output_path
     finally:

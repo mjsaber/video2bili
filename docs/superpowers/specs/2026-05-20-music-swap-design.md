@@ -129,7 +129,12 @@ Input: one segment MP4 (1920x1080, 30fps, h264 + AAC — the Step 6 output).
    h264, an audio stream is present, and the output duration is within a small
    tolerance of the input duration. Fail on any violation.
 
-8. **Cleanup** — remove the temp WAVs and Demucs scratch files by default;
+8. **Write music credits** — for the tracks actually used, collect the
+   `attribution` lines of any that came from the manifest and write them to a
+   `<output>_music_credits.txt` sidecar (skipped when no manifest-attributed
+   track was used). The user pastes this into the YouTube description. See §6.
+
+9. **Cleanup** — remove the temp WAVs and Demucs scratch files by default;
    `--keep-temp` retains them.
 
 ## 6. Music library
@@ -139,33 +144,64 @@ truth — the tool builds the music bed from whatever audio files are present
 there. The manifest is just an auto-fill convenience on top of it.
 
 - A manifest committed at `src/video2yt/data/music_library.json`. Each entry:
-  `{ name, url, sha256, duration, license }`.
+  `{ name, url, sha256, duration, license, attribution }`.
 - On first use, missing manifest tracks are downloaded to the cache dir and
   verified against `sha256`. This mirrors `video2yt-research-card`'s card-art
   caching (download once, cache with verification).
 - The user may also drop their own tracks straight into the cache dir; the
   tool picks them up alongside the manifest tracks.
 
+### Shipped library — Kevin MacLeod via the Internet Archive (CC BY 3.0)
+
+The original plan assumed an attribution-free CC0 library. That assumption did
+not survive contact with reality: **FreePD.com — the obvious CC0 source —
+shut down in 2025**, and no remaining source is simultaneously
+bulk-downloadable, attribution-free, *and* guaranteed claim-free.
+
+The shipped manifest is therefore seeded with calm/instrumental tracks by
+**Kevin MacLeod**, mirrored on the **Internet Archive**
+(`archive.org/details/Incompetech`). This was chosen because:
+
+- archive.org provides **stable, redistributable, hotlinkable direct-download
+  URLs** — exactly what the manifest auto-download design needs.
+- Kevin MacLeod is the most YouTube-proven royalty-free composer and does not
+  Content-ID-claim his own music, so claim risk is genuinely low.
+- The collection has plenty of calm tracks that suit game background music.
+
+The price: the tracks are **CC BY 3.0**, so **attribution is required**. Each
+manifest entry carries an `attribution` line, and `render` writes the credit
+lines for the tracks actually used to `<output>_music_credits.txt` (see §5
+step 8) — the user pastes that into the YouTube description.
+
 **Manifest tracks must be redistributable.** The tool downloads manifest
-tracks programmatically, so each manifest entry must point at a track whose
-license **explicitly permits redistribution / direct download** — practically,
-CC0 (public-domain dedication) or an equivalent. The URL must be the track's
-own canonical host, not a re-hosted copy.
+tracks programmatically, so every manifest URL must point at a host that
+permits direct download / redistribution (CC0 *or* CC BY on a permissive host
+such as the Internet Archive), and must be a canonical host, not a re-hosted
+copy.
 
 **Do NOT put YouTube Audio Library tracks in the manifest.** The YouTube Audio
 Library license permits *using* its tracks in your own videos but does **not**
-permit redistributing the audio files — so they cannot be downloaded by the
-tool from a re-hosted URL. A user who wants to use YouTube Audio Library music
-must download those tracks themselves (permitted, personal use) and drop them
-into the cache dir manually; that path stays outside the manifest.
+permit redistributing the audio files. A user who wants YouTube Audio Library
+music — the zero-attribution, strongest-guarantee option — downloads those
+tracks themselves (permitted, personal use) and drops them into the cache dir
+manually; that path stays outside the manifest. The tool surfaces no
+attribution for cache files with no manifest entry, which is correct for
+YouTube Audio Library tracks.
 
-**Vetting caveat (must be addressed in the implementation plan):** "CC0" does
-not guarantee "will not be Content-ID-claimed" — labels sometimes register
-free or public-domain music in Content ID. The manifest must be seeded only
-with *vetted* tracks: each seeded track must be both (a) confirmed
-redistributable per the rule above and (b) checked against Content ID as far
-as is practical before it ships. Seeding and vetting the initial track set is
-an explicit implementation task, not a code task.
+**Honest limit:** even CC0/CC BY music can occasionally be Content-ID-claimed
+by bad actors, and a CC BY claim is disputable with the license. This library
+reduces risk; it is not a guarantee (consistent with §2).
+
+### Expanding the library
+
+Two supported ways, both documented for the user:
+
+1. Add more entries to `music_library.json` — any archive.org direct-MP3 URL
+   (or other redistributable host) with a real `sha256`, `duration`, and
+   `attribution`. Compute `sha256` with `shasum -a 256` and `duration` with
+   `validate.probe`.
+2. Drop audio files straight into `~/.cache/video2yt/music/` — the cache dir
+   is the source of truth. This is the path for YouTube Audio Library tracks.
 
 ## 7. CLI
 

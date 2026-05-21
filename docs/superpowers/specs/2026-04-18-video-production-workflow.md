@@ -190,7 +190,8 @@ Each segment becomes a 1920x1080 30fps h264 MP4 with danmaku burnt in. The outpu
 ### Step 6.5 — Replace copyrighted background music
 
 **Input**: a burnt segment MP4 from Step 6.
-**Output**: `<segment>_clean.mp4` — same video, music bed swapped.
+**Output**: `<segment>_clean.mp4` — same video, music bed swapped — plus a
+`<segment>_clean_music_credits.txt` sidecar.
 **Tool**: `video2yt-music-swap`.
 
 ```bash
@@ -198,10 +199,20 @@ uv run video2yt-music-swap output/<project>/<uploader>：<title>/<bv>_with_danma
 ```
 
 Isolates the streamer's commentary voice with Demucs, discards the original
-music + game SFX, and lays a stitched CC0 royalty-free music bed underneath
+music + game SFX, and lays a stitched royalty-free music bed underneath
 (auto-ducked under the voice). This suppresses the streamer's copyrighted
 background music so the upload is very unlikely to draw a Content ID claim on
 it — **risk reduction, not a guarantee** (see the music-swap design spec).
+
+**Music library + attribution.** The bed is built from
+`~/.cache/video2yt/music/`. On first run the tool auto-downloads a shipped set
+of calm Kevin MacLeod tracks (Internet Archive, CC BY 3.0). CC BY **requires
+attribution**: the tool writes `<segment>_clean_music_credits.txt` — paste its
+lines into the YouTube description (Step 8) and keep them there. To skip
+attribution entirely, drop your own tracks from the **YouTube Audio Library**
+(download from YouTube Studio → Audio Library, filter mood = Calm / genre =
+Ambient or Cinematic) into `~/.cache/video2yt/music/`; the cache directory is
+the source of truth, and cache files with no manifest entry need no credit.
 
 Run this **before** the subtitle step so its speech recognition works on
 clean isolated vocals. **Performance**: Demucs is slow — a 17-minute segment

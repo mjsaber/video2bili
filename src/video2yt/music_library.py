@@ -159,3 +159,25 @@ def select_sequence(
             break
         i += 1
     return seq
+
+
+def attribution_lines(tracks: list[Track], manifest: list[dict]) -> list[str]:
+    """Return the de-duplicated attribution credit lines for ``tracks``.
+
+    Each Track's cache filename is matched against the manifest (a manifest
+    entry's cache filename is ``<name><url-extension>``). Manifest tracks
+    licensed Creative Commons Attribution carry an ``attribution`` line that
+    must be credited in the YouTube description. Tracks with no manifest
+    entry — files the user dropped into the cache directory by hand, e.g.
+    YouTube Audio Library tracks — or whose entry has no ``attribution``
+    contribute nothing; those need no credit. Order follows first appearance.
+    """
+    by_filename = {_cache_filename(e): e for e in manifest}
+    lines: list[str] = []
+    for track in tracks:
+        entry = by_filename.get(track.name)
+        if entry:
+            credit = entry.get("attribution")
+            if credit and credit not in lines:
+                lines.append(credit)
+    return lines

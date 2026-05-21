@@ -1480,65 +1480,68 @@ git commit -m "feat(music-swap): add video2yt-music-swap CLI entry point"
 
 ---
 
-## Task 13: Seed the CC0 music manifest (research task — not code)
+## Task 13: Seed the music manifest + attribution surfacing
 
-> This task is research, not programming. It cannot be TDD'd. The tool already
-> works with an empty manifest (the user can drop their own tracks into
-> `~/.cache/video2yt/music/`); this task makes it useful out of the box.
+> Research + a small code addition. Done outside the TDD-per-task loop because
+> the manifest content depends on live external sources. The tool works with
+> an empty manifest regardless (the cache dir is the source of truth).
+>
+> **Note (revised during implementation):** the plan originally targeted a
+> CC0, attribution-free library. FreePD.com — the obvious CC0 source — shut
+> down in 2025, and no remaining source is bulk-downloadable, attribution-free
+> *and* claim-free. Per the user's decision, the shipped library is calm Kevin
+> MacLeod tracks from the Internet Archive (CC BY 3.0), which requires
+> attribution; the YouTube Audio Library is documented as the zero-attribution
+> manual alternative. See the revised spec §6.
 
 **Files:**
 - Modify: `src/video2yt/data/music_library.json`
+- Modify: `src/video2yt/music_library.py` (add `attribution_lines`)
+- Modify: `src/video2yt/music_swap.py` (add `_write_credits`, wire into `render`)
+- Modify: `tests/test_smoke.py`
 
-- [ ] **Step 1: Collect candidate tracks**
+- [x] **Step 1: Collect candidate tracks**
 
-Find 6–10 instrumental background tracks that satisfy **both** rules from spec §6:
-1. **Redistributable** — the license must explicitly permit redistribution / direct download. In practice this means **CC0 / public-domain dedication**. Acceptable sources: the CC0 collections on Free Music Archive (`freemusicarchive.org`, filter License = CC0), or other catalogs that publish a CC0 dedication and a stable direct-download URL. **Do NOT use YouTube Audio Library tracks** — its license forbids redistribution, so the tool cannot download them (spec §6).
-2. **Not in Content ID** — as far as is practical, confirm the track is not registered in YouTube Content ID (e.g. search the track on YouTube and check whether uploads using it carry claims).
+Downloaded 15 calm/instrumental Kevin MacLeod candidates from the Internet
+Archive item `archive.org/details/Incompetech` (direct-MP3 URL pattern
+`https://archive.org/download/Incompetech/mp3-royaltyfree/<Track>.mp3`).
+Curated to 12 — dropped a 41-second clip and two 20–30-minute ambient drones
+that would kill bed variety.
 
-Prefer calm, instrumental, loopable tracks (no vocals) so they sit unobtrusively under commentary.
+- [x] **Step 2: Compute sha256 + duration for each track**
 
-- [ ] **Step 2: Compute sha256 + duration for each track**
+`shasum -a 256 <file>` for the digest; `ffprobe`/`validate.probe` for duration.
 
-For each chosen track, download it once and run:
+- [x] **Step 3: Populate the manifest**
 
-```bash
-shasum -a 256 <file>          # the sha256 hex digest
-uv run python -c "from video2yt import validate; print(validate.probe(__import__('pathlib').Path('<file>')).duration)"
-```
+`src/video2yt/data/music_library.json` holds 12 entries, each:
+`{ name, url, sha256, duration, license: "CC BY 3.0", attribution }`.
+`name` is unique and filename-safe (becomes the cache filename); `url` is the
+canonical archive.org direct-download URL.
 
-- [ ] **Step 3: Populate the manifest**
+- [x] **Step 4: Attribution surfacing (code)**
 
-Replace the contents of `src/video2yt/data/music_library.json` with the real entries, e.g.:
+Added `music_library.attribution_lines(tracks, manifest)` — maps used Tracks
+to manifest entries by cache filename and returns the de-duplicated credit
+lines. Added `music_swap._write_credits` and wired `render` to write
+`<output>_music_credits.txt` for the tracks actually used. Tests appended to
+`tests/test_smoke.py`: `test_attribution_lines_matches_cache_filenames_and_dedupes`,
+`test_attribution_lines_empty_for_user_supplied_tracks`,
+`test_real_manifest_every_track_has_attribution`,
+`test_render_writes_music_credits_sidecar`.
 
-```json
-{
-  "tracks": [
-    {
-      "name": "calm_morning",
-      "url": "https://files.freemusicarchive.org/.../calm_morning.mp3",
-      "sha256": "<64-hex-digest>",
-      "duration": 184.6,
-      "license": "CC0"
-    }
-  ]
-}
-```
+- [x] **Step 5: Verify the manifest loads**
 
-`name` must be unique and filename-safe (it becomes the cache filename). `url` must be the canonical host's direct-download URL, not a re-hosted copy.
+`uv run python -c "from video2yt import music_library as m; print(len(m.load_manifest()))"`
+prints `12`. Each track's `sha256` was computed from a real download of its
+manifest URL, so `ensure_manifest_cached` verification passes by construction.
 
-- [ ] **Step 4: Verify the manifest loads and downloads**
-
-Run: `uv run python -c "from video2yt import music_library as m; print(len(m.load_manifest()))"`
-Expected: prints the track count.
-
-Run: `uv run python -c "from video2yt import music_library as m; m.ensure_manifest_cached(m.load_manifest(), m.CACHE_DIR)"`
-Expected: each track logs `[music_library] cached <name>.<ext>` with no `WARNING` lines (a WARNING means a bad URL or sha256 — fix the manifest entry).
-
-- [ ] **Step 5: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
-git add src/video2yt/data/music_library.json
-git commit -m "chore(music-swap): seed CC0 music manifest"
+git add src/video2yt/data/music_library.json src/video2yt/music_library.py \
+        src/video2yt/music_swap.py tests/test_smoke.py
+git commit -m "feat(music-swap): seed Kevin MacLeod manifest + attribution credits"
 ```
 
 ---

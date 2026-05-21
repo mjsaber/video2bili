@@ -6408,3 +6408,74 @@ def test_cli_run_rejects_missing_input(tmp_path, monkeypatch):
     args = music_swap_cli.parse_args([str(tmp_path / "nope.mp4")])
     with pytest.raises(FileNotFoundError):
         music_swap_cli.run(args)
+
+
+def test_attribution_lines_matches_cache_filenames_and_dedupes():
+    manifest = [
+        {"name": "at_rest", "url": "http://x/At%20Rest.mp3", "sha256": "a",
+         "duration": 200.0, "license": "CC BY 3.0", "attribution": "credit-AT-REST"},
+        {"name": "babylon", "url": "http://x/Babylon.mp3", "sha256": "b",
+         "duration": 250.0, "license": "CC BY 3.0", "attribution": "credit-BABYLON"},
+    ]
+    tracks = [
+        _track("at_rest.mp3", 200.0),
+        _track("babylon.mp3", 250.0),
+        _track("at_rest.mp3", 200.0),     # repeat — must be de-duplicated
+        _track("user_drop.mp3", 100.0),   # not in manifest — no credit
+    ]
+    lines = music_library.attribution_lines(tracks, manifest)
+    assert lines == ["credit-AT-REST", "credit-BABYLON"]
+
+
+def test_attribution_lines_empty_for_user_supplied_tracks():
+    # A track with no manifest entry (e.g. a YouTube Audio Library file the
+    # user dropped in) needs no attribution.
+    tracks = [_track("my_yt_audio_library_track.mp3", 120.0)]
+    assert music_library.attribution_lines(tracks, []) == []
+
+
+def test_real_manifest_every_track_has_attribution():
+    # The shipped manifest is Kevin MacLeod / CC BY — every entry must carry a
+    # credit line so video2yt-music-swap can surface it.
+    for entry in music_library.load_manifest():
+        assert entry.get("attribution"), f"{entry['name']} missing attribution"
+        assert entry.get("license") == "CC BY 3.0"
+
+
+def test_render_writes_music_credits_sidecar(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "seg_clean.mp4"
+
+    monkeypatch.setattr("video2yt.music_swap.validate.probe",
+                        lambda p: _mk_info(duration=300.0, width=1920,
+                                           height=1080, has_video=True,
+                                           has_audio=True, vcodec="h264"))
+    monkeypatch.setattr("video2yt.music_swap.extract_audio",
+                        lambda i, o: o.write_bytes(b"a"))
+    monkeypatch.setattr("video2yt.music_swap.separate_vocals",
+                        lambda w, m, d: _touch(d / "v.wav"))
+    monkeypatch.setattr("video2yt.music_swap.music_library.ensure_manifest_cached",
+                        lambda manifest, cache: None)
+    manifest = [{"name": "at_rest", "url": "http://x/At%20Rest.mp3",
+                 "sha256": "a", "duration": 200.0, "license": "CC BY 3.0",
+                 "attribution": "credit-AT-REST"}]
+    monkeypatch.setattr("video2yt.music_swap.music_library.load_manifest",
+                        lambda: manifest)
+    monkeypatch.setattr("video2yt.music_swap.music_library.scan_cache",
+                        lambda cache: [_track("at_rest.mp3", 200.0)])
+    monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
+                        lambda pool, dur, crossfade, seed: pool)
+    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
+                        lambda seq, dur, bed, crossfade=2.0: bed.write_bytes(b"b"))
+    monkeypatch.setattr("video2yt.music_swap.mix",
+                        lambda v, b, mv, dk, mp: mp.write_bytes(b"m"))
+    monkeypatch.setattr("video2yt.music_swap.remux",
+                        lambda i, m, o: o.write_bytes(b"o"))
+
+    music_swap.render(music_swap.MusicSwapInputs(input_path=src,
+                                                 output_path=out))
+
+    credits = out.with_name("seg_clean_music_credits.txt")
+    assert credits.exists()
+    assert "credit-AT-REST" in credits.read_text(encoding="utf-8")
