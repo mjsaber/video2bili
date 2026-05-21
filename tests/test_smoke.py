@@ -1,8 +1,10 @@
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 from video2yt import validate
 from video2yt.validate import MediaInfo
@@ -5986,3 +5988,64 @@ def test_load_manifest_malformed_raises(tmp_path):
     manifest.write_text("not json", encoding="utf-8")
     with pytest.raises(ValueError):
         music_library.load_manifest(manifest)
+
+
+def test_ensure_manifest_cached_downloads_missing(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    payload = b"FAKEAUDIO"
+    sha = hashlib.sha256(payload).hexdigest()
+
+    def fake_get(url, timeout=0):
+        resp = MagicMock()
+        resp.content = payload
+        resp.raise_for_status = lambda: None
+        return resp
+
+    monkeypatch.setattr("video2yt.music_library.requests.get", fake_get)
+    manifest = [{"name": "song1", "url": "http://x/s1.mp3",
+                 "sha256": sha, "duration": 90.0, "license": "CC0"}]
+    music_library.ensure_manifest_cached(manifest, cache)
+    assert (cache / "song1.mp3").read_bytes() == payload
+
+
+def test_ensure_manifest_cached_skips_cache_hit(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "song1.mp3").write_bytes(b"already here")
+    called = []
+    monkeypatch.setattr("video2yt.music_library.requests.get",
+                        lambda *a, **k: called.append(1))
+    manifest = [{"name": "song1", "url": "http://x/s1.mp3",
+                 "sha256": "whatever", "duration": 90.0, "license": "CC0"}]
+    music_library.ensure_manifest_cached(manifest, cache)
+    assert called == []  # cache hit -> no download
+
+
+def test_ensure_manifest_cached_skips_on_sha_mismatch(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+
+    def fake_get(url, timeout=0):
+        resp = MagicMock()
+        resp.content = b"WRONG"
+        resp.raise_for_status = lambda: None
+        return resp
+
+    monkeypatch.setattr("video2yt.music_library.requests.get", fake_get)
+    manifest = [{"name": "song1", "url": "http://x/s1.mp3",
+                 "sha256": "0" * 64, "duration": 90.0, "license": "CC0"}]
+    # Must not raise — bad track is warned and skipped.
+    music_library.ensure_manifest_cached(manifest, cache)
+    assert not (cache / "song1.mp3").exists()
+
+
+def test_ensure_manifest_cached_skips_on_download_error(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+
+    def fake_get(url, timeout=0):
+        raise requests.RequestException("boom")
+
+    monkeypatch.setattr("video2yt.music_library.requests.get", fake_get)
+    manifest = [{"name": "song1", "url": "http://x/s1.mp3",
+                 "sha256": "0" * 64, "duration": 90.0, "license": "CC0"}]
+    music_library.ensure_manifest_cached(manifest, cache)  # must not raise
+    assert not (cache / "song1.mp3").exists()

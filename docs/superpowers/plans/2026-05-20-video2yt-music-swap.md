@@ -206,7 +206,7 @@ git commit -m "feat(music_library): add load_manifest"
 - Modify: `src/video2yt/music_library.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -272,12 +272,12 @@ def test_ensure_manifest_cached_skips_on_download_error(tmp_path, monkeypatch):
     assert not (cache / "song1.mp3").exists()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k ensure_manifest_cached -v`
 Expected: FAIL — `AttributeError: module 'video2yt.music_library' has no attribute 'ensure_manifest_cached'`.
 
-- [ ] **Step 3: Implement `ensure_manifest_cached`**
+- [x] **Step 3: Implement `ensure_manifest_cached`**
 
 Append to `src/video2yt/music_library.py`:
 
@@ -317,12 +317,12 @@ def ensure_manifest_cached(manifest: list[dict], cache_dir: Path) -> None:
         _log(f"cached {dest.name}")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k ensure_manifest_cached -v`
 Expected: 4 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_library.py tests/test_smoke.py
