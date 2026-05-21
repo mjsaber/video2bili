@@ -6110,3 +6110,28 @@ def test_select_sequence_repeats_pool_when_short():
                                         crossfade=2.0, seed=1)
     assert len(seq) >= 4  # 30s track must repeat to cover 120s
     assert all(t.name == "only.mp3" for t in seq)
+
+
+from video2yt import music_swap
+
+
+def test_extract_audio_builds_ffmpeg_command(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x")
+    out = tmp_path / "audio.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.extract_audio(src, out)
+    cmd = captured["cmd"]
+    assert cmd[0] == "ffmpeg"
+    assert "-vn" in cmd
+    assert str(src) in cmd
+    assert str(out) in cmd
+    # 44.1 kHz stereo PCM
+    assert "44100" in cmd
+    assert "2" in cmd

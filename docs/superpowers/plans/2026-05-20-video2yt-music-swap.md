@@ -542,7 +542,7 @@ git commit -m "feat(music_library): add select_sequence"
 - Create: `src/video2yt/music_swap.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_smoke.py`:
 
@@ -572,12 +572,12 @@ def test_extract_audio_builds_ffmpeg_command(tmp_path, monkeypatch):
     assert "2" in cmd
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_smoke.py -k extract_audio -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'video2yt.music_swap'`.
 
-- [ ] **Step 3: Create the module with `extract_audio`**
+- [x] **Step 3: Create the module with `extract_audio`**
 
 Create `src/video2yt/music_swap.py`:
 
@@ -630,12 +630,12 @@ def extract_audio(input_path: Path, wav_path: Path) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_smoke.py -k extract_audio -v`
 Expected: 1 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_swap.py tests/test_smoke.py
