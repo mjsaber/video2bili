@@ -6212,3 +6212,34 @@ def test_build_music_bed_single_track_no_crossfade(tmp_path, monkeypatch):
     assert "acrossfade" not in joined  # one track -> nothing to crossfade
     assert "afade" in joined
     assert captured["cmd"].count("-i") == 1
+
+
+def test_mix_with_ducking(tmp_path, monkeypatch):
+    vocals = tmp_path / "vocals.wav"
+    bed = tmp_path / "bed.wav"
+    out = tmp_path / "mixed.wav"
+    captured = {}
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run",
+                        lambda cmd, **k: captured.setdefault("cmd", cmd)
+                        or MagicMock(returncode=0))
+    music_swap.mix(vocals, bed, music_volume=0.25, duck=True, mixed_path=out)
+    joined = " ".join(captured["cmd"])
+    assert "sidechaincompress" in joined
+    assert "volume=0.25" in joined
+    assert "amix" in joined
+    assert str(out) in captured["cmd"]
+
+
+def test_mix_without_ducking(tmp_path, monkeypatch):
+    vocals = tmp_path / "vocals.wav"
+    bed = tmp_path / "bed.wav"
+    out = tmp_path / "mixed.wav"
+    captured = {}
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run",
+                        lambda cmd, **k: captured.setdefault("cmd", cmd)
+                        or MagicMock(returncode=0))
+    music_swap.mix(vocals, bed, music_volume=0.3, duck=False, mixed_path=out)
+    joined = " ".join(captured["cmd"])
+    assert "sidechaincompress" not in joined  # flat mix
+    assert "volume=0.3" in joined
+    assert "amix" in joined

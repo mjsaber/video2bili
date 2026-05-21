@@ -893,7 +893,7 @@ git commit -m "feat(music_swap): add build_music_bed"
 - Modify: `src/video2yt/music_swap.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -929,12 +929,12 @@ def test_mix_without_ducking(tmp_path, monkeypatch):
     assert "amix" in joined
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k "test_mix_with" -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'mix'`.
 
-- [ ] **Step 3: Implement `mix`**
+- [x] **Step 3: Implement `mix`**
 
 Append to `src/video2yt/music_swap.py`:
 
@@ -980,12 +980,12 @@ def mix(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k "test_mix_with" -v`
 Expected: 2 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_swap.py tests/test_smoke.py

@@ -140,3 +140,44 @@ def build_music_bed(
         str(bed_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def mix(
+    vocals_path: Path,
+    bed_path: Path,
+    music_volume: float,
+    duck: bool,
+    mixed_path: Path,
+) -> None:
+    """Mix the isolated commentary (input 0) with the music bed (input 1).
+
+    The bed is scaled to ``music_volume`` relative to the voice. When ``duck``
+    is true, the bed is side-chain compressed against the voice so it drops in
+    level while the streamer talks; otherwise the bed plays at a flat level.
+    The voice is always passed through at full level. The two are combined
+    with ``amix``; output length follows the voice (input 0).
+    """
+    if duck:
+        filtergraph = (
+            f"[1:a]volume={music_volume}[bed];"
+            f"[bed][0:a]sidechaincompress="
+            f"threshold=0.05:ratio=8:attack=5:release=300[ducked];"
+            f"[0:a][ducked]amix=inputs=2:duration=first:"
+            f"dropout_transition=0:normalize=0[out]"
+        )
+    else:
+        filtergraph = (
+            f"[1:a]volume={music_volume}[bed];"
+            f"[0:a][bed]amix=inputs=2:duration=first:"
+            f"dropout_transition=0:normalize=0[out]"
+        )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(vocals_path),
+        "-i", str(bed_path),
+        "-filter_complex", filtergraph,
+        "-map", "[out]",
+        "-c:a", "pcm_s16le",
+        str(mixed_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
