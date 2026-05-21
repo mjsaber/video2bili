@@ -444,7 +444,7 @@ git commit -m "feat(music_library): add scan_cache + Track pool"
 - Modify: `src/video2yt/music_library.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -477,12 +477,12 @@ def test_select_sequence_repeats_pool_when_short():
     assert all(t.name == "only.mp3" for t in seq)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k select_sequence -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'select_sequence'`.
 
-- [ ] **Step 3: Implement `select_sequence`**
+- [x] **Step 3: Implement `select_sequence`**
 
 Append to `src/video2yt/music_library.py`:
 
@@ -522,12 +522,12 @@ def select_sequence(
     return seq
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k select_sequence -v`
 Expected: 3 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_library.py tests/test_smoke.py

@@ -112,3 +112,38 @@ def scan_cache(cache_dir: Path) -> list[Track]:
         info = validate.probe(f)
         pool.append(Track(name=f.name, path=f, duration=info.duration))
     return pool
+
+
+def select_sequence(
+    pool: list[Track],
+    target_duration: float,
+    crossfade: float = 2.0,
+    seed: int | None = None,
+) -> list[Track]:
+    """Pick a track sequence whose stitched length covers ``target_duration``.
+
+    The pool is shuffled (deterministically when ``seed`` is given), then
+    walked cyclically — repeating the shuffled order — appending tracks until
+    the stitched length reaches the target. Stitching consecutive tracks with
+    an ``acrossfade`` of ``crossfade`` seconds overlaps them, so the effective
+    length of N tracks is ``sum(durations) - (N-1) * crossfade``.
+    """
+    if not pool:
+        raise ValueError("cannot select from an empty track pool")
+    order = list(pool)
+    random.Random(seed).shuffle(order)
+
+    seq: list[Track] = []
+    total = 0.0
+    i = 0
+    while True:
+        track = order[i % len(order)]
+        seq.append(track)
+        if len(seq) == 1:
+            total = track.duration
+        else:
+            total += track.duration - crossfade
+        if total >= target_duration:
+            break
+        i += 1
+    return seq

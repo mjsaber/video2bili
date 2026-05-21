@@ -6082,3 +6082,31 @@ def test_scan_cache_empty_raises(tmp_path):
 def test_scan_cache_missing_dir_raises(tmp_path):
     with pytest.raises(ValueError, match="no usable"):
         music_library.scan_cache(tmp_path / "does_not_exist")
+
+
+def _track(name, duration):
+    return music_library.Track(name=name, path=Path(name), duration=duration)
+
+
+def test_select_sequence_fills_to_target():
+    pool = [_track("a.mp3", 100.0), _track("b.mp3", 100.0)]
+    seq = music_library.select_sequence(pool, target_duration=250.0,
+                                        crossfade=2.0, seed=1)
+    # effective length = sum(d) - (n-1)*crossfade must reach >= 250
+    eff = sum(t.duration for t in seq) - (len(seq) - 1) * 2.0
+    assert eff >= 250.0
+
+
+def test_select_sequence_is_deterministic_with_seed():
+    pool = [_track("a.mp3", 60.0), _track("b.mp3", 60.0), _track("c.mp3", 60.0)]
+    s1 = music_library.select_sequence(pool, 300.0, crossfade=2.0, seed=42)
+    s2 = music_library.select_sequence(pool, 300.0, crossfade=2.0, seed=42)
+    assert [t.name for t in s1] == [t.name for t in s2]
+
+
+def test_select_sequence_repeats_pool_when_short():
+    pool = [_track("only.mp3", 30.0)]
+    seq = music_library.select_sequence(pool, target_duration=120.0,
+                                        crossfade=2.0, seed=1)
+    assert len(seq) >= 4  # 30s track must repeat to cover 120s
+    assert all(t.name == "only.mp3" for t in seq)
