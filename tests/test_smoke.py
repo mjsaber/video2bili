@@ -60,6 +60,12 @@ def _mk_info(**kw):
     return MediaInfo(**defaults)
 
 
+def _touch(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x")
+    return path
+
+
 def test_check_source_raises_without_video_stream():
     info = _mk_info(has_video=False, width=0, height=0, vcodec="")
     with pytest.raises(ValueError, match="no video stream"):
@@ -6262,3 +6268,61 @@ def test_remux_copies_video_and_encodes_aac(tmp_path, monkeypatch):
     assert str(video) in cmd
     assert str(audio) in cmd
     assert str(out) in cmd
+
+
+def test_render_orchestrates_pipeline_in_order(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "seg_clean.mp4"
+    calls = []
+
+    def fake_probe(path):
+        # input: a normal 1080p video; output: same shape
+        return _mk_info(duration=300.0, width=1920, height=1080,
+                        has_video=True, has_audio=True, vcodec="h264")
+
+    monkeypatch.setattr("video2yt.music_swap.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.music_swap.extract_audio",
+                        lambda i, o: calls.append("extract") or o.write_bytes(b"a"))
+    monkeypatch.setattr(
+        "video2yt.music_swap.separate_vocals",
+        lambda w, m, d: calls.append("separate") or _touch(d / "v.wav"))
+    monkeypatch.setattr("video2yt.music_swap.music_library.ensure_manifest_cached",
+                        lambda manifest, cache: calls.append("ensure_cache"))
+    monkeypatch.setattr("video2yt.music_swap.music_library.load_manifest",
+                        lambda: [])
+    monkeypatch.setattr(
+        "video2yt.music_swap.music_library.scan_cache",
+        lambda cache: calls.append("scan") or [_track("a.mp3", 400.0)])
+    monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
+                        lambda pool, dur, crossfade, seed:
+                        calls.append("select") or pool)
+    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
+                        lambda seq, dur, bed, crossfade=2.0:
+                        calls.append("bed") or bed.write_bytes(b"b"))
+    monkeypatch.setattr("video2yt.music_swap.mix",
+                        lambda v, b, mv, dk, mp:
+                        calls.append("mix") or mp.write_bytes(b"m"))
+    monkeypatch.setattr("video2yt.music_swap.remux",
+                        lambda i, m, o: calls.append("remux") or o.write_bytes(b"o"))
+
+    inputs = music_swap.MusicSwapInputs(input_path=src, output_path=out)
+    result = music_swap.render(inputs)
+
+    assert result == out
+    assert calls.index("extract") < calls.index("separate")
+    assert calls.index("separate") < calls.index("mix")
+    assert calls.index("bed") < calls.index("mix")
+    assert calls.index("mix") < calls.index("remux")
+
+
+def test_render_rejects_input_with_no_audio(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x")
+    monkeypatch.setattr(
+        "video2yt.music_swap.validate.probe",
+        lambda p: _mk_info(has_audio=False, acodec=None))
+    inputs = music_swap.MusicSwapInputs(input_path=src,
+                                        output_path=tmp_path / "o.mp4")
+    with pytest.raises(ValueError, match="audio"):
+        music_swap.render(inputs)

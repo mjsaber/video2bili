@@ -203,3 +203,68 @@ def remux(input_path: Path, mixed_path: Path, output_path: Path) -> None:
         str(output_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def render(inputs: MusicSwapInputs) -> Path:
+    """Run the full music-swap pipeline and return the output path.
+
+    Steps: probe input -> extract audio -> Demucs vocal isolation -> build the
+    CC0 music bed -> mix (with ducking) -> remux into the video -> validate.
+    Temp files go in a scratch directory removed afterwards unless
+    ``keep_temp`` is set. Final loudness is left to ``video2yt-merge``.
+    """
+    src_info = validate.probe(inputs.input_path)
+    if not src_info.has_video:
+        raise ValueError(f"input has no video stream: {inputs.input_path}")
+    if not src_info.has_audio:
+        raise ValueError(f"input has no audio stream: {inputs.input_path}")
+
+    work = Path(tempfile.mkdtemp(prefix="music_swap_"))
+    try:
+        wav = work / "audio.wav"
+        _log("extracting audio")
+        extract_audio(inputs.input_path, wav)
+
+        _log("isolating commentary voice")
+        demucs_out = work / "demucs"
+        vocals = separate_vocals(wav, inputs.model, demucs_out)
+
+        _log("building royalty-free music bed")
+        music_library.ensure_manifest_cached(
+            music_library.load_manifest(), music_library.CACHE_DIR
+        )
+        pool = music_library.scan_cache(music_library.CACHE_DIR)
+        sequence = music_library.select_sequence(
+            pool, src_info.duration, crossfade=2.0, seed=inputs.seed
+        )
+        bed = work / "bed.wav"
+        build_music_bed(sequence, src_info.duration, bed, crossfade=2.0)
+
+        _log(f"mixing (music_volume={inputs.music_volume}, duck={inputs.duck})")
+        mixed = work / "mixed.wav"
+        mix(vocals, bed, inputs.music_volume, inputs.duck, mixed)
+
+        _log("remuxing into the video")
+        remux(inputs.input_path, mixed, inputs.output_path)
+
+        _log("validating output")
+        out_info = validate.probe(inputs.output_path)
+        if not out_info.has_video or not out_info.has_audio:
+            raise ValueError("output is missing a video or audio stream")
+        if out_info.width != src_info.width or out_info.height != src_info.height:
+            raise ValueError(
+                f"output resolution {out_info.width}x{out_info.height} "
+                f"differs from input {src_info.width}x{src_info.height}"
+            )
+        if abs(out_info.duration - src_info.duration) >= 1.0:
+            raise ValueError(
+                f"output duration {out_info.duration:.2f}s differs from input "
+                f"{src_info.duration:.2f}s by more than 1 second"
+            )
+        _log(f"success: {inputs.output_path}")
+        return inputs.output_path
+    finally:
+        if inputs.keep_temp:
+            _log(f"keeping temp dir: {work}")
+        else:
+            shutil.rmtree(work, ignore_errors=True)

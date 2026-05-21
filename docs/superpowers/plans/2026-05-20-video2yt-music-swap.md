@@ -1076,7 +1076,7 @@ git commit -m "feat(music_swap): add remux"
 - Modify: `src/video2yt/music_swap.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -1148,12 +1148,12 @@ def _touch(path):
     return path
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k test_render_orchestrates -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'render'`.
 
-- [ ] **Step 3: Implement `render`**
+- [x] **Step 3: Implement `render`**
 
 Append to `src/video2yt/music_swap.py`:
 
@@ -1223,12 +1223,12 @@ def render(inputs: MusicSwapInputs) -> Path:
             shutil.rmtree(work, ignore_errors=True)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k "test_render_orchestrates or test_render_rejects" -v`
 Expected: 2 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_swap.py tests/test_smoke.py
