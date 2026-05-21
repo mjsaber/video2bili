@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
     "bilibili-api-python>=17.4.1",
+    "demucs>=4.0.1",
     "google-api-python-client>=2.194.0",
     "google-auth-httplib2>=0.3.1",
     "google-auth-oauthlib>=1.3.1",
@@ -39,6 +40,7 @@ video2yt-image = "video2yt.image_gen_cli:main"
 video2yt-upload = "video2yt.upload_cli:main"
 video2yt-topic = "video2yt.topic_cli:main"
 video2yt-subtitle = "video2yt.subtitle_cli:main"
+video2yt-music-swap = "video2yt.music_swap_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -49,3 +51,4 @@ packages = ["src/video2yt"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/video2yt/data/bg_glossary.yaml" = "video2yt/data/bg_glossary.yaml"
+"src/video2yt/data/music_library.json" = "video2yt/data/music_library.json"

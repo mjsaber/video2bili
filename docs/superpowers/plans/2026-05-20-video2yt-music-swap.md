@@ -43,13 +43,13 @@ Approved spec: `docs/superpowers/specs/2026-05-20-music-swap-design.md`. Read it
 - Modify: `pyproject.toml`
 - Create: `src/video2yt/data/music_library.json`
 
-- [ ] **Step 1: Add the Demucs dependency**
+- [x] **Step 1: Add the Demucs dependency**
 
 Run: `uv add demucs`
 
 Expected: `pyproject.toml` `dependencies` gains a `demucs>=...` line and `uv.lock` updates. (Demucs pulls in PyTorch; whisperx already does, so this is consistent.)
 
-- [ ] **Step 2: Create the empty manifest file**
+- [x] **Step 2: Create the empty manifest file**
 
 Create `src/video2yt/data/music_library.json` with exactly:
 
@@ -61,7 +61,7 @@ Create `src/video2yt/data/music_library.json` with exactly:
 
 The manifest ships empty; real CC0 tracks are seeded in Task 13. An empty manifest is valid (per spec §6 the cache dir is the source of truth).
 
-- [ ] **Step 3: Register the console script**
+- [x] **Step 3: Register the console script**
 
 In `pyproject.toml`, under `[project.scripts]`, add this line after the `video2yt-subtitle` line:
 
@@ -69,7 +69,7 @@ In `pyproject.toml`, under `[project.scripts]`, add this line after the `video2y
 video2yt-music-swap = "video2yt.music_swap_cli:main"
 ```
 
-- [ ] **Step 4: Force-include the manifest in the wheel**
+- [x] **Step 4: Force-include the manifest in the wheel**
 
 In `pyproject.toml`, under `[tool.hatch.build.targets.wheel.force-include]`, add after the `bg_glossary.yaml` line:
 
@@ -77,12 +77,12 @@ In `pyproject.toml`, under `[tool.hatch.build.targets.wheel.force-include]`, add
 "src/video2yt/data/music_library.json" = "video2yt/data/music_library.json"
 ```
 
-- [ ] **Step 5: Verify the package still imports**
+- [x] **Step 5: Verify the package still imports**
 
 Run: `uv run python -c "import video2yt"`
 Expected: no output, exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add pyproject.toml uv.lock src/video2yt/data/music_library.json
