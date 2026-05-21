@@ -337,7 +337,7 @@ git commit -m "feat(music_library): add ensure_manifest_cached with skip-on-fail
 - Modify: `src/video2yt/music_library.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -375,12 +375,12 @@ def test_scan_cache_missing_dir_raises(tmp_path):
         music_library.scan_cache(tmp_path / "does_not_exist")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k scan_cache -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'scan_cache'`.
 
-- [ ] **Step 3: Implement `Track` + `scan_cache`**
+- [x] **Step 3: Implement `Track` + `scan_cache`**
 
 Add the `validate` import to the top of `src/video2yt/music_library.py` (next to the other imports):
 
@@ -424,12 +424,12 @@ def scan_cache(cache_dir: Path) -> list[Track]:
     return pool
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k scan_cache -v`
 Expected: 3 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_library.py tests/test_smoke.py

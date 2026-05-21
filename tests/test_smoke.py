@@ -6049,3 +6049,36 @@ def test_ensure_manifest_cached_skips_on_download_error(tmp_path, monkeypatch):
                  "sha256": "0" * 64, "duration": 90.0, "license": "CC0"}]
     music_library.ensure_manifest_cached(manifest, cache)  # must not raise
     assert not (cache / "song1.mp3").exists()
+
+
+def test_scan_cache_builds_pool_with_probed_durations(tmp_path, monkeypatch):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "a.mp3").write_bytes(b"x")
+    (cache / "b.wav").write_bytes(b"x")
+    (cache / "notes.txt").write_text("ignore me")  # non-audio, must be skipped
+
+    durations = {"a.mp3": 100.0, "b.wav": 200.0}
+
+    def fake_probe(path):
+        return _mk_info(duration=durations[Path(path).name],
+                        has_video=False, vcodec="", acodec="mp3")
+
+    monkeypatch.setattr("video2yt.music_library.validate.probe", fake_probe)
+    pool = music_library.scan_cache(cache)
+    names = sorted(t.name for t in pool)
+    assert names == ["a.mp3", "b.wav"]
+    by_name = {t.name: t.duration for t in pool}
+    assert by_name == {"a.mp3": 100.0, "b.wav": 200.0}
+
+
+def test_scan_cache_empty_raises(tmp_path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    with pytest.raises(ValueError, match="no usable"):
+        music_library.scan_cache(cache)
+
+
+def test_scan_cache_missing_dir_raises(tmp_path):
+    with pytest.raises(ValueError, match="no usable"):
+        music_library.scan_cache(tmp_path / "does_not_exist")

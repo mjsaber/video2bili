@@ -17,6 +17,8 @@ from pathlib import Path
 
 import requests
 
+from video2yt import validate
+
 MANIFEST_PATH = Path(__file__).parent / "data" / "music_library.json"
 CACHE_DIR = Path.home() / ".cache" / "video2yt" / "music"
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus"}
@@ -77,3 +79,36 @@ def ensure_manifest_cached(manifest: list[dict], cache_dir: Path) -> None:
             continue
         dest.write_bytes(resp.content)
         _log(f"cached {dest.name}")
+
+
+@dataclass
+class Track:
+    """One playable music file in the cache pool."""
+    name: str
+    path: Path
+    duration: float
+
+
+def scan_cache(cache_dir: Path) -> list[Track]:
+    """Return the Track pool: every audio file in ``cache_dir``, duration-probed.
+
+    Duration comes from ``validate.probe`` (ffprobe), not from the manifest,
+    so user-supplied tracks with no manifest entry work correctly (spec §5).
+    Raises ``ValueError`` if the directory has no usable audio file at all.
+    """
+    files = []
+    if cache_dir.is_dir():
+        files = sorted(
+            p for p in cache_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
+        )
+    if not files:
+        raise ValueError(
+            f"no usable music track found in {cache_dir}. Fix the manifest / "
+            f"network, or drop your own audio files into that directory."
+        )
+    pool: list[Track] = []
+    for f in files:
+        info = validate.probe(f)
+        pool.append(Track(name=f.name, path=f, duration=info.duration))
+    return pool
