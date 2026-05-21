@@ -1519,7 +1519,7 @@ git commit -m "chore(music-swap): seed CC0 music manifest"
 - Modify: `docs/superpowers/specs/2026-04-18-video-production-workflow.md`
 - Modify: `CLAUDE.md`
 
-- [ ] **Step 1: Add Step 6.5 to the workflow spec**
+- [x] **Step 1: Add Step 6.5 to the workflow spec**
 
 In `docs/superpowers/specs/2026-04-18-video-production-workflow.md`, insert a new `### Step 6.5 — Replace copyrighted background music` section between Step 6 and the current subtitle step. Content:
 
@@ -1548,7 +1548,7 @@ like the subtitle step.
 
 Then renumber the existing `### Step 6.5 — ...` subtitle section to `### Step 6.6`, and update the per-project checklist in section 8 (the `- [ ] Step 6.5 — add STT subtitles ...` line becomes `Step 6.6`, and add a `- [ ] Step 6.5 — replace background music via video2yt-music-swap` line above it).
 
-- [ ] **Step 2: Update CLAUDE.md — Commands block**
+- [x] **Step 2: Update CLAUDE.md — Commands block**
 
 In `CLAUDE.md`, in the `## Commands` code block, add after the `video2yt-subtitle` line:
 
@@ -1556,7 +1556,7 @@ In `CLAUDE.md`, in the `## Commands` code block, add after the `video2yt-subtitl
 uv run video2yt-music-swap seg.mp4                         # swap copyrighted BGM for CC0 music
 ```
 
-- [ ] **Step 3: Update CLAUDE.md — Architecture map**
+- [x] **Step 3: Update CLAUDE.md — Architecture map**
 
 In the `## Architecture` tree, add these entries:
 
@@ -1566,7 +1566,7 @@ In the `## Architecture` tree, add these entries:
 ├── music_library.py  # CC0 manifest + download cache + track selection
 ```
 
-- [ ] **Step 4: Update CLAUDE.md — gotcha**
+- [x] **Step 4: Update CLAUDE.md — gotcha**
 
 In `## Known gotchas`, add:
 
@@ -1574,7 +1574,7 @@ In `## Known gotchas`, add:
 - **music-swap is risk reduction, not a guarantee**: `video2yt-music-swap` isolates the commentary voice (Demucs) and discards the original music+SFX mix, so the game sound effects are lost by design (Approach A — see `docs/superpowers/specs/2026-05-20-music-swap-design.md`). Demucs separation is imperfect: faint music can bleed into the vocals stem, and the replacement CC0 track carries its own claim risk. It strongly suppresses the streamer's music but does not mathematically guarantee a claim-free upload. Demucs is also slow (10–30 min for a 17-min segment on CPU; faster on Apple Silicon MPS).
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-04-18-video-production-workflow.md CLAUDE.md

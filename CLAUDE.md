@@ -19,6 +19,7 @@ uv run python -m video2yt "<url>"                          # run as module
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # compose from stills
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --segment c.mp4 --label "C" --title "T"   # concat + loudnorm + chapters (≥3 segments, each ≥10s)
 uv run video2yt-subtitle seg.mp4 --danmaku raw.xml         # add STT subtitles if not already present
+uv run video2yt-music-swap seg.mp4                         # swap copyrighted BGM for CC0 music
 uv run pytest                                              # run tests (230)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
@@ -55,6 +56,7 @@ For Hearthstone Battlegrounds video projects, **never draft the intro script bef
 - **compose SRT path escaping**: `compose.render` uses `cwd=<srt.parent>` and references the SRT by basename in the `subtitles` filter (same trick as `burn.py`). Absolute paths for `-i` inputs are fine because `-i` doesn't go through filter_complex.
 - **merge strict mode**: all `--segment` inputs must be 1920x1080 30fps h264 AND ≥10s long, and there must be ≥3 segments. The 10s/3-segment rules mirror YouTube's chapter requirements — fewer/shorter chapters means YouTube discards the chapter list. No auto-normalization. Fail fast with all violations listed.
 - **merge chapters**: there is no burned-in progress bar — segmentation is delivered as chapter markers. The **only officially-supported** YouTube chapter source is timestamps in the video description (≥3 ascending, first at 00:00, each ≥10s, exactly one block). merge produces two outputs: `<title>_chapters.txt` is the description paste (this is the supported path); `<title>_ffmeta.txt` is embedded into the MP4 via `-map_metadata`/`-map_chapters` as a best-effort extra — YouTube does NOT officially document reading embedded chapter atoms, so do NOT treat the embed as a safety net. Common breakage: a description with two timestamp blocks (繁體 + 简体) is not strictly ascending and YouTube discards the whole list — keep the block to exactly one occurrence.
+- **music-swap is risk reduction, not a guarantee**: `video2yt-music-swap` isolates the commentary voice (Demucs) and discards the original music+SFX mix, so the game sound effects are lost by design (Approach A — see `docs/superpowers/specs/2026-05-20-music-swap-design.md`). Demucs separation is imperfect: faint music can bleed into the vocals stem, and the replacement CC0 track carries its own claim risk. It strongly suppresses the streamer's music but does not mathematically guarantee a claim-free upload. Demucs is also slow (10–30 min for a 17-min segment on CPU; faster on Apple Silicon MPS).
 
 ## Architecture
 
@@ -72,7 +74,10 @@ src/video2yt/
 ├── validate.py       # ffprobe + source/ASS/output validators
 ├── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ├── subtitle.py       # detect (danmaku XML + OCR) + SenseVoice ASR + Codex cleanup + split + burn
-└── subtitle_cli.py   # video2yt-subtitle entry point
+├── subtitle_cli.py   # video2yt-subtitle entry point
+├── music_swap.py     # extract → Demucs vocal isolation → CC0 bed → mix → remux
+├── music_swap_cli.py # video2yt-music-swap entry point
+└── music_library.py  # CC0 manifest + download cache + track selection
 ```
 
 Tests live in `tests/test_smoke.py` (162 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.

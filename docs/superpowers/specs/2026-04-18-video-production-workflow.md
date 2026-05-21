@@ -187,6 +187,27 @@ uv run video2yt "<bilibili_url>" \
 
 Each segment becomes a 1920x1080 30fps h264 MP4 with danmaku burnt in. The output filename gets `_cut`, `_<speed>x`, `_preview` suffixes based on flags. The raw download (mp4 + danmaku XML) is preserved under `temp/<uploader>：<title>/` for caching.
 
+### Step 6.5 — Replace copyrighted background music
+
+**Input**: a burnt segment MP4 from Step 6.
+**Output**: `<segment>_clean.mp4` — same video, music bed swapped.
+**Tool**: `video2yt-music-swap`.
+
+```bash
+uv run video2yt-music-swap output/<project>/<uploader>：<title>/<bv>_with_danmaku_*.mp4
+```
+
+Isolates the streamer's commentary voice with Demucs, discards the original
+music + game SFX, and lays a stitched CC0 royalty-free music bed underneath
+(auto-ducked under the voice). This suppresses the streamer's copyrighted
+background music so the upload is very unlikely to draw a Content ID claim on
+it — **risk reduction, not a guarantee** (see the music-swap design spec).
+
+Run this **before** the subtitle step so its speech recognition works on
+clean isolated vocals. **Performance**: Demucs is slow — a 17-minute segment
+can take 10–30 minutes on CPU; faster on Apple Silicon (MPS). Plan accordingly,
+like the subtitle step.
+
 ### Step 7 — Merge into final video
 
 **Input**: ordered list of `--segment` + `--label` pairs (intro first), plus a working title.
@@ -375,7 +396,8 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
 - [ ] Step 5 — compose intro via `video2yt-compose`
 - [ ] Step 6 — burn N Bilibili segments via `video2yt`
-- [ ] Step 6.5 — add STT subtitles via `video2yt-subtitle` (per-segment; default flow uses danmaku-XML detection, OCR opt-in via `--enable-ocr`; whisperx ASR + Codex cleanup + style-aware split). Slower than realtime (~22 min cold / ~4 min warm on a 17-min segment). Skip when source already has burnt-in subs OR you want a faster turnaround
+- [ ] Step 6.5 — replace background music via `video2yt-music-swap`
+- [ ] Step 6.6 — add STT subtitles via `video2yt-subtitle` (per-segment; default flow uses danmaku-XML detection, OCR opt-in via `--enable-ocr`; whisperx ASR + Codex cleanup + style-aware split). Slower than realtime (~22 min cold / ~4 min warm on a 17-min segment). Skip when source already has burnt-in subs OR you want a faster turnaround
 - [ ] Step 7 — merge via `video2yt-merge`
 - [ ] Bonus — thumbnail (`video2yt-research-card` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`
