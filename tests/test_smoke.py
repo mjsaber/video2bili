@@ -6135,3 +6135,41 @@ def test_extract_audio_builds_ffmpeg_command(tmp_path, monkeypatch):
     # 44.1 kHz stereo PCM
     assert "44100" in cmd
     assert "2" in cmd
+
+
+def test_separate_vocals_runs_demucs_two_stems(tmp_path, monkeypatch):
+    wav = tmp_path / "audio.wav"
+    wav.write_bytes(b"x")
+    out_dir = tmp_path / "demucs_out"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        # Demucs writes <out>/<model>/<stem>/vocals.wav
+        stem_dir = out_dir / "htdemucs" / "audio"
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "vocals.wav").write_bytes(b"VOCALS")
+        (stem_dir / "no_vocals.wav").write_bytes(b"REST")
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    monkeypatch.setattr("video2yt.music_swap._pick_device", lambda: "cpu")
+    vocals = music_swap.separate_vocals(wav, "htdemucs", out_dir)
+
+    cmd = captured["cmd"]
+    assert "demucs" in cmd
+    assert "--two-stems" in cmd
+    assert "vocals" in cmd
+    assert "htdemucs" in cmd
+    assert vocals.name == "vocals.wav"
+    assert vocals.read_bytes() == b"VOCALS"
+
+
+def test_separate_vocals_raises_if_vocals_missing(tmp_path, monkeypatch):
+    wav = tmp_path / "audio.wav"
+    wav.write_bytes(b"x")
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run",
+                        lambda cmd, **k: MagicMock(returncode=0))
+    monkeypatch.setattr("video2yt.music_swap._pick_device", lambda: "cpu")
+    with pytest.raises(ValueError, match="vocals"):
+        music_swap.separate_vocals(wav, "htdemucs", tmp_path / "out")

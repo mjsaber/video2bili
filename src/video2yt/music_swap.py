@@ -44,3 +44,45 @@ def extract_audio(input_path: Path, wav_path: Path) -> None:
         str(wav_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def _pick_device() -> str:
+    """Return the Demucs device: ``mps`` on Apple Silicon if available, else ``cpu``.
+
+    CUDA is intentionally not selected here — the target machine is macOS.
+    """
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def separate_vocals(wav_path: Path, model: str, out_dir: Path) -> Path:
+    """Run Demucs in two-stem mode and return the path to ``vocals.wav``.
+
+    Demucs writes ``<out_dir>/<model>/<wav stem>/{vocals,no_vocals}.wav``.
+    ``no_vocals.wav`` (the music + game-SFX mix) is left on disk but ignored —
+    it is the Approach A trade-off (spec §2). Demucs runs as a subprocess via
+    ``python -m demucs`` so the call is mockable at the ``subprocess.run``
+    boundary.
+    """
+    device = _pick_device()
+    _log(f"running Demucs ({model}, device={device}) — this is slow on CPU")
+    cmd = [
+        sys.executable, "-m", "demucs",
+        "--two-stems", "vocals",
+        "-n", model,
+        "-d", device,
+        "-o", str(out_dir),
+        str(wav_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    vocals = out_dir / model / wav_path.stem / "vocals.wav"
+    if not vocals.exists():
+        raise ValueError(
+            f"Demucs did not produce {vocals} — separation failed"
+        )
+    return vocals

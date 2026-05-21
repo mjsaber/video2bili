@@ -650,7 +650,7 @@ git commit -m "feat(music_swap): add extract_audio"
 - Modify: `src/video2yt/music_swap.py`
 - Test: `tests/test_smoke.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_smoke.py`:
 
@@ -693,12 +693,12 @@ def test_separate_vocals_raises_if_vocals_missing(tmp_path, monkeypatch):
         music_swap.separate_vocals(wav, "htdemucs", tmp_path / "out")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_smoke.py -k separate_vocals -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'separate_vocals'`.
 
-- [ ] **Step 3: Implement `_pick_device` + `separate_vocals`**
+- [x] **Step 3: Implement `_pick_device` + `separate_vocals`**
 
 Append to `src/video2yt/music_swap.py`:
 
@@ -745,12 +745,12 @@ def separate_vocals(wav_path: Path, model: str, out_dir: Path) -> Path:
     return vocals
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_smoke.py -k separate_vocals -v`
 Expected: 2 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/video2yt/music_swap.py tests/test_smoke.py
