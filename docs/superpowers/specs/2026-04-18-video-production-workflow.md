@@ -383,6 +383,7 @@ All under `scripts/` (untracked by default — they're project-specific tooling,
 |---|---|---|---|
 | `back2back` | 2026-04-17 | [`DuglxlhKbzw`](https://www.youtube.com/watch?v=DuglxlhKbzw) | First end-to-end run. `intro.mp3` 21.89s → `intro.mp4` 21.97s (Δ < 0.1s). Final 21:55, 847 MB. 8m 24s upload. Originated the `compose -shortest` fix. |
 | `ringnaga` | 2026-05-02 | [`hP27PqfL6zY`](https://www.youtube.com/watch?v=hP27PqfL6zY) | First `card-tilt-right` thumbnail. Validated Codex `image_gen` as Gemini fallback. Surfaced 6 workflow improvements (term research, BG glossary, thumbnail formalization, transcribe multi-separator, OAuth auto-refresh, image backend), all batched after ship and folded into this spec on 2026-05-03. |
+| `redchroma` | 2026-05-23 | [`QwzUGIE3C6s`](https://www.youtube.com/watch?v=QwzUGIE3C6s) | First end-to-end run of `video2yt-music-swap` (Step 6.5). 22 Kevin MacLeod CC BY 3.0 tracks auto-downloaded from Internet Archive on first invocation. Demucs MPS path ~10 min per ~18-min segment. Hit a torchaudio backend bug on first attempt; fixed by `uv add soundfile` mid-pipeline. 瓦莉拉's source was VIP-locked at 480p, so the burnt segment had to be upscaled to 1920x1080 via ffmpeg before music-swap to meet merge's strict resolution rule. Final 36:37, 1.26 GB. 4m 43s upload. |
 
 ## 8. Per-project workflow template
 
