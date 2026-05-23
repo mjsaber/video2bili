@@ -6238,6 +6238,36 @@ def test_build_music_bed_single_track_no_crossfade(tmp_path, monkeypatch):
     assert captured["cmd"].count("-i") == 1
 
 
+def test_gate_vocals_builds_agate_command(tmp_path, monkeypatch):
+    vocals = tmp_path / "vocals.wav"
+    vocals.write_bytes(b"x")
+    out = tmp_path / "vocals_gated.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.gate_vocals(
+        vocals,
+        out,
+        threshold=0.015,
+        release_ms=250,
+    )
+
+    cmd = captured["cmd"]
+    joined = " ".join(cmd)
+    assert cmd[0] == "ffmpeg"
+    assert str(vocals) in cmd
+    assert str(out) in cmd
+    assert "agate=" in joined
+    assert "threshold=0.015" in joined
+    assert "release=250" in joined
+    assert "highpass=f=80" in joined
+    assert "pcm_s16le" in cmd
+
+
 def test_mix_with_ducking(tmp_path, monkeypatch):
     vocals = tmp_path / "vocals.wav"
     bed = tmp_path / "bed.wav"
@@ -6305,6 +6335,10 @@ def test_render_orchestrates_pipeline_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "video2yt.music_swap.separate_vocals",
         lambda w, m, d: calls.append("separate") or _touch(d / "v.wav"))
+    monkeypatch.setattr(
+        "video2yt.music_swap.gate_vocals",
+        lambda v, gp, threshold=0.015, release_ms=250:
+        calls.append("gate") or gp.write_bytes(b"g"))
     monkeypatch.setattr("video2yt.music_swap.music_library.ensure_manifest_cached",
                         lambda manifest, cache: calls.append("ensure_cache"))
     monkeypatch.setattr("video2yt.music_swap.music_library.load_manifest",
@@ -6329,9 +6363,50 @@ def test_render_orchestrates_pipeline_in_order(tmp_path, monkeypatch):
 
     assert result == out
     assert calls.index("extract") < calls.index("separate")
-    assert calls.index("separate") < calls.index("mix")
+    assert calls.index("separate") < calls.index("gate")
+    assert calls.index("gate") < calls.index("mix")
     assert calls.index("bed") < calls.index("mix")
     assert calls.index("mix") < calls.index("remux")
+
+
+def test_render_can_disable_vocal_gate(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "seg_clean.mp4"
+    calls = []
+
+    monkeypatch.setattr("video2yt.music_swap.validate.probe",
+                        lambda p: _mk_info(duration=300.0, width=1920,
+                                           height=1080, has_video=True,
+                                           has_audio=True, vcodec="h264"))
+    monkeypatch.setattr("video2yt.music_swap.extract_audio",
+                        lambda i, o: o.write_bytes(b"a"))
+    monkeypatch.setattr("video2yt.music_swap.separate_vocals",
+                        lambda w, m, d: _touch(d / "v.wav"))
+    monkeypatch.setattr("video2yt.music_swap.gate_vocals",
+                        lambda *a, **k: calls.append("gate"))
+    monkeypatch.setattr("video2yt.music_swap.music_library.ensure_manifest_cached",
+                        lambda manifest, cache: None)
+    monkeypatch.setattr("video2yt.music_swap.music_library.load_manifest",
+                        lambda: [])
+    monkeypatch.setattr("video2yt.music_swap.music_library.scan_cache",
+                        lambda cache: [_track("a.mp3", 400.0)])
+    monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
+                        lambda pool, dur, crossfade, seed: pool)
+    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
+                        lambda seq, dur, bed, crossfade=2.0: bed.write_bytes(b"b"))
+    monkeypatch.setattr("video2yt.music_swap.mix",
+                        lambda v, b, mv, dk, mp: mp.write_bytes(b"m"))
+    monkeypatch.setattr("video2yt.music_swap.remux",
+                        lambda i, m, o: o.write_bytes(b"o"))
+
+    music_swap.render(music_swap.MusicSwapInputs(
+        input_path=src,
+        output_path=out,
+        vocal_gate=False,
+    ))
+
+    assert calls == []
 
 
 def test_render_rejects_input_with_no_audio(tmp_path, monkeypatch):
@@ -6358,12 +6433,17 @@ def test_cli_parse_args_defaults():
     assert args.model == "htdemucs"
     assert args.seed is None
     assert args.keep_temp is False
+    assert args.no_vocal_gate is False
+    assert args.vocal_gate_threshold == 0.015
+    assert args.vocal_gate_release_ms == 250
 
 
 def test_cli_parse_args_all_flags():
     args = music_swap_cli.parse_args([
         "seg.mp4", "-o", "out.mp4", "--music-volume", "0.4",
         "--no-duck", "--model", "htdemucs_ft", "--seed", "7", "--keep-temp",
+        "--no-vocal-gate", "--vocal-gate-threshold", "0.02",
+        "--vocal-gate-release-ms", "400",
     ])
     assert args.output == Path("out.mp4")
     assert args.music_volume == 0.4
@@ -6371,6 +6451,9 @@ def test_cli_parse_args_all_flags():
     assert args.model == "htdemucs_ft"
     assert args.seed == 7
     assert args.keep_temp is True
+    assert args.no_vocal_gate is True
+    assert args.vocal_gate_threshold == 0.02
+    assert args.vocal_gate_release_ms == 400
 
 
 def test_cli_preflight_fails_without_ffmpeg(monkeypatch):
@@ -6401,6 +6484,9 @@ def test_cli_run_derives_default_output(tmp_path, monkeypatch):
     music_swap_cli.run(args)
     assert captured["inputs"].output_path == src.with_name(
         "BV123_with_danmaku_clean.mp4")
+    assert captured["inputs"].vocal_gate is True
+    assert captured["inputs"].vocal_gate_threshold == 0.015
+    assert captured["inputs"].vocal_gate_release_ms == 250
 
 
 def test_cli_run_rejects_missing_input(tmp_path, monkeypatch):
@@ -6455,6 +6541,9 @@ def test_render_writes_music_credits_sidecar(tmp_path, monkeypatch):
                         lambda i, o: o.write_bytes(b"a"))
     monkeypatch.setattr("video2yt.music_swap.separate_vocals",
                         lambda w, m, d: _touch(d / "v.wav"))
+    monkeypatch.setattr("video2yt.music_swap.gate_vocals",
+                        lambda v, gp, threshold=0.015, release_ms=250:
+                        gp.write_bytes(b"g"))
     monkeypatch.setattr("video2yt.music_swap.music_library.ensure_manifest_cached",
                         lambda manifest, cache: None)
     manifest = [{"name": "at_rest", "url": "http://x/At%20Rest.mp3",

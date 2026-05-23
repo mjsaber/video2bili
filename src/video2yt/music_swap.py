@@ -30,6 +30,9 @@ class MusicSwapInputs:
     model: str = "htdemucs"
     seed: int | None = None
     keep_temp: bool = False
+    vocal_gate: bool = True
+    vocal_gate_threshold: float = 0.015
+    vocal_gate_release_ms: int = 250
 
 
 def extract_audio(input_path: Path, wav_path: Path) -> None:
@@ -86,6 +89,42 @@ def separate_vocals(wav_path: Path, model: str, out_dir: Path) -> Path:
             f"Demucs did not produce {vocals} — separation failed"
         )
     return vocals
+
+
+def gate_vocals(
+    vocals_path: Path,
+    gated_path: Path,
+    threshold: float = 0.015,
+    release_ms: int = 250,
+) -> None:
+    """Mute low-level residual music bleed in the isolated vocals stem.
+
+    This is a voice-activity-style energy gate, not a semantic speech model.
+    Demucs often leaves quiet BGM in ``vocals.wav`` during non-speech regions;
+    ``agate`` pushes those regions to silence while keeping louder streamer
+    speech. ``highpass`` removes low-end rumble before the gate/mix.
+
+    ``threshold`` is a linear ffmpeg amplitude value. 0.015 is about -36.5 dBFS,
+    chosen from the redchroma probe where non-speech residual vocals clustered
+    below roughly -45 dBFS and speech peaks clustered around -20 dBFS.
+    """
+    if threshold <= 0 or threshold >= 1:
+        raise ValueError("vocal gate threshold must be between 0 and 1")
+    if release_ms <= 0:
+        raise ValueError("vocal gate release must be positive milliseconds")
+    filtergraph = (
+        "highpass=f=80,"
+        f"agate=threshold={threshold}:ratio=20:range=0:"
+        f"attack=10:release={release_ms}:detection=rms"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(vocals_path),
+        "-af", filtergraph,
+        "-c:a", "pcm_s16le",
+        str(gated_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
 def build_music_bed(
@@ -247,6 +286,21 @@ def render(inputs: MusicSwapInputs) -> Path:
         _log("isolating commentary voice")
         demucs_out = work / "demucs"
         vocals = separate_vocals(wav, inputs.model, demucs_out)
+        voice_for_mix = vocals
+        if inputs.vocal_gate:
+            _log(
+                "gating isolated vocals "
+                f"(threshold={inputs.vocal_gate_threshold}, "
+                f"release_ms={inputs.vocal_gate_release_ms})"
+            )
+            gated = work / "vocals_gated.wav"
+            gate_vocals(
+                vocals,
+                gated,
+                threshold=inputs.vocal_gate_threshold,
+                release_ms=inputs.vocal_gate_release_ms,
+            )
+            voice_for_mix = gated
 
         _log("building royalty-free music bed")
         manifest = music_library.load_manifest()
@@ -260,7 +314,7 @@ def render(inputs: MusicSwapInputs) -> Path:
 
         _log(f"mixing (music_volume={inputs.music_volume}, duck={inputs.duck})")
         mixed = work / "mixed.wav"
-        mix(vocals, bed, inputs.music_volume, inputs.duck, mixed)
+        mix(voice_for_mix, bed, inputs.music_volume, inputs.duck, mixed)
 
         _log("remuxing into the video")
         remux(inputs.input_path, mixed, inputs.output_path)

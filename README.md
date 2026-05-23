@@ -232,6 +232,47 @@ uv run video2yt-merge \
 - **Per-segment audio normalization**: each segment's audio goes through `loudnorm=I=-14:TP=-1:LRA=11` (YouTube reference loudness) before concatenation.
 - **Chapters**: each segment becomes one chapter. The officially-supported way to get chapters onto YouTube is via the video description, so `<title>_chapters.txt` is written in YouTube's text format (first chapter at `00:00`) — paste it into the description as a single ascending block. The same chapters are also embedded into the output MP4 (`-map_metadata`/`-map_chapters`) as a best-effort extra; this isn't officially documented as supported by YouTube, so don't treat it as a fallback for a missing/broken description block.
 
+## Replace background music / reduce Content ID risk
+
+`video2yt-music-swap` isolates streamer commentary with Demucs, discards the non-vocal mix, gates low-level non-speech residual bleed from the vocals stem, then mixes in royalty-free music.
+
+```bash
+uv run video2yt-music-swap path/to/BVxxx_with_danmaku.mp4 --seed 1
+```
+
+Useful A/B options:
+
+```bash
+# Disable the post-Demucs vocal gate for comparison
+uv run video2yt-music-swap path/to/input.mp4 --no-vocal-gate -o no_gate.mp4
+
+# More aggressive bleed suppression; may cut quiet speech
+uv run video2yt-music-swap path/to/input.mp4 --vocal-gate-threshold 0.025 -o stronger_gate.mp4
+
+# Softer release, less choppy but leaves more tails
+uv run video2yt-music-swap path/to/input.mp4 --vocal-gate-release-ms 400 -o softer_gate.mp4
+```
+
+Testing a short sample before a full run:
+
+```bash
+SRC='path/to/BVxxx_with_danmaku.mp4'
+SAMPLE='/tmp/video2yt_music_swap_probe_60s.mp4'
+ffmpeg -hide_banner -y -ss 00:05:00 -t 60 -i "$SRC" -map 0:v:0 -map 0:a:0 -c copy "$SAMPLE"
+uv run video2yt-music-swap "$SAMPLE" --no-vocal-gate --music-volume 0.0 -o /tmp/no_gate.mp4
+uv run video2yt-music-swap "$SAMPLE" --music-volume 0.0 -o /tmp/gated.mp4
+
+for f in /tmp/no_gate.mp4 /tmp/gated.mp4; do
+  echo "--- $f"
+  ffmpeg -hide_banner -nostats -i "$f" -af volumedetect -vn -f null - 2>&1 | grep -E 'mean_volume|max_volume'
+done
+```
+
+Whole-file `volumedetect mean_volume` is only a coarse sanity check because loud speech can dominate the average. For better validation, compare per-second RMS: the gated output should have much lower median / low-percentile RMS than the no-gate output while keeping speech-heavy seconds in the same rough range. Always listen to a short A/B clip too: if speech sounds choppy, lower `--vocal-gate-threshold` or increase `--vocal-gate-release-ms`.
+
+Trade-off: the gate mostly helps when the streamer is not speaking. If copyrighted music leaks under active speech, no energy gate can remove it perfectly without damaging the voice. For high-risk clips, compare a 60-second sample before processing the full video.
+
+
 ## Development
 
 ```bash

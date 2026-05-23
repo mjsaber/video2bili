@@ -54,6 +54,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Disable sidechain ducking; mix the bed at a flat level",
     )
     parser.add_argument(
+        "--no-vocal-gate", action="store_true",
+        help=(
+            "Disable post-Demucs vocal gating. Useful for A/B comparison; "
+            "default is to gate low-level non-speech bleed."
+        ),
+    )
+    parser.add_argument(
+        "--vocal-gate-threshold", type=float, default=0.015,
+        help=(
+            "ffmpeg agate threshold as linear amplitude (default: 0.015, "
+            "about -36.5 dBFS). Lower keeps more voice but more BGM bleed; "
+            "higher suppresses more bleed but may clip quiet speech."
+        ),
+    )
+    parser.add_argument(
+        "--vocal-gate-release-ms", type=int, default=250,
+        help="Vocal gate release time in milliseconds (default: 250).",
+    )
+    parser.add_argument(
         "--model", default="htdemucs",
         help="Demucs separation model (default: htdemucs)",
     )
@@ -83,6 +102,9 @@ def run(args: argparse.Namespace) -> Path:
         model=args.model,
         seed=args.seed,
         keep_temp=args.keep_temp,
+        vocal_gate=not args.no_vocal_gate,
+        vocal_gate_threshold=args.vocal_gate_threshold,
+        vocal_gate_release_ms=args.vocal_gate_release_ms,
     )
     _log(f"music-swapping {args.input.name} -> {output.name}")
     return music_swap.render(inputs)
