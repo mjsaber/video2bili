@@ -259,7 +259,27 @@ All `--segment` inputs MUST be 1920x1080 30fps h264 (strict) AND ≥10s long, wi
 }
 ```
 
-Title format used in this project: `[爐石戰棋]S13 <topic> | <streamer name> 實戰 [彈幕]`. For Taiwan audience, primary description is 繁體 with TW grammar; append 简体 below as secondary.
+**Title format (locked):**
+
+```
+「英雄戰場」S<season><topic>完整教學 | <streamer1> × <streamer2> 實戰 [彈幕]
+```
+
+Examples:
+- `「英雄戰場」S13龍族崛起！紅龍滾雪球完整教學 | 郭楓荷 × 瓦莉拉 實戰 [彈幕]`
+- `「英雄戰場」S13宰割亡靈完整教學 | 郭楓荷 × 夜吹 實戰 [彈幕]`
+
+Rules:
+- Prefix is the player-口語 short name `「英雄戰場」` with Japanese-style 「」 brackets (NOT `[]`, NOT `《》`). The official full name 「爐石戰記：英雄戰場」 is too long for the title slot — keep it for the description body's first paragraph as a branding cue.
+- **No space** between `」` and the season number; no space between season number and topic — compact CJK style.
+- Season prefix is **uppercase `S`** (e.g. `S13`).
+- Hook phrases (e.g. `龍族崛起！`) can be embedded as part of the `<topic>` slot when a catchier title is needed.
+- Topic + `完整教學`, pipe `|` with single spaces on both sides.
+- Streamer names in 繁體, joined by ` × ` (with spaces) when multiple.
+- Final tag `[彈幕]` with half-width brackets.
+- DO NOT use `[爐石戰棋]` (China/B站 用法), `[Hearthstone Battlegrounds]` (global English), or 简体字 anywhere in the title.
+
+For Taiwan audience, primary description is 繁體 with TW grammar; append 简体 below as secondary. The first paragraph of the 繁體 description should mention `「爐石戰記：英雄戰場」` once so the channel branding stays connected to Blizzard's Taiwan localization.
 
 **Chapter timestamps in the description — required, exactly one ascending block.** The description is the **only officially-supported** way to get the YouTube progress-bar segmentation. Rules YouTube enforces:
 
@@ -273,47 +293,90 @@ A duplicated block (e.g. one under 繁體, another under 简体) makes the seque
 
 ### Bonus — YouTube thumbnail
 
-**Input**: bg image (Step 3 style), logo PNG, card art PNG, title text.
+**Input**: bg image (Step 3 style), logo PNG, **zhTW BGS** card art PNG, 8-char two-tier title.
 **Output**: `output/<project>/thumbnail.png` (1280x720).
-**Tools**: `video2yt-research-card` (download card art), `scripts/thumbnail_compose.py` (compose).
+**Tools**: `video2yt-research-card` (download card art), `video2yt-thumbnail` (base render), per-project `polish_thumbnail.py` (vignette + 8-char title — copied verbatim from a reference project).
 
-Three-stage approach (the new default `card-tilt-right` layout, locked in on `ringnaga`):
+**Locked layout (2026-05-10, supersedes earlier `ringnaga` vertical-4-char recipe):**
 
-1. Background via image-gen (atmosphere only, NO text/logos/people in prompt — reserve quiet zones top-left for logo, top-right for season text, left for vertical title, right for the card).
-2. Card art via `video2yt-research-card` (auto-detects BG vs constructed style).
-3. Pillow composites: logo top-left + season top-right + vertical drop-shadow title left + tilted card right.
+- Canvas: **1280x720**.
+- **Top-left**: HSBG logo (`assets/hsbg_logo.png`), `--logo-target-w 180`, `--logo-margin 16`.
+- **Left half (below logo)**: **8-char two-tier title** (formula below).
+- **No season text** (S13 etc) — removed because it competed with the card.
+- **Right side**: card art bleeds off right + top + bottom. `--card-target-h 1100`, `--card-right-inset -180`, `--card-tilt-deg -18`, `--card-glow-expand 50`. Card supports the title; title is the primary message.
+- **Vignette**: radial darken corners ~30% in the polish pass.
+
+**Title formula — 8-char two-tier:**
+
+- **Top row (4 chars, primary):** the 流派 canonical 4-char name (e.g. `護戒娜迦`, `紅龍滾雪`).
+- **Bottom row (4 chars, secondary):** quantifiable / promise payoff. Pick from 5 directions:
+  - **Numbers** (preferred, most click-worthy) — `兩千攻擊` style absolute-value.
+  - **Hyperbole** — `太超模了` / `根本崩盤`.
+  - **Tutorial promise** — `必學陣容`.
+  - **Mechanic teaser** — 4-char strategy explainer.
+  - **Action / emotion** — visceral verb-driven phrase.
+
+Always present the 5 directions to the user with examples drawn from the source-video titles, then propose 3–4 concrete 4-char picks under the chosen direction. **Do not pick alone.**
+
+**Visual params for the title (rendered in the polish pass, NOT the CLI — the CLI only supports single-row titles):**
+
+```
+row 1 (primary):    text=<流派 4 字>
+                    font=Hiragino Sans GB W6, font_size=180
+                    fill=pure white (255,255,255), stroke=black 16px
+                    drop-shadow: offset (10,14), blur 12, alpha 235
+                    char_gap=-10  (slight overlap, "stamp" feel)
+                    position: x=20, y=140
+
+row 2 (secondary):  text=<4 字 payoff>
+                    font=Hiragino Sans GB W6, font_size=130
+                    fill=saturated gold (245,195,75), stroke=dark brown (70,25,0) 12px
+                    drop-shadow: offset (7,10), blur 10, alpha 220
+                    char_gap=-6
+                    position: x=30, y=380
+```
+
+**Card art**: use the **zhTW BGS art** for any BG card (繁體 card name matches the Taiwan audience). `video2yt-research-card` currently downloads enUS only — manually `curl https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<id>.png` into `assets/cards/<slug>_zhTW_bgs_512.png` until the CLI grows a `--locale` flag.
+
+**Background**: Codex `image_gen` via `video2yt-image --backend codex` (default), 16:9 atmospheric tavern/scene matched to topic. **No figures, characters, text, or logos** in the prompt. Keep top-left, top-right, far-left, and far-right bands darker so logo + title + card overlay cleanly.
+
+**Invocation pattern:**
 
 ```bash
 # 1. Background
-uv run python scripts/image_quick.py \
+uv run video2yt-image --backend codex \
   --prompt-file output/<project>/thumbnail_bg_prompt.txt \
   --output      output/<project>/thumbnail_bg.png \
   --save-raw    output/<project>/thumbnail_bg_raw.png \
   --target-size 1280x720 --fit cover
 
-# 2. Card art (downloads to assets/cards/<slug>_512.png by default)
-uv run video2yt-research-card --name "Ring Bearer"
+# 2. zhTW card art (manual curl until --locale lands)
+curl -o assets/cards/<slug>_zhTW_bgs_512.png \
+  https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<id>.png
 
-# 3. Composite
-uv run python scripts/thumbnail_compose.py \
-  --bg          output/<project>/thumbnail_bg.png \
-  --logo        assets/hsbg_logo.png \
-  --card        assets/cards/ring_bearer_512.png \
-  --title       "護戒娜迦" \
-  --season      "S13" \
+# 3. Base render — title pushed offscreen so CLI's vertical-title rendering doesn't paint
+uv run video2yt-thumbnail \
+  --bg     output/<project>/thumbnail_bg.png \
+  --logo   assets/hsbg_logo.png \
+  --card   assets/cards/<slug>_zhTW_bgs_512.png \
+  --title  "X" --season "" \
   --orientation card-tilt-right \
-  --logo-target-w 280 --logo-margin 20 \
-  --font-size   100 \
-  --title-anchor-x-abs 350 \
-  --output      output/<project>/thumbnail.png
+  --logo-target-w 180 --logo-margin 16 \
+  --font-size 1 --stroke-width 0 \
+  --title-anchor-x-abs 9000 \
+  --shared-top-y 30 \
+  --card-target-h 1100 --card-right-inset -180 \
+  --card-glow-expand 50 --card-tilt-deg -18 \
+  --output output/<project>/thumbnail_pre_polish.png
+
+# 4. Polish pass (vignette + 8-char title). Copy polish_thumbnail.py from output/zaige/
+#    verbatim and swap only the two render_row(...) strings.
+uv run python output/<project>/polish_thumbnail.py
 ```
 
-`thumbnail_compose.py` supports three orientations:
-- `card-tilt-right` (default): logo top-left, season top-right, vertical title with soft drop-shadow on the left, card art tilted right. The "focus object" makes the thumbnail read at a glance.
-- `vertical-left` (legacy): vertical title stacked left, no card. Auto-shrinks font when overflow.
-- `horizontal-bottom` (legacy): title across bottom.
+`thumbnail_compose.py` still supports three orientations (`card-tilt-right` default, plus `vertical-left` and `horizontal-bottom` legacy), but **all new projects MUST use `card-tilt-right` + the 2-tier polish-pass title**. Do not invent a new layout per project.
 
-`video2yt-research-card` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL) and downloads the 512px art from `art.hearthstonejson.com/v1/{render|bgs}/latest/enUS/512x/<id>.png`. `--style auto` (default) picks `bgs` for BATTLEGROUNDS-set cards, `render` for constructed.
+`video2yt-research-card` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL). `--style auto` picks `bgs` for BATTLEGROUND-set cards, `render` for constructed.
 
 ### Step 9 — Upload to YouTube
 
@@ -335,7 +398,7 @@ uv run python scripts/youtube_upload.py \
 Behavior:
 
 1. OAuth via `InstalledAppFlow.run_local_server(port=0)`. Browser opens for consent on first run; token cached to `youtube_token.json` after.
-2. Lists authenticated channels via `channels.list(mine=True)`. **Aborts** if `expected_channel_id` from metadata is not in the list (catches wrong-account auth).
+2. Lists authenticated channels via `channels.list(mine=True)`. **Aborts** if `expected_channel_id` from metadata is not in the list (catches wrong-account auth). All uploads from this repo go to channel **`UCEgIrCo0pR6DyyrXuSn3wBg`** — use it as `expected_channel_id`.
 3. Resumable upload via `MediaFileUpload` with 8 MB chunks. Progress logged every ≥5%.
 4. Uploads thumbnail via `thumbnails().set()` after video upload completes.
 5. Prints watch URL + studio URL.
