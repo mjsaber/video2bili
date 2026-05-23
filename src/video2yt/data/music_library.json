@@ -96,6 +96,86 @@
       "duration": 97.6,
       "license": "CC BY 3.0",
       "attribution": "\"Arcadia\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "autumn_day",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Autumn%20Day.mp3",
+      "sha256": "74b766d726f2292cb229b2961ea914c320285af382aaeb001579298384d7ae01",
+      "duration": 184.8,
+      "license": "CC BY 3.0",
+      "attribution": "\"Autumn Day\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "ascending_the_vale",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Ascending%20the%20Vale.mp3",
+      "sha256": "a0ab3aae9a942d797c381df8d914dfef453e7e455c1c6333d1916d59ba005353",
+      "duration": 247.6,
+      "license": "CC BY 3.0",
+      "attribution": "\"Ascending the Vale\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "bathed_in_the_light",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Bathed%20in%20the%20Light.mp3",
+      "sha256": "0254d63ce0ba7ecac0bda0fa01ff3ae58915bbc45d0b2d4ac20c1e8bc3c80b2d",
+      "duration": 166.1,
+      "license": "CC BY 3.0",
+      "attribution": "\"Bathed in the Light\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "black_bird",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Black%20Bird.mp3",
+      "sha256": "ed8b0a3629239d4b144367dc782249cfbb703200250e0ca33b6309b00ef337f0",
+      "duration": 174.2,
+      "license": "CC BY 3.0",
+      "attribution": "\"Black Bird\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "blue_feather",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/BlueFeather.mp3",
+      "sha256": "b41b5bdd74d03e41a0632b4af2c982398f4c0fc17d8e6d1c3ba2a33b2188cb3f",
+      "duration": 278.1,
+      "license": "CC BY 3.0",
+      "attribution": "\"BlueFeather\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "bicycle",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Bicycle.mp3",
+      "sha256": "ce282acb37bb38a314dd869ee3b8088d4edca5b1ec098086efc6b461324b983b",
+      "duration": 282.4,
+      "license": "CC BY 3.0",
+      "attribution": "\"Bicycle\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "angels_we_have_heard_piano",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Angels%20We%20Have%20Heard%20%28piano%29.mp3",
+      "sha256": "202b71e4ddccf9b94f745d0475cd1564c19a287768622446a1bf992ca41ff549",
+      "duration": 244.1,
+      "license": "CC BY 3.0",
+      "attribution": "\"Angels We Have Heard (piano)\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "allada",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Allada.mp3",
+      "sha256": "5afef97467ef2738016d1b604a3797165c8c076f90b86c379cae0b05c8a9ac1a",
+      "duration": 223.4,
+      "license": "CC BY 3.0",
+      "attribution": "\"Allada\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "aurea_carmina",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Aurea%20Carmina.mp3",
+      "sha256": "042d981e68f149fb0e5c34a44be64f6775262f1c3c2cdbda69a401903bad49f9",
+      "duration": 211.1,
+      "license": "CC BY 3.0",
+      "attribution": "\"Aurea Carmina\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "backed_vibes_clean",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Backed%20Vibes%20Clean.mp3",
+      "sha256": "e8dbe9ebab11de3e492fc6a95a4d9523d9a52845f289c4205569268224d521e9",
+      "duration": 228.4,
+      "license": "CC BY 3.0",
+      "attribution": "\"Backed Vibes Clean\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
     }
   ]
 }
