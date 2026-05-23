@@ -295,7 +295,7 @@ A duplicated block (e.g. one under 繁體, another under 简体) makes the seque
 
 **Input**: bg image (Step 3 style), logo PNG, **zhTW BGS** card art PNG, 8-char two-tier title.
 **Output**: `output/<project>/thumbnail.png` (1280x720).
-**Tools**: `video2yt-research-card` (download card art), `video2yt-thumbnail` (base render), per-project `polish_thumbnail.py` (vignette + 8-char title — copied verbatim from a reference project).
+**Tools**: `video2yt-research-card` (download card art), `video2yt-thumbnail` (base render), `scripts/thumbnail_polish.py` (committed polish pass — vignette + 8-char two-tier title).
 
 **Locked layout (2026-05-10, supersedes earlier `ringnaga` vertical-4-char recipe):**
 
@@ -369,9 +369,12 @@ uv run video2yt-thumbnail \
   --card-glow-expand 50 --card-tilt-deg -18 \
   --output output/<project>/thumbnail_pre_polish.png
 
-# 4. Polish pass (vignette + 8-char title). Copy polish_thumbnail.py from output/zaige/
-#    verbatim and swap only the two render_row(...) strings.
-uv run python output/<project>/polish_thumbnail.py
+# 4. Polish pass (vignette + 8-char two-tier title)
+uv run python scripts/thumbnail_polish.py \
+  --input     output/<project>/thumbnail_pre_polish.png \
+  --output    output/<project>/thumbnail.png \
+  --primary   "<4 字流派>" \
+  --secondary "<4 字 payoff>"
 ```
 
 `thumbnail_compose.py` still supports three orientations (`card-tilt-right` default, plus `vertical-left` and `horizontal-bottom` legacy), but **all new projects MUST use `card-tilt-right` + the 2-tier polish-pass title**. Do not invent a new layout per project.
