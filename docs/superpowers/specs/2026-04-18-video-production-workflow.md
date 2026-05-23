@@ -187,6 +187,17 @@ uv run video2yt "<bilibili_url>" \
 
 Each segment becomes a 1920x1080 30fps h264 MP4 with danmaku burnt in. The output filename gets `_cut`, `_<speed>x`, `_preview` suffixes based on flags. The raw download (mp4 + danmaku XML) is preserved under `temp/<uploader>：<title>/` for caching.
 
+**Per-streamer subtitle status (Step 6.6 implication):**
+
+| Streamer | Burnt-in subs? | Step 6.6 action |
+|---|---|---|
+| 炉石郭枫荷 (郭楓荷) | YES — source already has subs at the bottom | `video2yt-subtitle ... --force-skip` |
+| 炉石传说瓦莉拉 | NO | run subtitle pipeline (default) |
+| 炉石Kimmy | NO | run subtitle pipeline (default) |
+| 高冷难神衣锦夜行 (夜吹) | NO | run subtitle pipeline (default) |
+
+For any new streamer, eyeball the source video once before committing — if the streamer's stream has a bottom subtitle track (most Bilibili UP 主 add their own), skip subtitle generation to save the ~24 min cold pipeline cost AND avoid double-subtitle visual mess.
+
 ### Step 6.5 — Replace copyrighted background music
 
 **Input**: a burnt segment MP4 from Step 6.
