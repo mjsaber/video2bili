@@ -215,7 +215,16 @@ def test_check_output_fails_preview_duration_mismatch():
 from video2yt import download
 
 
-def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
+@pytest.fixture
+def good_av_durations(monkeypatch):
+    """Default: cached/downloaded files pass the A/V duration consistency check."""
+    monkeypatch.setattr(
+        "video2yt.download._is_av_duration_consistent",
+        lambda p: True,
+    )
+
+
+def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch, good_av_durations):
     captured = {}
 
     def fake_run(cmd, **kwargs):
@@ -269,7 +278,7 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch):
     assert xml == tmp_path / "BV191DpBmE2t.danmaku.xml"
 
 
-def test_fetch_uses_quality_720(tmp_path, monkeypatch):
+def test_fetch_uses_quality_720(tmp_path, monkeypatch, good_av_durations):
     def fake_run(cmd, **kwargs):
         fmt_idx = cmd.index("-f")
         assert "height<=720" in cmd[fmt_idx + 1]
@@ -287,7 +296,7 @@ def test_fetch_uses_quality_720(tmp_path, monkeypatch):
     ("h264", "[vcodec^=avc1]"),
     ("h265", "[vcodec^=hev1]"),
 ])
-def test_fetch_format_spec_uses_codec(tmp_path, monkeypatch, codec, expected_tag):
+def test_fetch_format_spec_uses_codec(tmp_path, monkeypatch, codec, expected_tag, good_av_durations):
     def fake_run(cmd, **kwargs):
         fmt_idx = cmd.index("-f")
         assert expected_tag in cmd[fmt_idx + 1]
@@ -300,7 +309,7 @@ def test_fetch_format_spec_uses_codec(tmp_path, monkeypatch, codec, expected_tag
     download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV", codec=codec)
 
 
-def test_fetch_format_spec_auto_has_no_codec_filter(tmp_path, monkeypatch):
+def test_fetch_format_spec_auto_has_no_codec_filter(tmp_path, monkeypatch, good_av_durations):
     def fake_run(cmd, **kwargs):
         fmt_idx = cmd.index("-f")
         assert "[vcodec^=" not in cmd[fmt_idx + 1]
@@ -336,7 +345,7 @@ def test_fetch_raises_when_ass_file_missing(tmp_path, monkeypatch):
         download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
 
 
-def test_fetch_uses_cache_when_files_exist(tmp_path, monkeypatch):
+def test_fetch_uses_cache_when_files_exist(tmp_path, monkeypatch, good_av_durations):
     """When temp_dir already contains both video and xml, fetch skips yt-dlp."""
     (tmp_path / "BV123.mp4").write_bytes(b"cached video")
     (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i></i>")
@@ -356,7 +365,7 @@ def test_fetch_uses_cache_when_files_exist(tmp_path, monkeypatch):
     assert xml == tmp_path / "BV123.danmaku.xml"
 
 
-def test_fetch_downloads_when_no_cache(tmp_path, monkeypatch):
+def test_fetch_downloads_when_no_cache(tmp_path, monkeypatch, good_av_durations):
     """Empty temp_dir — fetch calls yt-dlp and returns from_cache=False."""
     call_count = {"n": 0}
     def fake_run(cmd, **kwargs):
@@ -373,7 +382,7 @@ def test_fetch_downloads_when_no_cache(tmp_path, monkeypatch):
     assert from_cache is False
 
 
-def test_fetch_downloads_when_xml_missing_from_cache(tmp_path, monkeypatch):
+def test_fetch_downloads_when_xml_missing_from_cache(tmp_path, monkeypatch, good_av_durations):
     """Partial cache (only video) -> cache miss -> full download."""
     (tmp_path / "BV123.mp4").write_bytes(b"old video")
 
@@ -393,7 +402,7 @@ def test_fetch_downloads_when_xml_missing_from_cache(tmp_path, monkeypatch):
     assert from_cache is False
 
 
-def test_fetch_downloads_when_video_missing_from_cache(tmp_path, monkeypatch):
+def test_fetch_downloads_when_video_missing_from_cache(tmp_path, monkeypatch, good_av_durations):
     """Partial cache (only xml) -> cache miss -> full download."""
     (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i></i>")
 
@@ -409,6 +418,116 @@ def test_fetch_downloads_when_video_missing_from_cache(tmp_path, monkeypatch):
     )
     assert call_count["n"] == 1
     assert from_cache is False
+
+
+def test_fetch_quarantines_truncated_audio_cache_and_redownloads(tmp_path, monkeypatch):
+    """Cached file whose audio stream is shorter than video gets renamed
+    to *.broken and yt-dlp is invoked for a fresh download. Reproduces the
+    BV1UodgBJEXj 2026-05-23 incident."""
+    (tmp_path / "BV123.mp4").write_bytes(b"broken cached video")
+    (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i>old</i>")
+
+    # First probe: cached file is broken. Second probe (post-download): healthy.
+    probe_results = [False, True]
+    def fake_consistent(path):
+        return probe_results.pop(0)
+    monkeypatch.setattr(
+        "video2yt.download._is_av_duration_consistent", fake_consistent
+    )
+
+    call_count = {"n": 0}
+    def fake_run(cmd, **kwargs):
+        call_count["n"] += 1
+        (tmp_path / "BV123.mp4").write_bytes(b"fresh video")
+        (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i>new</i>")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    video, xml, from_cache = download.fetch(
+        "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
+    )
+    assert call_count["n"] == 1  # yt-dlp invoked despite cache presence
+    assert from_cache is False
+    assert (tmp_path / "BV123.mp4.broken").exists()
+    assert (tmp_path / "BV123.danmaku.xml.broken").exists()
+    assert video.read_bytes() == b"fresh video"
+
+
+def test_fetch_raises_when_fresh_download_has_truncated_audio(tmp_path, monkeypatch):
+    """If a fresh yt-dlp download still has the audio-video duration
+    mismatch, fail loudly — don't silently propagate the broken file."""
+    def fake_consistent(path):
+        return False
+    monkeypatch.setattr(
+        "video2yt.download._is_av_duration_consistent", fake_consistent
+    )
+    monkeypatch.setattr(
+        "video2yt.download._stream_durations",
+        lambda p: (1146.9, 220.7),
+    )
+
+    def fake_run(cmd, **kwargs):
+        (tmp_path / "BV123.mp4").write_bytes(b"truncated")
+        (tmp_path / "BV123.danmaku.xml").write_bytes(b"<i></i>")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError, match="truncated audio"):
+        download.fetch(
+            "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
+        )
+
+
+def test_stream_durations_parses_ffprobe_json(tmp_path, monkeypatch):
+    """_stream_durations returns (video_dur, audio_dur) from ffprobe streams."""
+    fake_file = tmp_path / "test.mp4"
+    fake_file.write_bytes(b"x")
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "ffprobe"
+        result = MagicMock()
+        result.stdout = json.dumps({
+            "streams": [
+                {"codec_type": "video", "duration": "1146.93"},
+                {"codec_type": "audio", "duration": "220.68"},
+            ]
+        })
+        return result
+
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    v, a = download._stream_durations(fake_file)
+    assert v == pytest.approx(1146.93)
+    assert a == pytest.approx(220.68)
+
+
+def test_is_av_duration_consistent_passes_audio_only_off(tmp_path, monkeypatch):
+    """File with no audio stream is treated as consistent (audio-less video)."""
+    fake_file = tmp_path / "noaudio.mp4"
+    fake_file.write_bytes(b"x")
+    monkeypatch.setattr(
+        "video2yt.download._stream_durations", lambda p: (60.0, 0.0)
+    )
+    assert download._is_av_duration_consistent(fake_file) is True
+
+
+def test_is_av_duration_consistent_fails_on_large_mismatch(tmp_path, monkeypatch):
+    """Audio shorter than video by more than the tolerance is inconsistent."""
+    fake_file = tmp_path / "broken.mp4"
+    fake_file.write_bytes(b"x")
+    monkeypatch.setattr(
+        "video2yt.download._stream_durations", lambda p: (1146.9, 220.7)
+    )
+    assert download._is_av_duration_consistent(fake_file) is False
+
+
+def test_is_av_duration_consistent_passes_on_small_mismatch(tmp_path, monkeypatch):
+    """Sub-tolerance drift (frame-boundary rounding) still passes."""
+    fake_file = tmp_path / "ok.mp4"
+    fake_file.write_bytes(b"x")
+    monkeypatch.setattr(
+        "video2yt.download._stream_durations", lambda p: (1146.95, 1146.93)
+    )
+    assert download._is_av_duration_consistent(fake_file) is True
 
 
 def test_generate_ass_passes_font_params(tmp_path, monkeypatch):

@@ -22,6 +22,50 @@ def get_metadata(url: str, browser: str) -> dict:
     return json.loads(result.stdout)
 
 
+def _stream_durations(path: Path) -> tuple[float, float]:
+    """Return ``(video_duration, audio_duration)`` in seconds for ``path``.
+
+    Either may be ``0.0`` if the stream is missing. Used by :func:`fetch` to
+    detect cached/downloaded files where yt-dlp's merger truncated audio
+    (BV1UodgBJEXj from 2026-05-23 muxed only 220s of a 1147s segment because
+    of a transient merger hiccup; the cache then served the broken file
+    forever on subsequent runs).
+    """
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-print_format", "json",
+            "-show_streams",
+            str(path),
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    data = json.loads(result.stdout)
+    v_dur = 0.0
+    a_dur = 0.0
+    for s in data.get("streams", []):
+        if s.get("codec_type") == "video" and v_dur == 0.0:
+            v_dur = float(s.get("duration") or 0.0)
+        elif s.get("codec_type") == "audio" and a_dur == 0.0:
+            a_dur = float(s.get("duration") or 0.0)
+    return v_dur, a_dur
+
+
+DURATION_MISMATCH_TOLERANCE_SECONDS = 2.0
+
+
+def _is_av_duration_consistent(path: Path) -> bool:
+    """True if the file's audio stream duration is within tolerance of video.
+
+    Files with no audio stream pass (audio duration of 0.0 just means
+    audio-less video, not a broken download).
+    """
+    v_dur, a_dur = _stream_durations(path)
+    if a_dur == 0.0:
+        return True
+    return abs(v_dur - a_dur) <= DURATION_MISMATCH_TOLERANCE_SECONDS
+
+
 def _build_format_spec(quality: int, codec: str) -> str:
     """Build yt-dlp format selector with quality cap and codec preference.
 
@@ -73,7 +117,15 @@ def fetch(
     )
     cached_xml_candidates = sorted(temp_dir.glob(f"{bv_id}*.xml"))
     if cached_video_candidates and cached_xml_candidates:
-        return cached_video_candidates[0], cached_xml_candidates[0], True
+        cached_video = cached_video_candidates[0]
+        if _is_av_duration_consistent(cached_video):
+            return cached_video, cached_xml_candidates[0], True
+        # Audio stream duration disagrees with video — yt-dlp's previous
+        # merge truncated audio. Quarantine the bad files and fall through
+        # to a fresh download.
+        cached_video.rename(cached_video.with_suffix(cached_video.suffix + ".broken"))
+        for xml in cached_xml_candidates:
+            xml.rename(xml.with_suffix(xml.suffix + ".broken"))
 
     # Cache miss — invoke yt-dlp.
     output_template = str(temp_dir / f"{bv_id}.%(ext)s")
@@ -109,6 +161,15 @@ def fetch(
             f"yt-dlp did not produce a danmaku XML file for {bv_id} in {temp_dir}"
         )
     xml_path = xml_candidates[0]
+
+    if not _is_av_duration_consistent(video_path):
+        v_dur, a_dur = _stream_durations(video_path)
+        raise RuntimeError(
+            f"yt-dlp produced {video_path.name} with truncated audio "
+            f"(video {v_dur:.1f}s vs audio {a_dur:.1f}s). This is the "
+            f"BV1UodgBJEXj-style merger hiccup — re-run to download again, "
+            f"or run yt-dlp manually to inspect."
+        )
 
     return video_path, xml_path, False
 
