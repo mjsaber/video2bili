@@ -191,7 +191,7 @@ def build_sparse_music_bed(
     bed_path: Path,
     crossfade: float = 2.0,
     edge_fade: float = 0.5,
-) -> None:
+) -> list:
     """Build a music bed that is silent except inside the supplied intervals.
 
     ``intervals`` is a list of ``(start, end)`` seconds (ascending,
@@ -224,6 +224,11 @@ def build_sparse_music_bed(
     If ``intervals`` is empty the function emits a single
     ``aevalsrc=0`` segment covering ``total_duration`` and no ``-i``
     inputs — pure silence.
+
+    Returns the ordered list of ``music_library.Track`` objects that were
+    actually consumed (one per ``-i`` input in the ffmpeg call). Callers can
+    use this for accurate CC-BY attribution — empty list when the bed is
+    pure silence.
     """
     if total_duration <= 0:
         raise ValueError(
@@ -244,7 +249,7 @@ def build_sparse_music_bed(
             str(bed_path),
         ]
         subprocess.run(cmd, check=True, capture_output=True, text=True)
-        return
+        return []
 
     # Validate intervals: ascending, non-overlapping, within total_duration.
     for start, end in intervals:
@@ -402,6 +407,7 @@ def build_sparse_music_bed(
         str(bed_path),
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return inputs
 
 
 def mix(
@@ -437,6 +443,96 @@ def mix(
         "ffmpeg", "-y",
         "-i", str(vocals_path),
         "-i", str(bed_path),
+        "-filter_complex", filtergraph,
+        "-map", "[out]",
+        "-c:a", "pcm_s16le",
+        str(mixed_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def mask_intervals(
+    src_path: Path,
+    intervals: list[tuple[float, float]],
+    out_path: Path,
+) -> None:
+    """Zero out audio in ``src_path`` inside each ``(start, end)`` interval.
+
+    Used to strip copyrighted background music from the Demucs ``no_vocals``
+    stem at every detected music region (long AND short), so the original
+    music never reaches the final mix even if Stage 3's sparse bed didn't
+    cover it.
+
+    Implementation: ffmpeg ``volume`` filter with an ``enable`` expression
+    that ORs ``between(t,s_i,e_i)`` for every interval. Outside the intervals
+    volume stays at 1.0; inside, it's 0. Output is PCM s16le matching the
+    input duration exactly.
+    """
+    if not intervals:
+        # No regions to mask — straight copy.
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(src_path),
+            "-c:a", "pcm_s16le",
+            str(out_path),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return
+
+    enable_expr = "+".join(
+        f"between(t,{s:.3f},{e:.3f})" for s, e in intervals
+    )
+    filtergraph = f"volume=enable='{enable_expr}':volume=0"
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(src_path),
+        "-af", filtergraph,
+        "-c:a", "pcm_s16le",
+        str(out_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def mix_three_way(
+    vocals_path: Path,
+    bed_path: Path,
+    sfx_path: Path,
+    music_volume: float,
+    duck: bool,
+    mixed_path: Path,
+) -> None:
+    """Three-way mix: gated vocals + sparse CC-BY bed + masked no_vocals SFX.
+
+    Input layout:
+      [0:a] — gated vocals (voice, always at full level)
+      [1:a] — sparse CC-BY bed (silent outside detected music regions)
+      [2:a] — masked no_vocals stem (silent inside detected music regions —
+              so it carries only game SFX / ambience from non-music ranges)
+
+    ``music_volume`` scales the bed (same as the two-way mix). ``duck`` ducks
+    the bed under the voice via sidechain compression but does NOT duck the
+    SFX — game audio is meant to punctuate. Output length follows the voice
+    (input 0).
+    """
+    if duck:
+        filtergraph = (
+            f"[1:a]volume={music_volume}[bed];"
+            f"[bed][0:a]sidechaincompress="
+            f"threshold=0.05:ratio=8:attack=5:release=300[ducked];"
+            f"[0:a][ducked][2:a]amix=inputs=3:duration=first:"
+            f"dropout_transition=0:normalize=0[out]"
+        )
+    else:
+        filtergraph = (
+            f"[1:a]volume={music_volume}[bed];"
+            f"[0:a][bed][2:a]amix=inputs=3:duration=first:"
+            f"dropout_transition=0:normalize=0[out]"
+        )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(vocals_path),
+        "-i", str(bed_path),
+        "-i", str(sfx_path),
         "-filter_complex", filtergraph,
         "-map", "[out]",
         "-c:a", "pcm_s16le",
@@ -648,19 +744,50 @@ def render(inputs: MusicSwapInputs) -> Path:
             )
             voice_for_mix = gated
 
-        _log("building royalty-free music bed")
+        # Stage 2-4 of 2026-05-23 conditional-bgm plan: detect which ranges
+        # of the original audio actually carry copyrighted music, then build
+        # a SPARSE bed that only covers ≥5s music regions and PRESERVE the
+        # original no_vocals (game SFX) outside those regions.
+        no_vocals_path = vocals.with_name("no_vocals.wav")
+        _log("detecting music regions on no_vocals stem")
+        from . import music_detect  # local import to keep top-level light
+        long_intervals, all_intervals = music_detect.detect_music_intervals(
+            no_vocals_path, min_duration_s=5.0,
+        )
+        _log(
+            f"detected {len(all_intervals)} music region(s); "
+            f"{len(long_intervals)} are >=5s and will get the new bed"
+        )
+
+        _log("building royalty-free sparse music bed")
         manifest = music_library.load_manifest()
         music_library.ensure_manifest_cached(manifest, music_library.CACHE_DIR)
         pool = music_library.scan_cache(music_library.CACHE_DIR)
-        sequence = music_library.select_sequence(
-            pool, src_info.duration, crossfade=2.0, seed=inputs.seed
+        # Pull enough tracks to cover the worst case (whole video as music).
+        # build_sparse_music_bed only consumes what it needs and returns the
+        # subset for accurate attribution.
+        sequence_pool = music_library.select_sequence(
+            pool, src_info.duration, crossfade=2.0, seed=inputs.seed,
         )
         bed = work / "bed.wav"
-        build_music_bed(sequence, src_info.duration, bed, crossfade=2.0)
+        consumed_tracks = build_sparse_music_bed(
+            sequence_pool, long_intervals, src_info.duration, bed,
+            crossfade=2.0, edge_fade=0.5,
+        )
 
-        _log(f"mixing (music_volume={inputs.music_volume}, duck={inputs.duck})")
+        _log(f"masking {len(all_intervals)} music region(s) on no_vocals stem")
+        no_vocals_masked = work / "no_vocals_masked.wav"
+        mask_intervals(no_vocals_path, all_intervals, no_vocals_masked)
+
+        _log(
+            f"three-way mixing (music_volume={inputs.music_volume}, "
+            f"duck={inputs.duck})"
+        )
         mixed = work / "mixed.wav"
-        mix(voice_for_mix, bed, inputs.music_volume, inputs.duck, mixed)
+        mix_three_way(
+            voice_for_mix, bed, no_vocals_masked,
+            inputs.music_volume, inputs.duck, mixed,
+        )
 
         _log("remuxing into the video")
         remux(inputs.input_path, mixed, inputs.output_path)
@@ -680,7 +807,9 @@ def render(inputs: MusicSwapInputs) -> Path:
                 f"{src_info.duration:.2f}s by more than 1 second"
             )
 
-        credits = music_library.attribution_lines(sequence, manifest)
+        # Only credit tracks that were actually consumed by the sparse bed
+        # (empty long_intervals → empty consumed_tracks → no credits written).
+        credits = music_library.attribution_lines(consumed_tracks, manifest)
         if credits:
             credits_path = _write_credits(inputs.output_path, credits)
             _log(
@@ -693,7 +822,6 @@ def render(inputs: MusicSwapInputs) -> Path:
         # on both Demucs stems. Measured AFTER validation succeeds so a busted
         # output never produces a misleading sidecar; emitted BEFORE the temp
         # dir is wiped so vocals.wav / no_vocals.wav are still readable.
-        no_vocals = vocals.with_name("no_vocals.wav")
         loudness_vocals: list[float] = []
         loudness_no_vocals: list[float] = []
         try:
@@ -701,9 +829,9 @@ def render(inputs: MusicSwapInputs) -> Path:
                 loudness_vocals = _measure_chunk_loudness(
                     vocals, src_info.duration, chunk_seconds=30,
                 )
-            if no_vocals.exists():
+            if no_vocals_path.exists():
                 loudness_no_vocals = _measure_chunk_loudness(
-                    no_vocals, src_info.duration, chunk_seconds=30,
+                    no_vocals_path, src_info.duration, chunk_seconds=30,
                 )
         except subprocess.CalledProcessError as e:  # pragma: no cover - defensive
             _log(f"WARNING: chunk-loudness probe failed: {e}; sidecar will be partial")
@@ -724,9 +852,14 @@ def render(inputs: MusicSwapInputs) -> Path:
                     "release_ms": inputs.vocal_gate_release_ms,
                 },
             },
+            "music_intervals": {
+                "long_seconds": 5.0,
+                "long": [list(iv) for iv in long_intervals],
+                "all": [list(iv) for iv in all_intervals],
+            },
             "music_bed": {
                 "crossfade_seconds": 2.0,
-                "tracks": _compute_track_timeline(sequence, crossfade=2.0,
+                "tracks": _compute_track_timeline(consumed_tracks, crossfade=2.0,
                                                   manifest=manifest),
             },
             "chunk_loudness_db": {

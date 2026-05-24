@@ -6501,6 +6501,130 @@ def test_build_sparse_music_bed_pulls_from_track_sequence(tmp_path, monkeypatch)
     assert a_pos < b_pos
 
 
+def test_mask_intervals_empty_uses_passthrough(tmp_path, monkeypatch):
+    """No intervals → no -af filter, just a stream-copy-style PCM reencode."""
+    src = tmp_path / "no_vocals.wav"
+    src.write_bytes(b"x")
+    dst = tmp_path / "masked.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.mask_intervals(src, intervals=[], out_path=dst)
+    cmd = captured["cmd"]
+    assert "-af" not in cmd
+    assert str(src) in cmd
+    assert str(dst) in cmd
+
+
+def test_mask_intervals_builds_volume_enable_expression(tmp_path, monkeypatch):
+    """Each interval becomes a between(t, s, e) clause OR'd in the enable
+    expression of a `volume=0` filter."""
+    src = tmp_path / "no_vocals.wav"
+    src.write_bytes(b"x")
+    dst = tmp_path / "masked.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.mask_intervals(
+        src,
+        intervals=[(10.0, 20.0), (40.5, 50.0)],
+        out_path=dst,
+    )
+    joined = " ".join(captured["cmd"])
+    assert "between(t,10.000,20.000)" in joined
+    assert "between(t,40.500,50.000)" in joined
+    assert "volume=0" in joined
+
+
+def test_mix_three_way_invokes_amix_inputs_3(tmp_path, monkeypatch):
+    """The three-way mix command has three -i inputs and amix=inputs=3."""
+    v = tmp_path / "v.wav"
+    b = tmp_path / "b.wav"
+    sfx = tmp_path / "sfx.wav"
+    for p in (v, b, sfx):
+        p.write_bytes(b"x")
+    mixed = tmp_path / "m.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.mix_three_way(v, b, sfx, music_volume=0.25, duck=True, mixed_path=mixed)
+    cmd = captured["cmd"]
+    i_positions = [i for i, a in enumerate(cmd) if a == "-i"]
+    assert len(i_positions) == 3
+    joined = " ".join(cmd)
+    assert "amix=inputs=3" in joined
+    # Ducked variant uses sidechaincompress on the bed
+    assert "sidechaincompress" in joined
+
+
+def test_mix_three_way_no_duck_skips_sidechain(tmp_path, monkeypatch):
+    v = tmp_path / "v.wav"
+    b = tmp_path / "b.wav"
+    sfx = tmp_path / "sfx.wav"
+    for p in (v, b, sfx):
+        p.write_bytes(b"x")
+    mixed = tmp_path / "m.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.mix_three_way(v, b, sfx, music_volume=0.3, duck=False, mixed_path=mixed)
+    joined = " ".join(captured["cmd"])
+    assert "amix=inputs=3" in joined
+    assert "sidechaincompress" not in joined
+
+
+def test_build_sparse_music_bed_returns_consumed_tracks(tmp_path, monkeypatch):
+    """The function returns the ordered list of tracks it actually used."""
+    track_a = _track(str(tmp_path / "a.mp3"), 30.0)
+    track_b = _track(str(tmp_path / "b.mp3"), 30.0)
+    track_c = _track(str(tmp_path / "c.mp3"), 30.0)
+    bed = tmp_path / "bed.wav"
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run",
+                        lambda cmd, **kw: MagicMock(returncode=0))
+
+    consumed = music_swap.build_sparse_music_bed(
+        [track_a, track_b, track_c],
+        intervals=[(10.0, 20.0), (40.0, 50.0)],
+        total_duration=60.0,
+        bed_path=bed,
+    )
+    # Two intervals → at least 2 tracks consumed (interval 0 → a, 1 → b).
+    assert len(consumed) >= 2
+    assert consumed[0] is track_a
+    assert consumed[1] is track_b
+
+
+def test_build_sparse_music_bed_returns_empty_when_no_intervals(tmp_path, monkeypatch):
+    track_a = _track(str(tmp_path / "a.mp3"), 30.0)
+    bed = tmp_path / "bed.wav"
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run",
+                        lambda cmd, **kw: MagicMock(returncode=0))
+    consumed = music_swap.build_sparse_music_bed(
+        [track_a],
+        intervals=[],
+        total_duration=60.0,
+        bed_path=bed,
+    )
+    assert consumed == []
+
+
 def test_build_sparse_music_bed_clamps_fade_for_short_interval(tmp_path, monkeypatch):
     """If an interval is shorter than 2*edge_fade the fade lengths must clamp
     to need/2 so the fade-in and fade-out don't overlap and silence the
@@ -6640,12 +6764,22 @@ def test_render_orchestrates_pipeline_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
                         lambda pool, dur, crossfade, seed:
                         calls.append("select") or pool)
-    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
-                        lambda seq, dur, bed, crossfade=2.0:
-                        calls.append("bed") or bed.write_bytes(b"b"))
-    monkeypatch.setattr("video2yt.music_swap.mix",
-                        lambda v, b, mv, dk, mp:
-                        calls.append("mix") or mp.write_bytes(b"m"))
+    monkeypatch.setattr(
+        "video2yt.music_detect.detect_music_intervals",
+        lambda p, min_duration_s=5.0:
+        calls.append("detect") or ([(10.0, 30.0)], [(10.0, 30.0)]))
+    monkeypatch.setattr(
+        "video2yt.music_swap.build_sparse_music_bed",
+        lambda seq, intervals, dur, bed, crossfade=2.0, edge_fade=0.5:
+        calls.append("bed") or (bed.write_bytes(b"b"), [seq[0]])[1])
+    monkeypatch.setattr(
+        "video2yt.music_swap.mask_intervals",
+        lambda src, intervals, dst:
+        calls.append("mask") or dst.write_bytes(b"k"))
+    monkeypatch.setattr(
+        "video2yt.music_swap.mix_three_way",
+        lambda v, b, sfx, mv, dk, mp:
+        calls.append("mix") or mp.write_bytes(b"m"))
     monkeypatch.setattr("video2yt.music_swap.remux",
                         lambda i, m, o: calls.append("remux") or o.write_bytes(b"o"))
 
@@ -6655,8 +6789,10 @@ def test_render_orchestrates_pipeline_in_order(tmp_path, monkeypatch):
     assert result == out
     assert calls.index("extract") < calls.index("separate")
     assert calls.index("separate") < calls.index("gate")
-    assert calls.index("gate") < calls.index("mix")
+    assert calls.index("gate") < calls.index("detect")
+    assert calls.index("detect") < calls.index("bed")
     assert calls.index("bed") < calls.index("mix")
+    assert calls.index("mask") < calls.index("mix")
     assert calls.index("mix") < calls.index("remux")
 
 
@@ -6684,10 +6820,17 @@ def test_render_can_disable_vocal_gate(tmp_path, monkeypatch):
                         lambda cache: [_track("a.mp3", 400.0)])
     monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
                         lambda pool, dur, crossfade, seed: pool)
-    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
-                        lambda seq, dur, bed, crossfade=2.0: bed.write_bytes(b"b"))
-    monkeypatch.setattr("video2yt.music_swap.mix",
-                        lambda v, b, mv, dk, mp: mp.write_bytes(b"m"))
+    monkeypatch.setattr(
+        "video2yt.music_detect.detect_music_intervals",
+        lambda p, min_duration_s=5.0: ([], []))
+    monkeypatch.setattr(
+        "video2yt.music_swap.build_sparse_music_bed",
+        lambda seq, intervals, dur, bed, crossfade=2.0, edge_fade=0.5:
+        (bed.write_bytes(b"b"), [])[1])
+    monkeypatch.setattr("video2yt.music_swap.mask_intervals",
+                        lambda src, intervals, dst: dst.write_bytes(b"k"))
+    monkeypatch.setattr("video2yt.music_swap.mix_three_way",
+                        lambda v, b, sfx, mv, dk, mp: mp.write_bytes(b"m"))
     monkeypatch.setattr("video2yt.music_swap.remux",
                         lambda i, m, o: o.write_bytes(b"o"))
 
@@ -6846,10 +6989,17 @@ def test_render_writes_music_credits_sidecar(tmp_path, monkeypatch):
                         lambda cache: [_track("at_rest.mp3", 200.0)])
     monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
                         lambda pool, dur, crossfade, seed: pool)
-    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
-                        lambda seq, dur, bed, crossfade=2.0: bed.write_bytes(b"b"))
-    monkeypatch.setattr("video2yt.music_swap.mix",
-                        lambda v, b, mv, dk, mp: mp.write_bytes(b"m"))
+    monkeypatch.setattr(
+        "video2yt.music_detect.detect_music_intervals",
+        lambda p, min_duration_s=5.0: ([(10.0, 30.0)], [(10.0, 30.0)]))
+    monkeypatch.setattr(
+        "video2yt.music_swap.build_sparse_music_bed",
+        lambda seq, intervals, dur, bed, crossfade=2.0, edge_fade=0.5:
+        (bed.write_bytes(b"b"), list(seq))[1])
+    monkeypatch.setattr("video2yt.music_swap.mask_intervals",
+                        lambda src, intervals, dst: dst.write_bytes(b"k"))
+    monkeypatch.setattr("video2yt.music_swap.mix_three_way",
+                        lambda v, b, sfx, mv, dk, mp: mp.write_bytes(b"m"))
     monkeypatch.setattr("video2yt.music_swap.remux",
                         lambda i, m, o: o.write_bytes(b"o"))
 
@@ -7037,11 +7187,17 @@ def _stub_render_dependencies(monkeypatch, *, duration=300.0, manifest=None,
                         lambda cache: sequence)
     monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
                         lambda pool, dur, crossfade, seed: sequence)
-    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
-                        lambda seq, dur, bed, crossfade=2.0:
-                        bed.write_bytes(b"b"))
-    monkeypatch.setattr("video2yt.music_swap.mix",
-                        lambda v, b, mv, dk, mp: mp.write_bytes(b"m"))
+    monkeypatch.setattr(
+        "video2yt.music_detect.detect_music_intervals",
+        lambda p, min_duration_s=5.0: ([(10.0, 30.0)], [(10.0, 30.0)]))
+    monkeypatch.setattr(
+        "video2yt.music_swap.build_sparse_music_bed",
+        lambda seq, intervals, dur, bed, crossfade=2.0, edge_fade=0.5:
+        (bed.write_bytes(b"b"), list(seq))[1])
+    monkeypatch.setattr("video2yt.music_swap.mask_intervals",
+                        lambda src, intervals, dst: dst.write_bytes(b"k"))
+    monkeypatch.setattr("video2yt.music_swap.mix_three_way",
+                        lambda v, b, sfx, mv, dk, mp: mp.write_bytes(b"m"))
     monkeypatch.setattr("video2yt.music_swap.remux",
                         lambda i, m, o: o.write_bytes(b"o"))
 
