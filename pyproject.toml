@@ -31,17 +31,21 @@ subtitle = [
 
 [project.scripts]
 video2yt = "video2yt.cli:main"
+video2yt-burn = "video2yt.burn_cli:main"
 video2yt-compose = "video2yt.compose_cli:main"
-video2yt-transcribe = "video2yt.transcribe_cli:main"
-video2yt-merge = "video2yt.merge_cli:main"
-video2yt-research-card = "video2yt.research_card_cli:main"
-video2yt-thumbnail = "video2yt.thumbnail_cli:main"
-video2yt-tts = "video2yt.tts_cli:main"
+video2yt-fetch = "video2yt.fetch_cli:main"
 video2yt-image = "video2yt.image_gen_cli:main"
-video2yt-upload = "video2yt.upload_cli:main"
-video2yt-topic = "video2yt.topic_cli:main"
-video2yt-subtitle = "video2yt.subtitle_cli:main"
+video2yt-merge = "video2yt.merge_cli:main"
+video2yt-music-mix = "video2yt.music_mix_cli:main"
 video2yt-music-swap = "video2yt.music_swap_cli:main"
+video2yt-research-card = "video2yt.research_card_cli:main"
+video2yt-stems = "video2yt.stems_cli:main"
+video2yt-subtitle = "video2yt.subtitle_cli:main"
+video2yt-thumbnail = "video2yt.thumbnail_cli:main"
+video2yt-topic = "video2yt.topic_cli:main"
+video2yt-transcribe = "video2yt.transcribe_cli:main"
+video2yt-tts = "video2yt.tts_cli:main"
+video2yt-upload = "video2yt.upload_cli:main"
 
 [build-system]
 requires = ["hatchling"]

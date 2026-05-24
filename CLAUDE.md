@@ -28,6 +28,7 @@ uv add <pkg>                                               # add a dep (NEVER ed
 
 - `ffmpeg` and `ffprobe` must be in PATH (system install, not Python package). Check with `shutil.which('ffmpeg')`.
 - video2yt downloads the raw danmaku XML via `yt-dlp --write-subs --sub-langs danmaku` and converts to ASS in-process using `biliass.convert_to_ass`, so the height and font_size are known before conversion. The `yt-dlp-danmaku` plugin is no longer used as a postprocessor (refactored away in `aa1d91c`); we still depend on the `biliass` Python package that ships with it.
+- `song-remover` (out-of-tree subprocess) must be on `$PATH` for `video2yt-stems` (Step 6 stage 2). One-time install: `cd ~/code/song-remover && uv tool install '.[remote]'` (the `[remote]` extra bakes the `modal` SDK into the tool's venv — without it, `--device remote` will fail with `ModuleNotFoundError: modal`). Verify with `song-remover --version`. For the default Modal cloud-GPU path (`--device remote`, 7.2× faster than local CPU, ~$0.10/segment within Modal's $30/mo free tier), the one-time Modal setup additionally requires: `uv run modal token new && uv run modal deploy -m modal_app.prep && uv run modal run -m modal_app.prep && uv run modal deploy -m modal_app.separator` (all from the song-remover repo).
 
 ## Project folder convention
 
