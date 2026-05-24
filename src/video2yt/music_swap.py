@@ -34,7 +34,7 @@ class MusicSwapInputs:
     seed: int | None = None
     keep_temp: bool = False
     vocal_gate: bool = True
-    vocal_gate_threshold: float = 0.015
+    vocal_gate_threshold: float = 0.025
     vocal_gate_release_ms: int = 250
 
 
@@ -97,7 +97,7 @@ def separate_vocals(wav_path: Path, model: str, out_dir: Path) -> Path:
 def gate_vocals(
     vocals_path: Path,
     gated_path: Path,
-    threshold: float = 0.015,
+    threshold: float = 0.025,
     release_ms: int = 250,
 ) -> None:
     """Mute low-level residual music bleed in the isolated vocals stem.
@@ -107,9 +107,14 @@ def gate_vocals(
     ``agate`` pushes those regions to silence while keeping louder streamer
     speech. ``highpass`` removes low-end rumble before the gate/mix.
 
-    ``threshold`` is a linear ffmpeg amplitude value. 0.015 is about -36.5 dBFS,
-    chosen from the redchroma probe where non-speech residual vocals clustered
-    below roughly -45 dBFS and speech peaks clustered around -20 dBFS.
+    ``threshold`` is a linear ffmpeg amplitude value. Default 0.025 (about
+    -32 dBFS). The original 2026-05-21 default of 0.015 (-36.5 dBFS) — chosen
+    from a redchroma probe — turned out too permissive on the 夜吹 (2026-05-23
+    mooniron) segment where audible original BGM was still leaking through
+    Demucs into the vocals stem at ~-30 dBFS. Bumped to 0.025 after the user
+    A/B-tested 0.040 (too aggressive — quiet speech got clipped) vs. 0.025
+    on a 60s snippet and picked 0.025. Speech peaks usually cluster around
+    -20 dBFS so 0.025 still leaves ~12 dB headroom for the streamer voice.
     """
     if threshold <= 0 or threshold >= 1:
         raise ValueError("vocal gate threshold must be between 0 and 1")

@@ -61,10 +61,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--vocal-gate-threshold", type=float, default=0.015,
+        "--vocal-gate-threshold", type=float, default=0.025,
         help=(
-            "ffmpeg agate threshold as linear amplitude (default: 0.015, "
-            "about -36.5 dBFS). Lower keeps more voice but more BGM bleed; "
+            "ffmpeg agate threshold as linear amplitude (default: 0.025, "
+            "about -32 dBFS). Lower keeps more voice but more BGM bleed; "
             "higher suppresses more bleed but may clip quiet speech."
         ),
     )

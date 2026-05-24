@@ -6868,7 +6868,7 @@ def test_cli_parse_args_defaults():
     assert args.seed is None
     assert args.keep_temp is False
     assert args.no_vocal_gate is False
-    assert args.vocal_gate_threshold == 0.015
+    assert args.vocal_gate_threshold == 0.025
     assert args.vocal_gate_release_ms == 250
 
 
@@ -6919,7 +6919,7 @@ def test_cli_run_derives_default_output(tmp_path, monkeypatch):
     assert captured["inputs"].output_path == src.with_name(
         "BV123_with_danmaku_clean.mp4")
     assert captured["inputs"].vocal_gate is True
-    assert captured["inputs"].vocal_gate_threshold == 0.015
+    assert captured["inputs"].vocal_gate_threshold == 0.025
     assert captured["inputs"].vocal_gate_release_ms == 250
 
 
