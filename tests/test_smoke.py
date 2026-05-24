@@ -6357,6 +6357,150 @@ def test_build_music_bed_single_track_no_crossfade(tmp_path, monkeypatch):
     assert captured["cmd"].count("-i") == 1
 
 
+def test_build_sparse_music_bed_full_length(tmp_path, monkeypatch):
+    seq = [_track(str(tmp_path / "a.mp3"), 30.0),
+           _track(str(tmp_path / "b.mp3"), 30.0),
+           _track(str(tmp_path / "c.mp3"), 30.0)]
+    bed = tmp_path / "bed.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.build_sparse_music_bed(
+        seq,
+        intervals=[(30.0, 40.0)],
+        total_duration=60.0,
+        bed_path=bed,
+    )
+    cmd = captured["cmd"]
+    assert cmd[0] == "ffmpeg"
+    # Total bed must be exactly 60 seconds
+    assert "-t" in cmd
+    t_idx = cmd.index("-t")
+    assert float(cmd[t_idx + 1]) == 60.0
+    # Output is pcm WAV at the requested path
+    assert "pcm_s16le" in cmd
+    assert str(bed) in cmd
+
+
+def test_build_sparse_music_bed_empty_intervals(tmp_path, monkeypatch):
+    seq = [_track(str(tmp_path / "a.mp3"), 30.0)]
+    bed = tmp_path / "bed.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.build_sparse_music_bed(
+        seq,
+        intervals=[],
+        total_duration=60.0,
+        bed_path=bed,
+    )
+    cmd = captured["cmd"]
+    joined = " ".join(cmd)
+    # No track is fed in at all — pure silence run
+    assert cmd.count("-i") == 0
+    # The full 60s is built from aevalsrc=0 silence
+    assert "aevalsrc=0" in joined
+    assert "d=60" in joined
+    # Output remains a WAV at the requested duration
+    assert "-t" in cmd
+    t_idx = cmd.index("-t")
+    assert float(cmd[t_idx + 1]) == 60.0
+    assert str(bed) in cmd
+
+
+def test_build_sparse_music_bed_single_interval_has_edge_fades(tmp_path, monkeypatch):
+    seq = [_track(str(tmp_path / "a.mp3"), 30.0),
+           _track(str(tmp_path / "b.mp3"), 30.0),
+           _track(str(tmp_path / "c.mp3"), 30.0)]
+    bed = tmp_path / "bed.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.build_sparse_music_bed(
+        seq,
+        intervals=[(30.0, 40.0)],
+        total_duration=60.0,
+        bed_path=bed,
+        edge_fade=0.5,
+    )
+    joined = " ".join(captured["cmd"])
+    assert "afade=t=in" in joined
+    assert "afade=t=out" in joined
+    assert "d=0.5" in joined  # the fade duration appears at least once
+
+
+def test_build_sparse_music_bed_two_intervals_have_silence_between(tmp_path, monkeypatch):
+    seq = [_track(str(tmp_path / "a.mp3"), 30.0),
+           _track(str(tmp_path / "b.mp3"), 30.0),
+           _track(str(tmp_path / "c.mp3"), 30.0)]
+    bed = tmp_path / "bed.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.build_sparse_music_bed(
+        seq,
+        intervals=[(10.0, 20.0), (40.0, 50.0)],
+        total_duration=60.0,
+        bed_path=bed,
+    )
+    cmd = captured["cmd"]
+    joined = " ".join(cmd)
+    # Three silence gaps: 0-10s (10s), 20-40s (20s), 50-60s (10s)
+    assert "aevalsrc=0" in joined
+    assert "d=10" in joined  # leading gap (and trailing gap)
+    assert "d=20" in joined  # middle gap
+    # concat over 5 segments (silence + interval + silence + interval + silence)
+    assert "concat=n=5" in joined
+
+
+def test_build_sparse_music_bed_pulls_from_track_sequence(tmp_path, monkeypatch):
+    # Three 30s tracks; two intervals that each comfortably fit in one track.
+    track_a = _track(str(tmp_path / "a.mp3"), 30.0)
+    track_b = _track(str(tmp_path / "b.mp3"), 30.0)
+    track_c = _track(str(tmp_path / "c.mp3"), 30.0)
+    seq = [track_a, track_b, track_c]
+    bed = tmp_path / "bed.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.build_sparse_music_bed(
+        seq,
+        intervals=[(10.0, 20.0), (40.0, 50.0)],
+        total_duration=60.0,
+        bed_path=bed,
+    )
+    cmd = captured["cmd"]
+    # Both first two tracks should be present as -i inputs in order.
+    i_positions = [i for i, v in enumerate(cmd) if v == "-i"]
+    input_paths = [cmd[i + 1] for i in i_positions]
+    assert str(track_a.path) in input_paths
+    assert str(track_b.path) in input_paths
+    # And track_a must appear before track_b in the command line ordering.
+    a_pos = input_paths.index(str(track_a.path))
+    b_pos = input_paths.index(str(track_b.path))
+    assert a_pos < b_pos
+
+
 def test_gate_vocals_builds_agate_command(tmp_path, monkeypatch):
     vocals = tmp_path / "vocals.wav"
     vocals.write_bytes(b"x")

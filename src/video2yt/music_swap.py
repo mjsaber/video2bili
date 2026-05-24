@@ -184,6 +184,217 @@ def build_music_bed(
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def build_sparse_music_bed(
+    tracks: list,
+    intervals: list[tuple[float, float]],
+    total_duration: float,
+    bed_path: Path,
+    crossfade: float = 2.0,
+    edge_fade: float = 0.5,
+) -> None:
+    """Build a music bed that is silent except inside the supplied intervals.
+
+    ``intervals`` is a list of ``(start, end)`` seconds (ascending,
+    non-overlapping) where the new CC-BY music should play. Outside those
+    intervals the bed is digital silence. Each music segment has a linear
+    ``afade=t=in`` of ``edge_fade`` seconds at its start and a matching
+    ``afade=t=out`` at its end so cuts don't pop. Output is a single
+    ``pcm_s16le`` WAV of exactly ``total_duration`` seconds at ``bed_path``.
+
+    Filtergraph structure (one ``ffmpeg -filter_complex`` invocation):
+
+    1. For each interval, take a slice from the CC-BY ``tracks`` sequence
+       (``atrim``/``asetpts``) sized to ``end - start`` seconds. The first
+       interval consumes ``tracks[0]``; the second consumes ``tracks[1]``;
+       and so on (per-interval cursor, modulo the pool). If a single
+       interval is longer than its starting track, the next track is
+       chained in with ``acrossfade=d={crossfade}`` so the music keeps
+       playing without an audible seam.
+    2. Apply ``afade=t=in:st=0:d={edge_fade}`` and
+       ``afade=t=out:st=<dur - edge_fade>:d={edge_fade}`` to each interval
+       so the cut into / out of silence is smooth.
+    3. Emit ``aevalsrc=0:c=stereo:s=44100:d=<gap>`` silence segments for
+       the gap before the first interval, every gap between consecutive
+       intervals, and the gap after the last interval (zero-length gaps
+       are skipped to keep ``concat=n=K`` accurate).
+    4. ``concat=n=K:v=0:a=1[out]`` over the silence + interval + silence +
+       ... chain, producing the final stream. ``-t total_duration`` clamps
+       the output so floating-point drift can't extend the file.
+
+    If ``intervals`` is empty the function emits a single
+    ``aevalsrc=0`` segment covering ``total_duration`` and no ``-i``
+    inputs — pure silence.
+    """
+    if total_duration <= 0:
+        raise ValueError(
+            f"total_duration must be positive, got {total_duration}"
+        )
+
+    if not intervals:
+        # No music regions — produce a pure-silence WAV. No -i inputs.
+        filtergraph = (
+            f"aevalsrc=0:c=stereo:s=44100:d={total_duration:.3f}[out]"
+        )
+        cmd = [
+            "ffmpeg", "-y",
+            "-filter_complex", filtergraph,
+            "-map", "[out]",
+            "-t", f"{total_duration:.3f}",
+            "-c:a", "pcm_s16le",
+            str(bed_path),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return
+
+    # Validate intervals: ascending, non-overlapping, within total_duration.
+    for start, end in intervals:
+        if end <= start:
+            raise ValueError(
+                f"interval ({start}, {end}) is empty or reversed"
+            )
+        if start < 0:
+            raise ValueError(f"interval start {start} is negative")
+        if end > total_duration:
+            raise ValueError(
+                f"interval end {end} exceeds total_duration {total_duration}"
+            )
+    for prev, curr in zip(intervals, intervals[1:]):
+        if curr[0] < prev[1]:
+            raise ValueError(
+                f"intervals are not non-overlapping or ascending: "
+                f"{prev} then {curr}"
+            )
+
+    if not tracks:
+        raise ValueError(
+            "cannot build a sparse music bed without any CC-BY tracks"
+        )
+
+    # Walk through tracks consuming chunks per interval. Each interval starts
+    # fresh on the next unused track; if one track isn't long enough the next
+    # is chained in with an acrossfade.
+    inputs: list = []          # ordered list of music_library.Track to feed via -i
+    interval_parts: list[list[str]] = []  # filtergraph parts per interval
+    interval_labels: list[str] = []       # output label per interval
+    track_cursor = 0
+    for i, (start, end) in enumerate(intervals):
+        need = end - start
+        # Pick enough tracks. First track contributes up to its full duration.
+        # Each chained track adds `chunk - crossfade` net seconds because the
+        # acrossfade overlaps the seam.
+        chunks: list[tuple] = []  # list of (track, slice_seconds)
+        remaining = need
+        first = True
+        while remaining > 1e-6:
+            t = tracks[track_cursor % len(tracks)]
+            track_cursor += 1
+            if first:
+                chunk = min(float(t.duration), remaining)
+                chunks.append((t, chunk))
+                remaining -= chunk
+                first = False
+            else:
+                # The acrossfade consumes `crossfade` seconds from both sides
+                # of the seam; the chained slice must be at least `crossfade`
+                # long for the filter to work.
+                want = remaining + crossfade
+                chunk = min(float(t.duration), want)
+                if chunk <= crossfade:
+                    raise ValueError(
+                        f"track {t.name} too short ({t.duration}s) to chain "
+                        f"into interval (needs > {crossfade}s for crossfade)"
+                    )
+                chunks.append((t, chunk))
+                remaining -= (chunk - crossfade)
+        # Register inputs for each chunk
+        input_indices = []
+        for (t, _chunk) in chunks:
+            input_indices.append(len(inputs))
+            inputs.append(t)
+        # Slice each chunk: [N:a]atrim=0:duration=<chunk>,asetpts=PTS-STARTPTS[s_i_j]
+        parts: list[str] = []
+        chunk_labels: list[str] = []
+        for j, (in_idx, (_t, chunk)) in enumerate(zip(input_indices, chunks)):
+            cl = f"[s_{i}_{j}]"
+            parts.append(
+                f"[{in_idx}:a]atrim=0:duration={chunk:.3f},"
+                f"asetpts=PTS-STARTPTS{cl}"
+            )
+            chunk_labels.append(cl)
+        # Chain via acrossfade across the chunks
+        if len(chunk_labels) == 1:
+            combined_label = chunk_labels[0]
+        else:
+            prev_label = chunk_labels[0]
+            for j in range(1, len(chunk_labels)):
+                next_label = f"[x_{i}_{j}]"
+                parts.append(
+                    f"{prev_label}{chunk_labels[j]}"
+                    f"acrossfade=d={crossfade:.3f}:c1=tri:c2=tri{next_label}"
+                )
+                prev_label = next_label
+            combined_label = prev_label
+        # Apply edge fades so the cut into/out of silence is smooth.
+        interval_label = f"[interval_{i}]"
+        fade_out_start = max(0.0, need - edge_fade)
+        parts.append(
+            f"{combined_label}"
+            f"afade=t=in:st=0:d={edge_fade:.3f},"
+            f"afade=t=out:st={fade_out_start:.3f}:d={edge_fade:.3f}"
+            f"{interval_label}"
+        )
+        interval_parts.append(parts)
+        interval_labels.append(interval_label)
+
+    # Now stitch the timeline: silence_0, interval_0, silence_1, interval_1,
+    # ..., silence_N. Zero-length silences are skipped so concat=n=K matches.
+    all_parts: list[str] = []
+    concat_labels: list[str] = []
+    silence_idx = 0
+
+    def _emit_silence(dur: float) -> str:
+        nonlocal silence_idx
+        label = f"[sil_{silence_idx}]"
+        silence_idx += 1
+        all_parts.append(
+            f"aevalsrc=0:c=stereo:s=44100:d={dur:.3f}{label}"
+        )
+        return label
+
+    # Leading gap
+    lead = intervals[0][0]
+    if lead > 0:
+        concat_labels.append(_emit_silence(lead))
+    # Intervals + intermediate gaps + trailing gap
+    for i, (_start, end) in enumerate(intervals):
+        all_parts.extend(interval_parts[i])
+        concat_labels.append(interval_labels[i])
+        if i + 1 < len(intervals):
+            gap = intervals[i + 1][0] - end
+        else:
+            gap = total_duration - end
+        if gap > 0:
+            concat_labels.append(_emit_silence(gap))
+
+    n = len(concat_labels)
+    all_parts.append(
+        "".join(concat_labels) + f"concat=n={n}:v=0:a=1[out]"
+    )
+    filtergraph = ";".join(all_parts)
+
+    cmd = ["ffmpeg", "-y"]
+    for t in inputs:
+        cmd += ["-i", str(t.path)]
+    cmd += [
+        "-filter_complex", filtergraph,
+        "-map", "[out]",
+        "-t", f"{total_duration:.3f}",
+        "-c:a", "pcm_s16le",
+        str(bed_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
 def mix(
     vocals_path: Path,
     bed_path: Path,
