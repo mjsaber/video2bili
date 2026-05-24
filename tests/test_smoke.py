@@ -6501,6 +6501,34 @@ def test_build_sparse_music_bed_pulls_from_track_sequence(tmp_path, monkeypatch)
     assert a_pos < b_pos
 
 
+def test_build_sparse_music_bed_clamps_fade_for_short_interval(tmp_path, monkeypatch):
+    """If an interval is shorter than 2*edge_fade the fade lengths must clamp
+    to need/2 so the fade-in and fade-out don't overlap and silence the
+    segment. Stage-3 review identified this as a blocker (intervals are
+    nominally ≥5s, but a sub-1s caller must not silently break)."""
+    track_a = _track(str(tmp_path / "a.mp3"), 30.0)
+    bed = tmp_path / "bed.wav"
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    music_swap.build_sparse_music_bed(
+        [track_a],
+        intervals=[(10.0, 10.6)],  # 0.6s — shorter than 2 * default edge_fade (1.0s)
+        total_duration=60.0,
+        bed_path=bed,
+        edge_fade=0.5,
+    )
+    joined = " ".join(captured["cmd"])
+    # Fade duration must be clamped to need/2 = 0.300 (NOT 0.500).
+    assert "afade=t=in:st=0:d=0.300" in joined
+    # Fade-out must start at need - clamped = 0.3s into the segment.
+    assert "afade=t=out:st=0.300:d=0.300" in joined
+
+
 def test_gate_vocals_builds_agate_command(tmp_path, monkeypatch):
     vocals = tmp_path / "vocals.wav"
     vocals.write_bytes(b"x")

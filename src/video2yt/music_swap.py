@@ -295,14 +295,17 @@ def build_sparse_music_bed(
                 first = False
             else:
                 # The acrossfade consumes `crossfade` seconds from both sides
-                # of the seam; the chained slice must be at least `crossfade`
-                # long for the filter to work.
+                # of the seam; the chained slice must be longer than
+                # `crossfade` for the filter to add any new audio (and not
+                # break with a zero-length output).
                 want = remaining + crossfade
                 chunk = min(float(t.duration), want)
                 if chunk <= crossfade:
                     raise ValueError(
-                        f"track {t.name} too short ({t.duration}s) to chain "
-                        f"into interval (needs > {crossfade}s for crossfade)"
+                        f"cannot chain into interval: track {t.name!r} "
+                        f"has duration {t.duration:.2f}s but crossfade is "
+                        f"{crossfade:.2f}s, leaving <= 0s of new audio. "
+                        f"Use a longer track or shrink crossfade."
                     )
                 chunks.append((t, chunk))
                 remaining -= (chunk - crossfade)
@@ -334,13 +337,19 @@ def build_sparse_music_bed(
                 )
                 prev_label = next_label
             combined_label = prev_label
-        # Apply edge fades so the cut into/out of silence is smooth.
+        # Apply edge fades so the cut into/out of silence is smooth. For very
+        # short intervals (need < 2*edge_fade) the fade-in and fade-out would
+        # overlap and silence the whole segment — clamp the fade length so
+        # the two halves of the interval each get a non-degenerate fade.
+        # (Stage 4 callers should not pass intervals <5s, but `need < 1s` is
+        # cheap to defend against.)
+        actual_fade = min(edge_fade, need / 2.0)
         interval_label = f"[interval_{i}]"
-        fade_out_start = max(0.0, need - edge_fade)
+        fade_out_start = max(0.0, need - actual_fade)
         parts.append(
             f"{combined_label}"
-            f"afade=t=in:st=0:d={edge_fade:.3f},"
-            f"afade=t=out:st={fade_out_start:.3f}:d={edge_fade:.3f}"
+            f"afade=t=in:st=0:d={actual_fade:.3f},"
+            f"afade=t=out:st={fade_out_start:.3f}:d={actual_fade:.3f}"
             f"{interval_label}"
         )
         interval_parts.append(parts)
