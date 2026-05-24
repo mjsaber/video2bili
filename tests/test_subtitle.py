@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from video2yt import subtitle
+from video2yt import subtitle, validate
 
 
 def test_constants_exist():
@@ -897,262 +897,256 @@ def test_preflight_fails_with_helpful_message_when_whisperx_missing(mock_import,
 
 
 # ---------------------------------------------------------------------------
-# Pause-based splitting (2026-05-23 plan): split ASR segments on word-level
-# silences ≥ pause_threshold_s. Reuses whisperx forced alignment.
+# silencedetect-based pause splitting (2026-05-23 Option B plan).
 # ---------------------------------------------------------------------------
 
-def test_pause_split_single_internal_gap():
-    """One ASR segment with a 0.8s internal gap → two sub-segments at the gap."""
-    seg = subtitle.FunASRSegment(0.0, 10.0, "你好世界今天天氣很好")
-    # Words: 5 chars before the gap, 5 chars after. Gap is 4.0s → 4.8s = 0.8s.
-    words = [
-        ("你", 0.0, 0.5),
-        ("好", 0.5, 1.0),
-        ("世", 1.0, 1.5),
-        ("界", 1.5, 2.0),
-        ("今", 4.8, 5.3),
-        ("天", 5.3, 5.8),
-        ("天", 5.8, 6.3),
-        ("氣", 6.3, 6.8),
-        ("很", 6.8, 7.3),
-        ("好", 7.3, 10.0),
-    ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.6,
+@patch("video2yt.subtitle.subprocess.run")
+def test_detect_silences_parses_stderr(mock_run, tmp_path):
+    wav = tmp_path / "vocals.wav"
+    wav.write_bytes(b"x")
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout="",
+        stderr=(
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 1.460\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 3.349 | silence_duration: 1.889\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_start: 10.0\n"
+            "[Parsed_silencedetect_0 @ 0x1] silence_end: 13.0 | silence_duration: 3.0\n"
+        ),
     )
-    assert len(out) == 2
-    assert out[0].start == 0.0 and out[0].end == 2.0
-    assert out[0].text == "你好世界"
-    assert out[1].start == 4.8 and out[1].end == 10.0
-    assert out[1].text == "今天天氣很好"
+    out = subtitle.detect_silences(wav, noise_db=-40, min_duration_s=0.6)
+    assert out == [(1.460, 3.349), (10.0, 13.0)]
 
 
-def test_pause_split_no_gaps_passes_through():
-    """Words evenly spaced with 0.1s gaps; threshold 0.6 → single block."""
-    seg = subtitle.FunASRSegment(0.0, 5.0, "你好世界")
-    words = [
-        ("你", 0.0, 0.5),
-        ("好", 0.6, 1.1),
-        ("世", 1.2, 1.7),
-        ("界", 1.8, 5.0),
-    ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.6,
+@patch("video2yt.subtitle.subprocess.run")
+def test_detect_silences_empty_returns_empty_list(mock_run, tmp_path):
+    wav = tmp_path / "vocals.wav"
+    wav.write_bytes(b"x")
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="",
+        stderr="[info] no silences found\n",
     )
-    assert len(out) == 1
-    assert out[0] == seg
+    assert subtitle.detect_silences(wav) == []
 
 
-def test_pause_split_multiple_gaps():
-    """Two internal gaps → three sub-segments (CJK chars so _join_words
-    behaviour doesn't muddy the timing assertion)."""
-    seg = subtitle.FunASRSegment(0.0, 15.0, "一二三四五六")
-    words = [
-        ("一", 0.0, 0.5),
-        ("二", 0.5, 1.0),
-        # gap 1: 1.0 → 4.0 (3.0s)
-        ("三", 4.0, 4.5),
-        ("四", 4.5, 5.0),
-        # gap 2: 5.0 → 9.0 (4.0s)
-        ("五", 9.0, 9.5),
-        ("六", 9.5, 15.0),
-    ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.6,
+@patch("video2yt.subtitle.subprocess.run")
+def test_detect_silences_builds_correct_ffmpeg_command(mock_run, tmp_path):
+    wav = tmp_path / "v.wav"
+    wav.write_bytes(b"x")
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="", stderr="",
     )
-    assert len(out) == 3
-    assert [o.text for o in out] == ["一二", "三四", "五六"]
-    assert out[0].end == 1.0
-    assert out[1].start == 4.0 and out[1].end == 5.0
-    assert out[2].start == 9.0 and out[2].end == 15.0
+    subtitle.detect_silences(wav, noise_db=-35, min_duration_s=0.8)
+    cmd = mock_run.call_args[0][0]
+    assert cmd[0] == "ffmpeg"
+    assert str(wav) in cmd
+    af_idx = cmd.index("-af")
+    assert cmd[af_idx + 1] == "silencedetect=noise=-35.0dB:duration=0.8"
+    assert cmd[-1] == "-"  # null muxer target
 
 
-def test_pause_split_ignores_out_of_range_words():
-    """Alignment includes words before seg.start and after seg.end → skipped."""
-    seg = subtitle.FunASRSegment(5.0, 10.0, "你好")
-    words = [
-        ("前", 0.0, 0.5),   # before segment — skip
-        ("你", 5.1, 5.5),
-        ("好", 5.5, 6.0),
-        ("後", 12.0, 12.5),  # after segment — skip
-    ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.6,
+@patch("video2yt.subtitle.subprocess.run")
+def test_detect_silences_ignores_orphan_start(mock_run, tmp_path):
+    """A silence_start without a matching silence_end (truncated log) is
+    dropped, not paired with a later unrelated start."""
+    wav = tmp_path / "v.wav"
+    wav.write_bytes(b"x")
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="",
+        stderr=(
+            "silence_start: 1.0\n"
+            "silence_start: 5.0\n"  # orphan — no end before this
+            "silence_end: 6.0 | silence_duration: 1.0\n"
+        ),
     )
-    assert len(out) == 1
-    assert out[0].text == "你好"
-    assert out[0].start == 5.0
-    assert out[0].end == 10.0
+    out = subtitle.detect_silences(wav)
+    assert out == [(5.0, 6.0)]
 
 
-def test_pause_split_empty_words_passthrough():
-    """If alignment returned no words, segments must pass through unchanged."""
+def test_split_on_silences_passes_through_when_no_silences():
     segs = [
-        subtitle.FunASRSegment(0.0, 5.0, "你好"),
-        subtitle.FunASRSegment(5.0, 10.0, "世界"),
+        subtitle.FunASRSegment(0.0, 10.0, "你好世界"),
+        subtitle.FunASRSegment(10.0, 20.0, "今天天氣很好"),
     ]
-    out = subtitle._split_segments_on_pauses(
-        segs, [], pause_threshold_s=0.6,
-    )
-    assert out == segs
+    assert subtitle._split_segments_on_silences(segs, [], 0.6) == segs
 
 
-def test_pause_split_text_concatenation_cjk_no_spaces():
-    """CJK chars are concatenated without spaces; latin/digit tokens keep
-    their existing spacing."""
-    seg = subtitle.FunASRSegment(0.0, 5.0, "")
-    words = [
-        ("Hello", 0.0, 0.5),
-        ("世", 0.5, 0.7),
-        ("界", 0.7, 0.9),
-        # gap
-        ("123", 2.0, 2.5),
-        ("ok", 2.5, 5.0),
-    ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.6,
-    )
-    assert len(out) == 2
-    # First sub-segment: latin "Hello" + CJK 世界 (no space between latin and CJK)
-    assert out[0].text == "Hello世界"
-    # Second: "123 ok" — latin/digit tokens separated by a single space
-    assert out[1].text == "123 ok"
-
-
-def test_pause_split_threshold_zero_disabled():
-    """pause_threshold_s == 0 disables splitting; segments pass through."""
+def test_split_on_silences_threshold_zero_disabled():
     seg = subtitle.FunASRSegment(0.0, 10.0, "你好世界")
-    words = [
-        ("你", 0.0, 1.0),
-        ("好", 5.0, 10.0),  # huge 4s gap — would split at any positive threshold
-    ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.0,
-    )
+    silences = [(3.0, 7.0)]  # huge internal silence
+    out = subtitle._split_segments_on_silences([seg], silences, 0.0)
     assert out == [seg]
 
 
-# Pause-split Stage 2 — wiring into transcribe() + CLI.
-
-@patch("video2yt.subtitle._extract_wav")
-@patch("video2yt.subtitle._run_alignment")
-@patch("video2yt.subtitle._run_asr")
-def test_transcribe_returns_raw_asr_without_pause_split(
-    mock_asr, mock_align, mock_extract, tmp_path
-):
-    """transcribe() never runs alignment — it returns raw ASR. Pause-split
-    is a separate CLI-orchestrated step (independent cache key)."""
-    mock_extract.return_value = tmp_path / "audio.wav"
-    mock_asr.return_value = [(0.0, 10.0, "你好世界")]
-    out = subtitle.transcribe(Path("seg.mp4"))
-    assert not mock_align.called
-    assert out == [subtitle.FunASRSegment(0.0, 10.0, "你好世界")]
-
-
-@patch("video2yt.subtitle._extract_wav")
-@patch("video2yt.subtitle._run_alignment")
-def test_transcribe_alignment_returns_word_tuples(
-    mock_align, mock_extract, tmp_path
-):
-    """transcribe_alignment() returns whisperx word-level tuples."""
-    mock_extract.return_value = tmp_path / "audio.wav"
-    mock_align.return_value = [
-        ("你", 0.0, 0.5),
-        ("好", 0.5, 1.0),
-    ]
-    out = subtitle.transcribe_alignment(Path("seg.mp4"))
-    assert out == [("你", 0.0, 0.5), ("好", 0.5, 1.0)]
-
-
-@patch("video2yt.subtitle._extract_wav")
-@patch("video2yt.subtitle._run_alignment")
-def test_transcribe_alignment_propagates_failure(
-    mock_align, mock_extract, tmp_path
-):
-    """Alignment failure raises — the CLI catches it and falls back."""
-    mock_extract.return_value = tmp_path / "audio.wav"
-    mock_align.side_effect = RuntimeError("alignment model OOM")
-    with pytest.raises(RuntimeError, match="alignment model OOM"):
-        subtitle.transcribe_alignment(Path("seg.mp4"))
-
-
-def test_threshold_filename_suffix_basic_values():
-    """Threshold-to-filename mapping must be stable, safe, and reversible
-    enough for cache invalidation."""
-    from video2yt.subtitle_cli import _threshold_filename_suffix
-    assert _threshold_filename_suffix(0.6) == "p0p6"
-    assert _threshold_filename_suffix(1.0) == "p1"
-    assert _threshold_filename_suffix(1.25) == "p1p25"
-    assert _threshold_filename_suffix(0) == "p0"
-    # Different thresholds → different suffixes → cleanup cache invalidation
-    assert _threshold_filename_suffix(0.5) != _threshold_filename_suffix(0.6)
-
-
-def test_cli_parse_pause_split_seconds_default():
-    from video2yt import subtitle_cli
-    args = subtitle_cli.parse_args(["seg.mp4"])
-    assert args.pause_split_seconds == 0.6
-
-
-def test_cli_parse_pause_split_seconds_custom():
-    from video2yt import subtitle_cli
-    args = subtitle_cli.parse_args(["seg.mp4", "--pause-split-seconds", "1.0"])
-    assert args.pause_split_seconds == 1.0
-
-
-def test_cli_parse_pause_split_seconds_zero_disables():
-    from video2yt import subtitle_cli
-    args = subtitle_cli.parse_args(["seg.mp4", "--pause-split-seconds", "0"])
-    assert args.pause_split_seconds == 0.0
-
-
-def test_pause_split_clamps_pre_boundary_word_to_seg_start():
-    """A word that lands BEFORE seg.start (within tolerance) and is followed
-    by a gap >= threshold must NOT produce an inverted sub-segment. Codex
-    BLOCKER 1 from the 2026-05-23 review — fixed by clamping sub-segment
-    bounds to [seg.start, seg.end] and skipping if end <= start.
-    """
-    seg = subtitle.FunASRSegment(5.0, 15.0, "你好世界")
-    # First word ends at 4.9s (within 0.2s tolerance of seg.start=5.0).
-    # Then a 1.0s gap → would split, producing a degenerate first
-    # sub-segment with start=seg.start=5.0 but end=4.9 (BEFORE start).
-    words = [
-        ("前", 4.85, 4.95),
-        # gap 4.95 -> 6.0 = 1.05s >= 0.6 → splits
-        ("你", 6.0, 6.5),
-        ("好", 6.5, 7.0),
-        ("世", 7.0, 7.5),
-        ("界", 7.5, 15.0),
-    ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.6,
+def test_split_on_silences_single_internal_silence():
+    """Segment 0-20s with silence 8-10s → two sub-segs [0,8] + [10,20]."""
+    seg = subtitle.FunASRSegment(0.0, 20.0, "你好世界今天天氣很好")  # 10 chars
+    out = subtitle._split_segments_on_silences(
+        [seg], [(8.0, 10.0)], 0.6,
     )
-    # The degenerate "前" sub-segment must be dropped, leaving just one
-    # valid sub-segment from the second group.
-    assert all(o.end > o.start for o in out)
-    assert len(out) == 1
-    assert out[0].text == "你好世界"
-    assert out[0].start == 5.0  # not 6.0 — first surviving sub-segment uses seg.start
-    assert out[0].end == 15.0
+    assert len(out) == 2
+    assert out[0].start == 0.0 and out[0].end == 8.0
+    assert out[1].start == 10.0 and out[1].end == 20.0
+    # Char distribution proportional to speech duration: 8s + 10s = 18s.
+    # First piece gets 8/18 of 10 chars ≈ 4-5 chars.
+    assert 3 <= len(out[0].text) <= 6
+    # Total text reconstruction must equal the original.
+    assert out[0].text + out[1].text == seg.text
 
 
-def test_pause_split_clamps_post_boundary_word_to_seg_end():
-    """Symmetric to the pre-boundary case: a word lands AFTER seg.end
-    (within tolerance) and is preceded by a gap — must not invert."""
-    seg = subtitle.FunASRSegment(0.0, 10.0, "你好世界")
-    words = [
-        ("你", 0.0, 0.5),
-        ("好", 0.5, 1.0),
-        ("世", 1.0, 1.5),
-        ("界", 1.5, 2.0),
-        # gap 2.0 -> 10.15 = 8.15s >= 0.6 → splits
-        ("後", 10.05, 10.15),  # within 0.2s tolerance of seg.end=10.0
+def test_split_on_silences_multiple_silences():
+    """Three internal silences → four sub-segments."""
+    seg = subtitle.FunASRSegment(0.0, 40.0, "ABCDEFGHIJKL")  # 12 chars
+    silences = [(5.0, 6.0), (15.0, 17.0), (30.0, 31.0)]  # 3 long silences
+    out = subtitle._split_segments_on_silences([seg], silences, 0.6)
+    assert len(out) == 4
+    assert out[0].start == 0.0  # first preserves seg.start
+    assert out[-1].end == 40.0   # last preserves seg.end
+    # All sub-segs have non-empty text
+    assert all(o.text for o in out)
+    # Reconstruct original text from sub-seg texts
+    assert "".join(o.text for o in out) == seg.text
+
+
+def test_split_on_silences_ignores_silences_outside_segment():
+    seg = subtitle.FunASRSegment(10.0, 20.0, "你好世界")
+    silences = [
+        (1.0, 5.0),   # before seg — ignored
+        (12.0, 14.0), # internal — kept
+        (25.0, 30.0), # after seg — ignored
     ]
-    out = subtitle._split_segments_on_pauses(
-        [seg], words, pause_threshold_s=0.6,
+    out = subtitle._split_segments_on_silences([seg], silences, 0.6)
+    assert len(out) == 2  # only the internal silence triggers a split
+    assert out[0].start == 10.0
+    assert out[1].end == 20.0
+
+
+def test_split_on_silences_short_silence_below_threshold():
+    seg = subtitle.FunASRSegment(0.0, 10.0, "你好")
+    silences = [(4.0, 4.3)]  # only 0.3s silence
+    out = subtitle._split_segments_on_silences([seg], silences, 0.6)
+    assert out == [seg]  # below threshold — no split
+
+
+def test_split_on_silences_preserves_total_text_across_many_silences():
+    """Many silences in one segment → concat of sub-seg texts equals original."""
+    seg = subtitle.FunASRSegment(0.0, 100.0, "一二三四五六七八九十十一十二十三十四十五")
+    silences = [(i * 10.0, i * 10.0 + 1.0) for i in range(1, 10)]  # 9 internal silences
+    out = subtitle._split_segments_on_silences([seg], silences, 0.6)
+    assert len(out) == 10
+    assert "".join(o.text for o in out) == seg.text
+
+
+@patch("video2yt.subtitle_cli.preflight")
+@patch("video2yt.validate.probe")
+@patch("video2yt.subtitle.transcribe")
+@patch("video2yt.subtitle.detect_silences")
+@patch("video2yt.subtitle._split_segments_on_silences")
+@patch("video2yt.subtitle.cleanup_with_codex")
+@patch("video2yt.subtitle.split_segments")
+@patch("video2yt.subtitle.burn_subtitles")
+@patch("video2yt.subtitle.scan_danmaku")
+def test_cli_pause_split_uses_silencedetect_when_sidecar_present(
+    mock_scan_danmaku,
+    mock_burn, mock_char_split, mock_cleanup,
+    mock_split_on_silences, mock_detect, mock_transcribe,
+    mock_probe, mock_preflight,
+    tmp_path,
+):
+    seg_mp4 = tmp_path / "x.mp4"
+    seg_mp4.write_bytes(b"v")
+    # Sidecar present: silencedetect path is taken.
+    (tmp_path / "x.vocals.wav").write_bytes(b"audio")
+    mock_probe.return_value = validate.MediaInfo(
+        duration=300.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=1,
     )
-    assert all(o.end > o.start for o in out)
-    assert len(out) == 1
-    assert out[0].text == "你好世界"
-    assert out[0].start == 0.0
-    assert out[0].end == 10.0  # not 10.15 — last surviving sub-segment uses seg.end
+    raw = [subtitle.FunASRSegment(0.0, 300.0, "全部")]
+    mock_transcribe.return_value = raw
+    mock_detect.return_value = [(10.0, 11.0)]
+    mock_split_on_silences.return_value = raw + raw  # pretend it split
+    mock_cleanup.return_value = raw + raw
+    mock_char_split.return_value = []
+    mock_burn.return_value = None
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([str(seg_mp4), "--force-add"])
+    subtitle_cli.run(args)
+    assert mock_detect.called
+    assert mock_split_on_silences.called
+    # Verify silencedetect was called on the sidecar, not the segment mp4
+    call_arg = mock_detect.call_args[0][0]
+    assert call_arg.name == "x.vocals.wav"
+
+
+@patch("video2yt.subtitle_cli.preflight")
+@patch("video2yt.validate.probe")
+@patch("video2yt.subtitle.transcribe")
+@patch("video2yt.subtitle.detect_silences")
+@patch("video2yt.subtitle.cleanup_with_codex")
+@patch("video2yt.subtitle.split_segments")
+@patch("video2yt.subtitle.burn_subtitles")
+@patch("video2yt.subtitle.scan_danmaku")
+def test_cli_pause_split_skipped_when_sidecar_missing(
+    mock_scan_danmaku,
+    mock_burn, mock_char_split, mock_cleanup,
+    mock_detect, mock_transcribe,
+    mock_probe, mock_preflight,
+    tmp_path, capsys,
+):
+    seg_mp4 = tmp_path / "x.mp4"
+    seg_mp4.write_bytes(b"v")
+    # No sidecar — silencedetect MUST NOT be called.
+    mock_probe.return_value = validate.MediaInfo(
+        duration=300.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=1,
+    )
+    raw = [subtitle.FunASRSegment(0.0, 300.0, "你好")]
+    mock_transcribe.return_value = raw
+    mock_cleanup.return_value = raw
+    mock_char_split.return_value = []
+    mock_burn.return_value = None
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([str(seg_mp4), "--force-add"])
+    subtitle_cli.run(args)
+    assert not mock_detect.called
+
+
+@patch("video2yt.subtitle_cli.preflight")
+@patch("video2yt.validate.probe")
+@patch("video2yt.subtitle.transcribe")
+@patch("video2yt.subtitle.detect_silences")
+@patch("video2yt.subtitle.cleanup_with_codex")
+@patch("video2yt.subtitle.split_segments")
+@patch("video2yt.subtitle.burn_subtitles")
+@patch("video2yt.subtitle.scan_danmaku")
+def test_cli_pause_split_skipped_when_threshold_zero(
+    mock_scan_danmaku,
+    mock_burn, mock_char_split, mock_cleanup,
+    mock_detect, mock_transcribe,
+    mock_probe, mock_preflight,
+    tmp_path,
+):
+    seg_mp4 = tmp_path / "x.mp4"
+    seg_mp4.write_bytes(b"v")
+    (tmp_path / "x.vocals.wav").write_bytes(b"audio")  # sidecar PRESENT
+    mock_probe.return_value = validate.MediaInfo(
+        duration=300.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=1,
+    )
+    raw = [subtitle.FunASRSegment(0.0, 300.0, "你好")]
+    mock_transcribe.return_value = raw
+    mock_cleanup.return_value = raw
+    mock_char_split.return_value = []
+    mock_burn.return_value = None
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([
+        str(seg_mp4), "--force-add", "--pause-split-seconds", "0",
+    ])
+    subtitle_cli.run(args)
+    assert not mock_detect.called

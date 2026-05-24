@@ -7210,6 +7210,25 @@ def _stub_render_dependencies(monkeypatch, *, duration=300.0, manifest=None,
                         fake_measure)
 
 
+def test_render_writes_vocals_sidecar(tmp_path, monkeypatch):
+    """music-swap exports the gated vocals as <output_stem>.vocals.wav
+    next to the output MP4 so video2yt-subtitle can silencedetect it
+    without re-running Demucs. Always emitted, regardless of --keep-temp."""
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "seg_clean.mp4"
+
+    _stub_render_dependencies(monkeypatch, duration=300.0)
+    music_swap.render(music_swap.MusicSwapInputs(input_path=src,
+                                                 output_path=out))
+
+    vocals_sidecar = out.with_name("seg_clean.vocals.wav")
+    assert vocals_sidecar.exists()
+    # Stub writes b"g" for gated vocals — verify the sidecar contents come
+    # from the gated wav, not some other temp file.
+    assert vocals_sidecar.read_bytes() == b"g"
+
+
 def test_swap_debug_sidecar_written(tmp_path, monkeypatch):
     src = tmp_path / "seg.mp4"
     src.write_bytes(b"x" * 100)

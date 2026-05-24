@@ -391,13 +391,56 @@ def _run_asr(wav_path: Path, model_name: str = "large-v3") -> list[tuple[float, 
     return out
 
 
-def _run_alignment(wav_path: Path) -> list[tuple[str, float, float]]:
-    """Run whisperx forced alignment on ``wav_path`` and return word-level
-    timestamps. Thin wrapper over ``transcribe.run_whisperx_alignment`` so
-    tests can monkeypatch ``video2yt.subtitle._run_alignment`` independently
-    of the intro flow."""
-    from .transcribe import run_whisperx_alignment
-    return run_whisperx_alignment(wav_path)
+def detect_silences(
+    wav_path: Path,
+    noise_db: float = -40.0,
+    min_duration_s: float = 0.6,
+) -> list[tuple[float, float]]:
+    """Find silence intervals in ``wav_path`` via ffmpeg silencedetect.
+
+    Returns ascending non-overlapping ``[(start, end), ...]`` in seconds.
+    Empty list when nothing meets the threshold.
+
+    Use on the gated Demucs vocals stem (saved as `<output>.vocals.wav`
+    sidecar by ``video2yt-music-swap``) so the silences mark real speech
+    pauses, not just generic quiet moments where BGM happens to be at low
+    level. Wrapping ffmpeg keeps this language-agnostic and side-steps the
+    whisperx-Chinese-alignment uniform-fill problem documented in the
+    2026-05-23 plan.
+    """
+    cmd = [
+        "ffmpeg", "-nostats", "-hide_banner",
+        "-i", str(wav_path),
+        "-af", f"silencedetect=noise={float(noise_db)}dB:duration={float(min_duration_s)}",
+        "-f", "null", "-",
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # silencedetect prints to stderr regardless of exit; only treat as error
+    # if both stderr lacks our markers AND ffmpeg exited non-zero.
+    intervals: list[tuple[float, float]] = []
+    pending_start: float | None = None
+    for line in proc.stderr.splitlines():
+        if "silence_start:" in line:
+            try:
+                pending_start = float(line.rsplit(":", 1)[-1].strip())
+            except ValueError:
+                pending_start = None
+        elif "silence_end:" in line and pending_start is not None:
+            # Format: "silence_end: 12.345 | silence_duration: 1.234"
+            try:
+                end_str = line.split("silence_end:", 1)[1].split("|")[0].strip()
+                end = float(end_str)
+                if end > pending_start:
+                    intervals.append((pending_start, end))
+            except (ValueError, IndexError):
+                pass
+            pending_start = None
+    if not intervals and proc.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg silencedetect failed (exit {proc.returncode}): "
+            f"{proc.stderr[-500:]!r}"
+        )
+    return intervals
 
 
 def transcribe(video_path: Path) -> list[FunASRSegment]:
@@ -406,9 +449,9 @@ def transcribe(video_path: Path) -> list[FunASRSegment]:
     The ``FunASRSegment`` name is preserved for downstream compatibility despite
     the engine swap (SenseVoice → whisperx, 2026-05-15).
 
-    Pause-based splitting is intentionally NOT done here — the CLI runs
-    alignment + ``_split_segments_on_pauses`` as separate cacheable steps so
-    that changing the pause threshold doesn't force a re-ASR.
+    Pause-based splitting is NOT done here — the CLI calls
+    ``detect_silences`` + ``_split_segments_on_silences`` separately when the
+    ``<input>.vocals.wav`` sidecar from ``video2yt-music-swap`` is available.
     """
     with tempfile.TemporaryDirectory() as td:
         wav = _extract_wav(video_path, Path(td))
@@ -416,141 +459,92 @@ def transcribe(video_path: Path) -> list[FunASRSegment]:
     return [FunASRSegment(start, end, text.strip()) for (start, end, text) in raw]
 
 
-def transcribe_alignment(video_path: Path) -> list[tuple[str, float, float]]:
-    """Run whisperx forced alignment on the segment's audio and return the
-    full ``[(word, start, end), ...]`` list. The result is independent of the
-    pause threshold, so the CLI caches it separately from the cleanup output.
-
-    Alignment failure raises — the CLI catches and falls back to ASR-only
-    segments with a WARNING log.
-    """
-    with tempfile.TemporaryDirectory() as td:
-        wav = _extract_wav(video_path, Path(td))
-        return _run_alignment(wav)
-
-
-# Tolerance for word-to-segment membership. whisperx alignment can land a few
-# tens of ms outside a segment's start/end; accept words within this slack.
-_PAUSE_SPLIT_BOUNDARY_TOLERANCE_S = 0.2
-
-
-def _is_cjk(s: str) -> bool:
-    """True if ``s`` contains any CJK Unified Ideograph (U+4E00 .. U+9FFF)."""
-    return any("一" <= c <= "鿿" for c in s)
-
-
-def _join_words(words: list[str]) -> str:
-    """Join word tokens with spacing rules that match CJK conventions.
-
-    Rule: insert a single space between two adjacent tokens only when BOTH
-    end-edges are non-CJK (e.g. ``"123" + "ok" → "123 ok"``); if either side
-    is CJK, concatenate directly (``"Hello" + "世界" → "Hello世界"``,
-    ``"你" + "好" → "你好"``). This matches what readers expect for mixed
-    Chinese-with-Latin transcripts.
-    """
-    if not words:
-        return ""
-    out = [words[0]]
-    for w in words[1:]:
-        prev = out[-1]
-        if not prev or not w:
-            out.append(w)
-            continue
-        if _is_cjk(prev[-1]) or _is_cjk(w[0]):
-            out.append(w)
-        else:
-            out.append(" " + w)
-    return "".join(out)
-
-
-def _split_segments_on_pauses(
+def _split_segments_on_silences(
     segments: list[FunASRSegment],
-    words: list[tuple[str, float, float]],
-    pause_threshold_s: float,
+    silences: list[tuple[float, float]],
+    min_split_seconds: float = 0.6,
 ) -> list[FunASRSegment]:
-    """Split each ASR ``segment`` at any word-level gap >= ``pause_threshold_s``.
+    """Split each ASR ``segment`` at every internal silence whose duration is
+    >= ``min_split_seconds``.
 
-    ``words`` is the full whisperx forced-alignment output for the whole
-    audio: a list of ``(word, start, end)`` tuples. For each segment, the
-    words that fall inside (with a small boundary tolerance) are walked and
-    a new sub-segment is opened wherever ``words[i+1].start - words[i].end
-    >= pause_threshold_s``.
+    ``silences`` is the full list of ``(start, end)`` intervals from
+    ``detect_silences`` (in seconds, original-video timeline). For each
+    segment, only silences fully contained in ``[seg.start, seg.end]`` and
+    long enough are considered split points.
 
-    Each sub-segment's text is the joined words within it (CJK convention,
-    see ``_join_words``). The FIRST sub-segment keeps the original
-    ``segment.start`` and the LAST keeps the original ``segment.end`` so
-    total time coverage is preserved (matters for downstream alignment with
-    audio and per-segment hard-floor logic).
+    The sub-segments are emitted as alternating "speech" pieces (between
+    silence boundaries) and the segment text is distributed proportionally
+    by speech-piece duration. The FIRST sub-segment keeps ``seg.start`` and
+    the LAST keeps ``seg.end`` so total time coverage is preserved.
+
+    Limitations: sub-segment text is approximate — without per-char timing
+    we can't know which characters belong to which speech piece. Duration-
+    proportional char distribution gives "good enough" placement that the
+    downstream cleanup step usually normalises.
 
     Special cases:
-    - ``pause_threshold_s == 0`` → splitting disabled; segments pass through.
-    - Empty ``words`` (alignment failed or returned nothing) → segments pass
-      through unchanged. The caller decides whether to log a warning.
-    - A segment with no in-range words → passed through unchanged.
+    - ``min_split_seconds <= 0`` → splitting disabled; segments pass through.
+    - Empty ``silences`` → segments pass through.
+    - Sub-pieces shorter than ``HARD_FLOOR_SECONDS / 4`` are skipped to
+      avoid microscopic flicker entries.
     """
-    if pause_threshold_s <= 0 or not words:
+    if min_split_seconds <= 0 or not silences:
         return list(segments)
 
     out: list[FunASRSegment] = []
     for seg in segments:
-        in_range = [
-            (w, s, e) for (w, s, e) in words
-            if s >= seg.start - _PAUSE_SPLIT_BOUNDARY_TOLERANCE_S
-            and e <= seg.end + _PAUSE_SPLIT_BOUNDARY_TOLERANCE_S
+        internal = [
+            (s, e) for (s, e) in silences
+            if s >= seg.start and e <= seg.end and (e - s) >= min_split_seconds
         ]
-        if not in_range:
-            out.append(seg)
-            continue
-        # Find split points: indices i where the gap to i+1 >= threshold.
-        groups: list[list[tuple[str, float, float]]] = [[in_range[0]]]
-        for prev_idx in range(len(in_range) - 1):
-            _, _, prev_end = in_range[prev_idx]
-            _, next_start, _ = in_range[prev_idx + 1]
-            gap = next_start - prev_end
-            if gap >= pause_threshold_s:
-                groups.append([])
-            groups[-1].append(in_range[prev_idx + 1])
-
-        if len(groups) == 1:
-            # No internal pause hit threshold — return segment unchanged so
-            # text and timing match exactly what the ASR produced.
+        if not internal:
             out.append(seg)
             continue
 
-        # Build provisional sub-segments using each group's word boundaries,
-        # then drop any whose clamped range is degenerate (a pre- or post-
-        # boundary-tolerated word that splits off into its own group can fall
-        # entirely outside [seg.start, seg.end]). The FIRST and LAST groups
-        # that SURVIVE the drop inherit seg.start / seg.end so the parent's
-        # full time range is still covered.
-        candidates: list[tuple[float, float, str]] = []
-        for group in groups:
-            if not group:
+        # Speech pieces: alternating gaps between silences (plus head + tail).
+        pieces: list[tuple[float, float]] = []
+        pos = seg.start
+        for (sil_start, sil_end) in internal:
+            if sil_start > pos:
+                pieces.append((pos, sil_start))
+            pos = sil_end
+        if pos < seg.end:
+            pieces.append((pos, seg.end))
+
+        # Drop microscopic pieces (e.g. silence right at seg.start).
+        min_piece = HARD_FLOOR_SECONDS / 4
+        pieces = [(s, e) for (s, e) in pieces if (e - s) >= min_piece]
+        if not pieces:
+            out.append(seg)
+            continue
+        if len(pieces) == 1:
+            # All but one piece got filtered — the surviving one spans the
+            # whole segment.
+            out.append(FunASRSegment(seg.start, seg.end, seg.text))
+            continue
+
+        total_speech = sum(e - s for (s, e) in pieces)
+        text = seg.text
+        char_offset = 0
+        for i, (s, e) in enumerate(pieces):
+            if i == 0:
+                start = seg.start
+            else:
+                start = s
+            if i == len(pieces) - 1:
+                end = seg.end
+                chunk = text[char_offset:]
+            else:
+                end = e
+                frac = (e - s) / total_speech if total_speech > 0 else 0
+                n_chars = max(1, int(round(len(text) * frac)))
+                # Don't overshoot remaining text.
+                n_chars = min(n_chars, max(1, len(text) - char_offset - (len(pieces) - i - 1)))
+                chunk = text[char_offset:char_offset + n_chars]
+                char_offset += n_chars
+            if not chunk.strip():
                 continue
-            text = _join_words([w for (w, _s, _e) in group])
-            cand_start = max(group[0][1], seg.start)
-            cand_end = min(group[-1][2], seg.end)
-            if cand_end <= cand_start:
-                continue
-            candidates.append((cand_start, cand_end, text))
-
-        if not candidates:
-            out.append(seg)
-            continue
-
-        # First surviving claims seg.start, last claims seg.end. If only one
-        # candidate survives (because all other groups were dropped at the
-        # boundary), that single sub-segment spans the whole parent.
-        if len(candidates) == 1:
-            _, _, t = candidates[0]
-            out.append(FunASRSegment(seg.start, seg.end, t))
-            continue
-        first_s, first_e, first_t = candidates[0]
-        candidates[0] = (seg.start, first_e, first_t)
-        last_s, last_e, last_t = candidates[-1]
-        candidates[-1] = (last_s, seg.end, last_t)
-        for (s, e, t) in candidates:
-            out.append(FunASRSegment(s, e, t))
+            out.append(FunASRSegment(start, end, chunk))
     return out
 
 

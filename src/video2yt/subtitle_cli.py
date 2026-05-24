@@ -4,7 +4,6 @@ Spec: docs/superpowers/specs/2026-05-14-video2yt-subtitle-design.md
 """
 
 import argparse
-import json
 import shutil
 import subprocess
 import sys
@@ -190,43 +189,37 @@ def run(args: argparse.Namespace) -> Path:
         )
         _log(f"ASR done in {time.time() - t0:.1f}s ({len(raw_segments)} segments)")
 
-    # Forced alignment (with cache — independent of pause-split threshold).
-    # Used only when pause-split is enabled. Cached as `.words.json` so
-    # changing the threshold doesn't force a re-alignment.
+    # Pause-split via silencedetect on the gated vocals sidecar that
+    # video2yt-music-swap drops next to its output. If the sidecar isn't
+    # present (subtitle running on a non-music-swap MP4), skip the split.
+    # Alignment-based pause-split was removed 2026-05-23 — whisperx Chinese
+    # alignment returned uniform-fill word timing that never crossed any
+    # threshold. See docs/superpowers/plans/2026-05-23-subtitle-
+    # silencedetect-pause-split.md.
     if args.pause_split_seconds > 0:
-        words_path = args.segment.parent / f"{args.segment.stem}.words.json"
-        if words_path.exists() and not args.force_asr:
-            _log(f"alignment cache hit: {words_path.name}")
-            words = [
-                (w, float(s), float(e))
-                for (w, s, e) in json.loads(words_path.read_text(encoding="utf-8"))
-            ]
+        vocals_sidecar = args.segment.with_name(f"{args.segment.stem}.vocals.wav")
+        if not vocals_sidecar.is_file():
+            _log(
+                f"no vocals sidecar at {vocals_sidecar.name}; skipping pause-split "
+                f"(run video2yt-music-swap first to produce it)"
+            )
         else:
             t0 = time.time()
-            _log(f"alignment: whisperx forced alignment on {info.duration:.2f}s audio...")
-            try:
-                words = subtitle.transcribe_alignment(args.segment)
-                words_path.write_text(
-                    json.dumps([[w, s, e] for (w, s, e) in words]),
-                    encoding="utf-8",
-                )
-                _log(f"alignment done in {time.time() - t0:.1f}s ({len(words)} words)")
-            except Exception as e:
-                _log(
-                    f"WARNING: whisperx alignment failed "
-                    f"({type(e).__name__}: {e}); falling back to ASR-only segments"
-                )
-                words = []
-
-        if words:
+            _log(f"silencedetect on {vocals_sidecar.name}...")
+            silences = subtitle.detect_silences(
+                vocals_sidecar,
+                noise_db=-40.0,
+                min_duration_s=args.pause_split_seconds,
+            )
             pre_count = len(raw_segments)
-            raw_segments = subtitle._split_segments_on_pauses(
-                raw_segments, words,
-                pause_threshold_s=args.pause_split_seconds,
+            raw_segments = subtitle._split_segments_on_silences(
+                raw_segments, silences,
+                min_split_seconds=args.pause_split_seconds,
             )
             _log(
-                f"pause-split (>={args.pause_split_seconds}s): "
-                f"{pre_count} → {len(raw_segments)} segments"
+                f"silencedetect: {len(silences)} silence(s) >={args.pause_split_seconds}s; "
+                f"pause-split: {pre_count} → {len(raw_segments)} segments "
+                f"({time.time() - t0:.1f}s)"
             )
 
     # Cleanup (with threshold-keyed cache, since cleanup input depends on

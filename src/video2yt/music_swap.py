@@ -876,6 +876,16 @@ def render(inputs: MusicSwapInputs) -> Path:
         sidecar_path = _write_swap_debug(inputs.output_path, debug_payload)
         _log(f"debug sidecar written to {sidecar_path.name}")
 
+        # Vocals sidecar (used by video2yt-subtitle for silencedetect-based
+        # pause-splitting). Always emitted next to the output MP4 — even
+        # without --keep-temp — so the subtitle step can find real speech
+        # pauses without re-running Demucs.
+        vocals_sidecar = inputs.output_path.with_name(
+            f"{inputs.output_path.stem}.vocals.wav"
+        )
+        shutil.copy(voice_for_mix, vocals_sidecar)
+        _log(f"vocals sidecar written to {vocals_sidecar.name}")
+
         _log(f"success: {inputs.output_path}")
         return inputs.output_path
     finally:
