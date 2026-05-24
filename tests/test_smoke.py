@@ -6687,3 +6687,127 @@ def test_render_writes_music_credits_sidecar(tmp_path, monkeypatch):
     credits = out.with_name("seg_clean_music_credits.txt")
     assert credits.exists()
     assert "credit-AT-REST" in credits.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# music_detect: classify "music" vs "no music" intervals on a no_vocals stem.
+# Synthetic WAV fixtures here (sine for music, silence / white-noise for non-
+# music) drive the detector directly — no subprocess / ffmpeg / numpy mocking.
+# ---------------------------------------------------------------------------
+
+import numpy as _md_np
+import soundfile as _md_sf
+
+
+_MD_SR = 16000  # sample rate used across the synthetic fixtures
+
+
+def _md_write_wav(path: Path, segments: list[tuple[str, float, float]]) -> None:
+    """Render a sequence of (kind, duration_s, level) segments to a mono WAV.
+
+    kind: "sine" (440 Hz), "silence", "noise" (uniform white noise).
+    level: linear amplitude in [0, 1].  -20 dBFS ≈ 0.1.
+    """
+    _md_np.random.seed(0)
+    parts = []
+    t_offset = 0.0
+    for kind, dur, level in segments:
+        n = int(round(dur * _MD_SR))
+        if kind == "sine":
+            t = (_md_np.arange(n) + int(round(t_offset * _MD_SR))) / _MD_SR
+            parts.append(level * _md_np.sin(2 * _md_np.pi * 440.0 * t))
+        elif kind == "silence":
+            parts.append(_md_np.zeros(n))
+        elif kind == "noise":
+            parts.append(level * (2 * _md_np.random.random(n) - 1))
+        else:
+            raise ValueError(f"unknown segment kind: {kind}")
+        t_offset += dur
+    sig = _md_np.concatenate(parts).astype(_md_np.float32)
+    _md_sf.write(str(path), sig, _MD_SR)
+
+
+def test_detect_music_intervals_finds_continuous_music(tmp_path):
+    from video2yt.music_detect import detect_music_intervals
+
+    wav = tmp_path / "music.wav"
+    _md_write_wav(wav, [("sine", 10.0, 0.1)])  # -20 dBFS sine for 10s
+
+    long_intervals, all_intervals = detect_music_intervals(wav)
+
+    assert len(long_intervals) == 1
+    start, end = long_intervals[0]
+    assert start == pytest.approx(0.0, abs=0.5)
+    assert end == pytest.approx(10.0, abs=0.5)
+    assert all_intervals == long_intervals
+
+
+def test_detect_music_intervals_skips_short_bursts(tmp_path):
+    from video2yt.music_detect import detect_music_intervals
+
+    wav = tmp_path / "bursts.wav"
+    # 3s sine + 10s silence + 3s sine — neither sine is long enough to keep.
+    _md_write_wav(wav, [
+        ("sine", 3.0, 0.1),
+        ("silence", 10.0, 0.0),
+        ("sine", 3.0, 0.1),
+    ])
+
+    long_intervals, all_intervals = detect_music_intervals(wav)
+
+    assert long_intervals == []
+    assert len(all_intervals) == 2
+    s1, e1 = all_intervals[0]
+    s2, e2 = all_intervals[1]
+    # 1s sliding window → up to ~1s slop on edges where music meets silence.
+    assert s1 == pytest.approx(0.0, abs=1.0)
+    assert e1 == pytest.approx(3.0, abs=1.0)
+    assert s2 == pytest.approx(13.0, abs=1.0)
+    assert e2 == pytest.approx(16.0, abs=1.0)
+    # Each short region under 5s.
+    for s, e in all_intervals:
+        assert (e - s) < 5.0
+
+
+def test_detect_music_intervals_merges_via_gap_fill(tmp_path):
+    from video2yt.music_detect import detect_music_intervals
+
+    wav = tmp_path / "gap.wav"
+    # 4s sine + 0.5s silence + 3s sine → one merged interval ≈ 7.5s.
+    _md_write_wav(wav, [
+        ("sine", 4.0, 0.1),
+        ("silence", 0.5, 0.0),
+        ("sine", 3.0, 0.1),
+    ])
+
+    long_intervals, all_intervals = detect_music_intervals(wav)
+
+    assert len(long_intervals) == 1
+    start, end = long_intervals[0]
+    assert start == pytest.approx(0.0, abs=0.5)
+    assert end == pytest.approx(7.5, abs=0.7)
+    assert (end - start) >= 5.0
+    assert all_intervals == long_intervals
+
+
+def test_detect_music_intervals_ignores_silence(tmp_path):
+    from video2yt.music_detect import detect_music_intervals
+
+    wav = tmp_path / "silence.wav"
+    _md_write_wav(wav, [("silence", 30.0, 0.0)])
+
+    long_intervals, all_intervals = detect_music_intervals(wav)
+
+    assert long_intervals == []
+    assert all_intervals == []
+
+
+def test_detect_music_intervals_ignores_white_noise_pulses(tmp_path):
+    from video2yt.music_detect import detect_music_intervals
+
+    wav = tmp_path / "noise.wav"
+    _md_write_wav(wav, [("noise", 10.0, 0.3)])  # loud, but spectrally flat
+
+    long_intervals, all_intervals = detect_music_intervals(wav)
+
+    assert long_intervals == []
