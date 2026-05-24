@@ -7,6 +7,9 @@ new audio back into the video (no video re-encode).
 """
 from __future__ import annotations
 
+import json
+import math
+import re
 import shutil
 import subprocess
 import sys
@@ -262,6 +265,129 @@ def _write_credits(output_path: Path, credit_lines: list[str]) -> Path:
     return credits_path
 
 
+# ---------------------------------------------------------------------------
+# Debug sidecar (Stage 1 of docs/superpowers/plans/2026-05-23-music-swap-
+# conditional-bgm.md).
+#
+# Every successful render writes ``<output_stem>_music_swap_debug.json``
+# beside the output MP4. The sidecar captures the run's config, the bed
+# timeline, and per-30s chunk loudness for the ``vocals`` and ``no_vocals``
+# Demucs stems so bleed / gating regressions can be diagnosed offline without
+# re-running Demucs. Schema is documented inline so future stages of the plan
+# can extend it.
+# ---------------------------------------------------------------------------
+
+
+_RMS_LEVEL_RE = re.compile(
+    r"lavfi\.astats\.Overall\.RMS_level\s*=\s*(-?\d+(?:\.\d+)?)"
+)
+
+
+def _measure_chunk_loudness(
+    wav_path: Path,
+    duration_seconds: float,
+    chunk_seconds: int = 30,
+) -> list[float]:
+    """Return one mean-RMS-in-dB number per ``chunk_seconds`` slice of ``wav_path``.
+
+    The output list has length ``ceil(duration_seconds / chunk_seconds)``.
+    ffmpeg's ``astats=metadata=1:reset=1`` emits the overall RMS level for the
+    samples it sees; running it once per ``-ss start -t chunk`` window gives a
+    per-chunk number. Mean RMS (not true integrated LUFS) is the trade-off the
+    plan calls for: one ffmpeg invocation per chunk, no second pass, easy to
+    mock at the ``subprocess.run`` boundary. Unparseable chunks contribute
+    ``-inf`` (preferable to silently dropping data points).
+    """
+    if chunk_seconds <= 0:
+        raise ValueError("chunk_seconds must be a positive integer")
+    if duration_seconds <= 0:
+        return []
+    n_chunks = math.ceil(duration_seconds / chunk_seconds)
+    values: list[float] = []
+    for i in range(n_chunks):
+        start = i * chunk_seconds
+        cmd = [
+            "ffmpeg", "-hide_banner", "-nostats",
+            "-ss", f"{start}",
+            "-t", f"{chunk_seconds}",
+            "-i", str(wav_path),
+            "-af",
+            "astats=metadata=1:reset=1,"
+            "ametadata=print:key=lavfi.astats.Overall.RMS_level",
+            "-f", "null", "-",
+        ]
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        # astats writes metadata to stderr by default; some ffmpeg builds also
+        # surface it on stdout. Scan both so the parse is resilient.
+        haystack = (result.stderr or "") + "\n" + (result.stdout or "")
+        matches = _RMS_LEVEL_RE.findall(haystack)
+        if matches:
+            # One RMS_level per reset window — for a single chunk that's one
+            # number. If multiple show up, average them rather than dropping.
+            parsed = [float(m) for m in matches]
+            values.append(sum(parsed) / len(parsed))
+        else:
+            values.append(float("-inf"))
+    return values
+
+
+def _compute_track_timeline(
+    tracks: list,
+    crossfade: float,
+    manifest: list[dict] | None = None,
+) -> list[dict]:
+    """Return the per-track timeline entries for the debug sidecar.
+
+    ``acrossfade`` overlaps consecutive tracks by ``crossfade`` seconds, so for
+    a sequence of N tracks the start-of-track in the stitched bed is::
+
+        start_in_bed[N] = sum(durations[0..N-1]) - N * crossfade
+
+    Track 0 starts at 0; subsequent tracks slide left by ``crossfade`` per
+    boundary they sit behind. Attribution (when the track is in the manifest)
+    is recorded so the sidecar is self-contained.
+    """
+    by_filename = {}
+    if manifest:
+        # Mirror music_library._cache_filename without re-importing the helper.
+        for entry in manifest:
+            ext = Path(entry["url"]).suffix or ".mp3"
+            by_filename[f"{entry['name']}{ext}"] = entry
+
+    entries: list[dict] = []
+    cumulative_prev_duration = 0.0
+    for i, track in enumerate(tracks):
+        # start_in_bed = sum(prev durations) - i * crossfade
+        start_in_bed = cumulative_prev_duration - i * crossfade
+        if start_in_bed < 0:
+            start_in_bed = 0.0
+        attribution = ""
+        entry = by_filename.get(track.name)
+        if entry:
+            attribution = entry.get("attribution") or ""
+        entries.append({
+            "name": track.name,
+            "start_in_bed": round(float(start_in_bed), 6),
+            "duration_seconds": float(track.duration),
+            "attribution": attribution,
+        })
+        cumulative_prev_duration += track.duration
+    return entries
+
+
+def _write_swap_debug(output_path: Path, payload: dict) -> Path:
+    """Write the debug sidecar next to ``output_path`` and return its path."""
+    sidecar = output_path.with_name(
+        f"{output_path.stem}_music_swap_debug.json"
+    )
+    sidecar.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False)
+        + "\n",
+        encoding="utf-8",
+    )
+    return sidecar
+
+
 def render(inputs: MusicSwapInputs) -> Path:
     """Run the full music-swap pipeline and return the output path.
 
@@ -341,6 +467,56 @@ def render(inputs: MusicSwapInputs) -> Path:
                 f"music credits written to {credits_path.name} — paste them "
                 f"into the YouTube description"
             )
+
+        # Stage 1 of 2026-05-23 conditional-bgm plan: emit a debug sidecar
+        # capturing the run config, bed timeline, and per-30s chunk loudness
+        # on both Demucs stems. Measured AFTER validation succeeds so a busted
+        # output never produces a misleading sidecar; emitted BEFORE the temp
+        # dir is wiped so vocals.wav / no_vocals.wav are still readable.
+        no_vocals = vocals.with_name("no_vocals.wav")
+        loudness_vocals: list[float] = []
+        loudness_no_vocals: list[float] = []
+        try:
+            if vocals.exists():
+                loudness_vocals = _measure_chunk_loudness(
+                    vocals, src_info.duration, chunk_seconds=30,
+                )
+            if no_vocals.exists():
+                loudness_no_vocals = _measure_chunk_loudness(
+                    no_vocals, src_info.duration, chunk_seconds=30,
+                )
+        except subprocess.CalledProcessError as e:  # pragma: no cover - defensive
+            _log(f"WARNING: chunk-loudness probe failed: {e}; sidecar will be partial")
+
+        debug_payload = {
+            "input_path": str(inputs.input_path),
+            "output_path": str(inputs.output_path),
+            "duration_seconds": float(src_info.duration),
+            "config": {
+                "model": inputs.model,
+                "device": _pick_device(),
+                "seed": inputs.seed,
+                "music_volume": inputs.music_volume,
+                "duck": inputs.duck,
+                "vocal_gate": {
+                    "enabled": inputs.vocal_gate,
+                    "threshold": inputs.vocal_gate_threshold,
+                    "release_ms": inputs.vocal_gate_release_ms,
+                },
+            },
+            "music_bed": {
+                "crossfade_seconds": 2.0,
+                "tracks": _compute_track_timeline(sequence, crossfade=2.0,
+                                                  manifest=manifest),
+            },
+            "chunk_loudness_db": {
+                "chunk_seconds": 30,
+                "vocals": loudness_vocals,
+                "no_vocals": loudness_no_vocals,
+            },
+        }
+        sidecar_path = _write_swap_debug(inputs.output_path, debug_payload)
+        _log(f"debug sidecar written to {sidecar_path.name}")
 
         _log(f"success: {inputs.output_path}")
         return inputs.output_path

@@ -6811,3 +6811,215 @@ def test_detect_music_intervals_ignores_white_noise_pulses(tmp_path):
     long_intervals, all_intervals = detect_music_intervals(wav)
 
     assert long_intervals == []
+
+
+# ---------------------------------------------------------------------------
+# Debug sidecar (Stage 1 of 2026-05-23 conditional-bgm plan)
+# ---------------------------------------------------------------------------
+
+
+def _stub_render_dependencies(monkeypatch, *, duration=300.0, manifest=None,
+                              sequence=None, loudness_vocals=None,
+                              loudness_no_vocals=None):
+    """Wire up monkeypatches so render() runs end-to-end against fakes.
+
+    The defaults mirror test_render_orchestrates_pipeline_in_order so each
+    sidecar test only overrides the bits it cares about.
+    """
+    manifest = manifest if manifest is not None else []
+    sequence = (sequence
+                if sequence is not None
+                else [_track("a.mp3", 400.0)])
+    loudness_vocals = (loudness_vocals
+                       if loudness_vocals is not None
+                       else [-20.0, -19.0, -21.0])
+    loudness_no_vocals = (loudness_no_vocals
+                          if loudness_no_vocals is not None
+                          else [-30.0, -32.0, -28.0])
+
+    monkeypatch.setattr(
+        "video2yt.music_swap.validate.probe",
+        lambda p: _mk_info(duration=duration, width=1920, height=1080,
+                           has_video=True, has_audio=True, vcodec="h264"))
+    monkeypatch.setattr("video2yt.music_swap.extract_audio",
+                        lambda i, o: o.write_bytes(b"a"))
+
+    def fake_separate(wav, model, demucs_out):
+        # Demucs writes <out>/<model>/<wav_stem>/{vocals,no_vocals}.wav.
+        stem_dir = demucs_out / model / wav.stem
+        stem_dir.mkdir(parents=True, exist_ok=True)
+        (stem_dir / "vocals.wav").write_bytes(b"V")
+        (stem_dir / "no_vocals.wav").write_bytes(b"N")
+        return stem_dir / "vocals.wav"
+
+    monkeypatch.setattr("video2yt.music_swap.separate_vocals", fake_separate)
+    monkeypatch.setattr(
+        "video2yt.music_swap.gate_vocals",
+        lambda v, gp, threshold=0.015, release_ms=250: gp.write_bytes(b"g"))
+    monkeypatch.setattr(
+        "video2yt.music_swap.music_library.ensure_manifest_cached",
+        lambda manifest_, cache: None)
+    monkeypatch.setattr("video2yt.music_swap.music_library.load_manifest",
+                        lambda: manifest)
+    monkeypatch.setattr("video2yt.music_swap.music_library.scan_cache",
+                        lambda cache: sequence)
+    monkeypatch.setattr("video2yt.music_swap.music_library.select_sequence",
+                        lambda pool, dur, crossfade, seed: sequence)
+    monkeypatch.setattr("video2yt.music_swap.build_music_bed",
+                        lambda seq, dur, bed, crossfade=2.0:
+                        bed.write_bytes(b"b"))
+    monkeypatch.setattr("video2yt.music_swap.mix",
+                        lambda v, b, mv, dk, mp: mp.write_bytes(b"m"))
+    monkeypatch.setattr("video2yt.music_swap.remux",
+                        lambda i, m, o: o.write_bytes(b"o"))
+
+    def fake_measure(wav_path, duration_seconds, chunk_seconds=30):
+        if wav_path.name == "vocals.wav":
+            return list(loudness_vocals)
+        return list(loudness_no_vocals)
+
+    monkeypatch.setattr("video2yt.music_swap._measure_chunk_loudness",
+                        fake_measure)
+
+
+def test_swap_debug_sidecar_written(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "seg_clean.mp4"
+
+    _stub_render_dependencies(monkeypatch, duration=300.0)
+    music_swap.render(music_swap.MusicSwapInputs(input_path=src,
+                                                 output_path=out))
+
+    sidecar = out.with_name("seg_clean_music_swap_debug.json")
+    assert sidecar.exists()
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    for key in ("input_path", "output_path", "duration_seconds", "config",
+                "music_bed", "chunk_loudness_db"):
+        assert key in payload, f"sidecar missing top-level key {key!r}"
+    assert payload["input_path"] == str(src)
+    assert payload["output_path"] == str(out)
+    assert payload["duration_seconds"] == 300.0
+    cfg = payload["config"]
+    for key in ("model", "device", "seed", "music_volume", "duck",
+                "vocal_gate"):
+        assert key in cfg, f"sidecar config missing {key!r}"
+    for key in ("enabled", "threshold", "release_ms"):
+        assert key in cfg["vocal_gate"]
+
+
+def test_swap_debug_sidecar_contains_track_timeline(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "seg_clean.mp4"
+
+    # Three tracks: 100s + 200s + 150s with crossfade=2 -> expected starts at
+    # 0, 98, 296 (cumulative_duration - N * crossfade).
+    seq = [_track("first.mp3", 100.0),
+           _track("second.mp3", 200.0),
+           _track("third.mp3", 150.0)]
+    manifest = [
+        {"name": "first", "url": "http://x/first.mp3", "sha256": "a",
+         "duration": 100.0, "license": "CC BY 3.0", "attribution": "credit-1"},
+        {"name": "second", "url": "http://x/second.mp3", "sha256": "b",
+         "duration": 200.0, "license": "CC BY 3.0", "attribution": "credit-2"},
+    ]
+    _stub_render_dependencies(monkeypatch, duration=400.0, sequence=seq,
+                              manifest=manifest)
+    music_swap.render(music_swap.MusicSwapInputs(input_path=src,
+                                                 output_path=out))
+
+    sidecar = out.with_name("seg_clean_music_swap_debug.json")
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    tracks = payload["music_bed"]["tracks"]
+    assert [t["name"] for t in tracks] == ["first.mp3", "second.mp3",
+                                           "third.mp3"]
+    starts = [t["start_in_bed"] for t in tracks]
+    assert starts == [0.0, 98.0, 296.0]
+    # monotonically ascending — required for any timeline-based debugging.
+    assert starts == sorted(starts)
+    assert all(b > a for a, b in zip(starts, starts[1:]))
+    assert payload["music_bed"]["crossfade_seconds"] == 2.0
+    # Tracks present in the manifest must surface their attribution string;
+    # ones missing from the manifest (user-supplied) carry an empty string.
+    by_name = {t["name"]: t for t in tracks}
+    assert by_name["first.mp3"]["attribution"] == "credit-1"
+    assert by_name["second.mp3"]["attribution"] == "credit-2"
+    assert by_name["third.mp3"]["attribution"] == ""
+
+
+def test_swap_debug_sidecar_contains_chunk_loudness(tmp_path, monkeypatch):
+    src = tmp_path / "seg.mp4"
+    src.write_bytes(b"x" * 100)
+    out = tmp_path / "seg_clean.mp4"
+
+    _stub_render_dependencies(
+        monkeypatch,
+        duration=90.0,
+        loudness_vocals=[-10.0, -12.0, -14.0],
+        loudness_no_vocals=[-20.0, -22.0, -24.0],
+    )
+    music_swap.render(music_swap.MusicSwapInputs(input_path=src,
+                                                 output_path=out))
+
+    sidecar = out.with_name("seg_clean_music_swap_debug.json")
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    chunks = payload["chunk_loudness_db"]
+    assert chunks["chunk_seconds"] == 30
+    # 90s / 30s = 3 chunks for each stem.
+    assert len(chunks["vocals"]) == 3
+    assert len(chunks["no_vocals"]) == 3
+    assert chunks["vocals"] == [-10.0, -12.0, -14.0]
+    assert chunks["no_vocals"] == [-20.0, -22.0, -24.0]
+
+
+def test_compute_track_timeline_acrossfade_math():
+    # 3 tracks: 100s + 200s + 150s, crossfade=2 -> starts at 0, 98, 296.
+    # The acrossfade formula: start_in_bed[N] = sum(prev durations) - N * crossfade.
+    seq = [_track("a.mp3", 100.0),
+           _track("b.mp3", 200.0),
+           _track("c.mp3", 150.0)]
+    timeline = music_swap._compute_track_timeline(seq, crossfade=2.0)
+    assert [t["start_in_bed"] for t in timeline] == [0.0, 98.0, 296.0]
+    assert [t["duration_seconds"] for t in timeline] == [100.0, 200.0, 150.0]
+    assert [t["name"] for t in timeline] == ["a.mp3", "b.mp3", "c.mp3"]
+
+
+def test_compute_track_timeline_single_track():
+    seq = [_track("only.mp3", 300.0)]
+    timeline = music_swap._compute_track_timeline(seq, crossfade=2.0)
+    assert timeline == [{"name": "only.mp3", "start_in_bed": 0.0,
+                         "duration_seconds": 300.0, "attribution": ""}]
+
+
+def test_measure_chunk_loudness_parses_astats_output(tmp_path, monkeypatch):
+    """_measure_chunk_loudness should run ffmpeg per chunk and parse one
+    RMS_level number out of stderr per call."""
+    wav = tmp_path / "vocals.wav"
+    wav.write_bytes(b"x")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        result = MagicMock()
+        # ffmpeg emits ametadata lines on stderr.
+        result.stderr = (
+            "[Parsed_ametadata_1 @ 0x1] "
+            "lavfi.astats.Overall.RMS_level=-17.42\n"
+        )
+        result.stdout = ""
+        result.returncode = 0
+        return result
+
+    monkeypatch.setattr("video2yt.music_swap.subprocess.run", fake_run)
+    values = music_swap._measure_chunk_loudness(wav, duration_seconds=90.0,
+                                                chunk_seconds=30)
+    assert len(values) == 3
+    assert all(abs(v - (-17.42)) < 1e-6 for v in values)
+    # One ffmpeg call per chunk.
+    assert len(calls) == 3
+    # Each call points at the wav and uses astats.
+    for cmd in calls:
+        assert cmd[0] == "ffmpeg"
+        assert str(wav) in cmd
+        assert any("astats" in a for a in cmd)
