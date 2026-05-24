@@ -856,6 +856,7 @@ def burn_subtitles(
     shadow_px: int,
     video_width: int,
     video_height: int,
+    margin_v: int = 80,
 ) -> None:
     """Burn ``entries`` into ``input_video``, write to ``output_video``.
 
@@ -909,6 +910,7 @@ def burn_subtitles(
     ass_text = srt_to_ass(
         srt_text, video_width, video_height, font_face, font_size,
         position="bottom", outline_px=outline_px, shadow_px=shadow_px,
+        margin_v=margin_v,
     )
 
     ass_path = input_video.parent / f"{input_video.stem}.subbed.ass"

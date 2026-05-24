@@ -112,9 +112,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     parser.add_argument("--font-face", default="Hiragino Sans GB")
     parser.add_argument("--font-size", type=int, default=None,
-                        help="Default: auto (height * 25/540)")
-    parser.add_argument("--outline-px", type=int, default=4)
-    parser.add_argument("--shadow-px", type=int, default=2)
+                        help="Default: auto (height * 18/1080, min 16)")
+    parser.add_argument("--outline-px", type=int, default=2)
+    parser.add_argument("--shadow-px", type=int, default=0)
+    parser.add_argument(
+        "--margin-v", type=int, default=15,
+        help=(
+            "ASS MarginV in pixels (distance from bottom edge for "
+            "bottom-aligned subtitles). Default: 15 — keeps subs close to "
+            "the bottom so they don't cover game UI in HS BG footage."
+        ),
+    )
 
     parser.add_argument(
         "-o", "--output", type=Path, default=None,
@@ -246,7 +254,7 @@ def run(args: argparse.Namespace) -> Path:
         _log(f"cleanup done in {time.time() - t0:.1f}s")
 
     # Split (style-dependent, never cached)
-    font_size = args.font_size if args.font_size is not None else max(int(info.height * 25 / 540), 24)
+    font_size = args.font_size if args.font_size is not None else max(int(info.height * 18 / 1080), 16)
     max_line_chars = _effective_chars_per_line(
         font_size=font_size, video_width=info.width, margin_l=80, margin_r=80,
     )
@@ -260,6 +268,7 @@ def run(args: argparse.Namespace) -> Path:
         args.segment, final_entries, output,
         font_face=args.font_face, font_size=font_size,
         outline_px=args.outline_px, shadow_px=args.shadow_px,
+        margin_v=args.margin_v,
         video_width=info.width, video_height=info.height,
     )
     _log(f"burn done in {time.time() - t0:.1f}s")

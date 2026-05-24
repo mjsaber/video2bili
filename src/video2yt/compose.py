@@ -180,6 +180,7 @@ def srt_to_ass(
     position: str = "center",
     outline_px: int = 2,
     shadow_px: int = 0,
+    margin_v: int = 80,
 ) -> str:
     """Convert SRT text to ASS text with pixel-accurate script resolution.
 
@@ -187,12 +188,13 @@ def srt_to_ass(
     ``FontSize`` units equal display pixels exactly. Produces a single
     ``Default`` style with the given font and size, white primary colour,
     black outline (default 2px, configurable via ``outline_px``),
-    no shadow by default (``shadow_px`` configurable), MarginV=80.
+    no shadow by default (``shadow_px`` configurable), and ``MarginV``
+    configurable (default 80; lower values move bottom-aligned subtitles
+    closer to the frame edge).
 
     ``position`` maps to an ASS ``Alignment`` value: ``"bottom"`` -> 2
     (bottom centre), ``"center"`` -> 5 (middle centre), ``"top"`` -> 8 (top
-    centre). For Alignment=5, libass ignores MarginV; we still emit 80 in
-    the style which is harmless.
+    centre). For Alignment=5, libass ignores MarginV.
 
     Raises ``ValueError`` if no parseable dialogue blocks are found or if
     ``position`` is not one of the supported values.
@@ -205,7 +207,6 @@ def srt_to_ass(
         )
     margin_l = 80
     margin_r = 80
-    margin_v = 80
     max_chars_per_line = _effective_chars_per_line(
         font_size=font_size,
         video_width=video_width,

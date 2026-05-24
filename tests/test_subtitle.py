@@ -622,6 +622,44 @@ def test_burn_passes_outline_shadow_via_compose(mock_run, tmp_path):
 
 
 @patch("subprocess.run")
+def test_burn_default_margin_v_is_80(mock_run, tmp_path):
+    """No margin_v arg → ASS style emits MarginV=80 (compose default)."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"fake")
+    output_mp4 = tmp_path / "seg_subbed.mp4"
+    entries = [subtitle.SrtEntry(0.0, 2.0, "你好")]
+    subtitle.burn_subtitles(
+        input_mp4, entries, output_mp4,
+        font_face="Hiragino Sans GB", font_size=42,
+        outline_px=2, shadow_px=0,
+        video_width=1920, video_height=1080,
+    )
+    ass_text = next(input_mp4.parent.glob("*.ass")).read_text(encoding="utf-8")
+    style_line = [l for l in ass_text.splitlines() if l.startswith("Style: Default,")][0]
+    assert style_line.split(",")[21].strip() == "80"
+
+
+@patch("subprocess.run")
+def test_burn_propagates_margin_v(mock_run, tmp_path):
+    """margin_v=15 → ASS style emits MarginV=15."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+    input_mp4 = tmp_path / "seg.mp4"
+    input_mp4.write_bytes(b"fake")
+    output_mp4 = tmp_path / "seg_subbed.mp4"
+    entries = [subtitle.SrtEntry(0.0, 2.0, "你好")]
+    subtitle.burn_subtitles(
+        input_mp4, entries, output_mp4,
+        font_face="Hiragino Sans GB", font_size=18,
+        outline_px=2, shadow_px=0, margin_v=15,
+        video_width=1920, video_height=1080,
+    )
+    ass_text = next(input_mp4.parent.glob("*.ass")).read_text(encoding="utf-8")
+    style_line = [l for l in ass_text.splitlines() if l.startswith("Style: Default,")][0]
+    assert style_line.split(",")[21].strip() == "15"
+
+
+@patch("subprocess.run")
 def test_burn_uses_audio_copy(mock_run, tmp_path):
     mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
     input_mp4 = tmp_path / "seg.mp4"
@@ -851,8 +889,9 @@ def test_parse_args_defaults():
     assert args.danmaku_min_coverage == 30
     assert args.skip_cleanup is False
     assert args.font_face == "Hiragino Sans GB"
-    assert args.outline_px == 4
-    assert args.shadow_px == 2
+    assert args.outline_px == 2
+    assert args.shadow_px == 0
+    assert args.margin_v == 15
 
 
 def test_parse_args_enable_ocr():

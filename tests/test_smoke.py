@@ -2742,6 +2742,27 @@ def test_srt_to_ass_rejects_invalid_position():
         srt_to_ass(srt, 1920, 1080, "Font", 42, position="sideways")
 
 
+def test_srt_to_ass_default_margin_v_is_80():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(srt, 1920, 1080, "Font", 42, position="bottom")
+    style_line = [l for l in ass.splitlines() if l.startswith("Style: Default,")][0]
+    fields = style_line.split(",")
+    # MarginV is at index 21 (MarginL=19, MarginR=20, MarginV=21).
+    assert fields[21].strip() == "80"
+
+
+def test_srt_to_ass_custom_margin_v_propagates():
+    from video2yt.compose import srt_to_ass
+    srt = "1\n00:00:00,000 --> 00:00:02,000\nhi\n"
+    ass = srt_to_ass(
+        srt, 1920, 1080, "Font", 42, position="bottom", margin_v=15,
+    )
+    style_line = [l for l in ass.splitlines() if l.startswith("Style: Default,")][0]
+    fields = style_line.split(",")
+    assert fields[21].strip() == "15"
+
+
 def test_render_builds_correct_ffmpeg_command(tmp_path, monkeypatch):
     work_dir = tmp_path / "srt_dir"
     work_dir.mkdir()
