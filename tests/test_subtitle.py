@@ -1037,53 +1037,55 @@ def test_pause_split_threshold_zero_disabled():
 @patch("video2yt.subtitle._extract_wav")
 @patch("video2yt.subtitle._run_alignment")
 @patch("video2yt.subtitle._run_asr")
-def test_transcribe_calls_alignment_when_pause_split_enabled(
+def test_transcribe_returns_raw_asr_without_pause_split(
     mock_asr, mock_align, mock_extract, tmp_path
 ):
+    """transcribe() never runs alignment — it returns raw ASR. Pause-split
+    is a separate CLI-orchestrated step (independent cache key)."""
     mock_extract.return_value = tmp_path / "audio.wav"
     mock_asr.return_value = [(0.0, 10.0, "你好世界")]
-    mock_align.return_value = [
-        ("你", 0.0, 1.0),
-        ("好", 1.0, 2.0),
-        ("世", 5.0, 6.0),
-        ("界", 6.0, 10.0),
-    ]
-    out = subtitle.transcribe(Path("seg.mp4"), pause_split_seconds=0.6)
-    assert mock_align.called
-    assert len(out) == 2  # one pause >=0.6s → split into 2 sub-segments
-    assert out[0].text == "你好"
-    assert out[1].text == "世界"
-
-
-@patch("video2yt.subtitle._extract_wav")
-@patch("video2yt.subtitle._run_alignment")
-@patch("video2yt.subtitle._run_asr")
-def test_transcribe_skips_alignment_when_pause_split_zero(
-    mock_asr, mock_align, mock_extract, tmp_path
-):
-    mock_extract.return_value = tmp_path / "audio.wav"
-    mock_asr.return_value = [(0.0, 5.0, "你好")]
-    out = subtitle.transcribe(Path("seg.mp4"), pause_split_seconds=0.0)
+    out = subtitle.transcribe(Path("seg.mp4"))
     assert not mock_align.called
-    assert out == [subtitle.FunASRSegment(0.0, 5.0, "你好")]
+    assert out == [subtitle.FunASRSegment(0.0, 10.0, "你好世界")]
 
 
 @patch("video2yt.subtitle._extract_wav")
 @patch("video2yt.subtitle._run_alignment")
-@patch("video2yt.subtitle._run_asr")
-def test_transcribe_alignment_failure_falls_back_to_asr_segments(
-    mock_asr, mock_align, mock_extract, tmp_path, caplog
+def test_transcribe_alignment_returns_word_tuples(
+    mock_align, mock_extract, tmp_path
 ):
+    """transcribe_alignment() returns whisperx word-level tuples."""
     mock_extract.return_value = tmp_path / "audio.wav"
-    mock_asr.return_value = [(0.0, 5.0, "你好")]
+    mock_align.return_value = [
+        ("你", 0.0, 0.5),
+        ("好", 0.5, 1.0),
+    ]
+    out = subtitle.transcribe_alignment(Path("seg.mp4"))
+    assert out == [("你", 0.0, 0.5), ("好", 0.5, 1.0)]
+
+
+@patch("video2yt.subtitle._extract_wav")
+@patch("video2yt.subtitle._run_alignment")
+def test_transcribe_alignment_propagates_failure(
+    mock_align, mock_extract, tmp_path
+):
+    """Alignment failure raises — the CLI catches it and falls back."""
+    mock_extract.return_value = tmp_path / "audio.wav"
     mock_align.side_effect = RuntimeError("alignment model OOM")
+    with pytest.raises(RuntimeError, match="alignment model OOM"):
+        subtitle.transcribe_alignment(Path("seg.mp4"))
 
-    out = subtitle.transcribe(Path("seg.mp4"), pause_split_seconds=0.6)
 
-    # Alignment was attempted...
-    assert mock_align.called
-    # ...but the segments come from ASR, untouched
-    assert out == [subtitle.FunASRSegment(0.0, 5.0, "你好")]
+def test_threshold_filename_suffix_basic_values():
+    """Threshold-to-filename mapping must be stable, safe, and reversible
+    enough for cache invalidation."""
+    from video2yt.subtitle_cli import _threshold_filename_suffix
+    assert _threshold_filename_suffix(0.6) == "p0p6"
+    assert _threshold_filename_suffix(1.0) == "p1"
+    assert _threshold_filename_suffix(1.25) == "p1p25"
+    assert _threshold_filename_suffix(0) == "p0"
+    # Different thresholds → different suffixes → cleanup cache invalidation
+    assert _threshold_filename_suffix(0.5) != _threshold_filename_suffix(0.6)
 
 
 def test_cli_parse_pause_split_seconds_default():
@@ -1102,3 +1104,55 @@ def test_cli_parse_pause_split_seconds_zero_disables():
     from video2yt import subtitle_cli
     args = subtitle_cli.parse_args(["seg.mp4", "--pause-split-seconds", "0"])
     assert args.pause_split_seconds == 0.0
+
+
+def test_pause_split_clamps_pre_boundary_word_to_seg_start():
+    """A word that lands BEFORE seg.start (within tolerance) and is followed
+    by a gap >= threshold must NOT produce an inverted sub-segment. Codex
+    BLOCKER 1 from the 2026-05-23 review — fixed by clamping sub-segment
+    bounds to [seg.start, seg.end] and skipping if end <= start.
+    """
+    seg = subtitle.FunASRSegment(5.0, 15.0, "你好世界")
+    # First word ends at 4.9s (within 0.2s tolerance of seg.start=5.0).
+    # Then a 1.0s gap → would split, producing a degenerate first
+    # sub-segment with start=seg.start=5.0 but end=4.9 (BEFORE start).
+    words = [
+        ("前", 4.85, 4.95),
+        # gap 4.95 -> 6.0 = 1.05s >= 0.6 → splits
+        ("你", 6.0, 6.5),
+        ("好", 6.5, 7.0),
+        ("世", 7.0, 7.5),
+        ("界", 7.5, 15.0),
+    ]
+    out = subtitle._split_segments_on_pauses(
+        [seg], words, pause_threshold_s=0.6,
+    )
+    # The degenerate "前" sub-segment must be dropped, leaving just one
+    # valid sub-segment from the second group.
+    assert all(o.end > o.start for o in out)
+    assert len(out) == 1
+    assert out[0].text == "你好世界"
+    assert out[0].start == 5.0  # not 6.0 — first surviving sub-segment uses seg.start
+    assert out[0].end == 15.0
+
+
+def test_pause_split_clamps_post_boundary_word_to_seg_end():
+    """Symmetric to the pre-boundary case: a word lands AFTER seg.end
+    (within tolerance) and is preceded by a gap — must not invert."""
+    seg = subtitle.FunASRSegment(0.0, 10.0, "你好世界")
+    words = [
+        ("你", 0.0, 0.5),
+        ("好", 0.5, 1.0),
+        ("世", 1.0, 1.5),
+        ("界", 1.5, 2.0),
+        # gap 2.0 -> 10.15 = 8.15s >= 0.6 → splits
+        ("後", 10.05, 10.15),  # within 0.2s tolerance of seg.end=10.0
+    ]
+    out = subtitle._split_segments_on_pauses(
+        [seg], words, pause_threshold_s=0.6,
+    )
+    assert all(o.end > o.start for o in out)
+    assert len(out) == 1
+    assert out[0].text == "你好世界"
+    assert out[0].start == 0.0
+    assert out[0].end == 10.0  # not 10.15 — last surviving sub-segment uses seg.end

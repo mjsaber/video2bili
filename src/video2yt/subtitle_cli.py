@@ -4,6 +4,7 @@ Spec: docs/superpowers/specs/2026-05-14-video2yt-subtitle-design.md
 """
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,16 @@ def preflight() -> None:
             "whisperx not installed (this should be a top-level dep). "
             "Run: uv sync"
         ) from e
+
+
+def _threshold_filename_suffix(threshold: float) -> str:
+    """Encode a pause-split threshold as a safe filename token.
+
+    Examples: 0.6 → ``p0p6``, 1.25 → ``p1p25``, 0 → ``p0``. Used in
+    ``<stem>.cleaned.{suffix}.srt`` so changing the threshold invalidates
+    the cleanup cache (since cleanup input depends on pause-split output).
+    """
+    return "p" + format(threshold, "g").replace(".", "p").replace("-", "neg")
 
 
 def _default_output(segment: Path) -> Path:
@@ -163,7 +174,7 @@ def run(args: argparse.Namespace) -> Path:
         _log(f"passthrough -> {output}")
         return output
 
-    # ASR (with cache)
+    # ASR (with cache — independent of pause-split threshold)
     raw_srt_path = args.segment.parent / f"{args.segment.stem}.raw.srt"
     if raw_srt_path.exists() and not args.force_asr:
         _log(f"ASR cache hit: {raw_srt_path.name}")
@@ -172,21 +183,57 @@ def run(args: argparse.Namespace) -> Path:
         )
     else:
         t0 = time.time()
-        _log(
-            f"ASR: whisperx (large-v3) on {info.duration:.2f}s audio "
-            f"(pause-split threshold={args.pause_split_seconds}s)..."
-        )
-        raw_segments = subtitle.transcribe(
-            args.segment,
-            pause_split_seconds=args.pause_split_seconds,
-        )
+        _log(f"ASR: whisperx (large-v3) on {info.duration:.2f}s audio...")
+        raw_segments = subtitle.transcribe(args.segment)
         raw_srt_path.write_text(
             subtitle.segments_to_srt(raw_segments), encoding="utf-8"
         )
         _log(f"ASR done in {time.time() - t0:.1f}s ({len(raw_segments)} segments)")
 
-    # Cleanup (with cache)
-    cleaned_srt_path = args.segment.parent / f"{args.segment.stem}.cleaned.srt"
+    # Forced alignment (with cache — independent of pause-split threshold).
+    # Used only when pause-split is enabled. Cached as `.words.json` so
+    # changing the threshold doesn't force a re-alignment.
+    if args.pause_split_seconds > 0:
+        words_path = args.segment.parent / f"{args.segment.stem}.words.json"
+        if words_path.exists() and not args.force_asr:
+            _log(f"alignment cache hit: {words_path.name}")
+            words = [
+                (w, float(s), float(e))
+                for (w, s, e) in json.loads(words_path.read_text(encoding="utf-8"))
+            ]
+        else:
+            t0 = time.time()
+            _log(f"alignment: whisperx forced alignment on {info.duration:.2f}s audio...")
+            try:
+                words = subtitle.transcribe_alignment(args.segment)
+                words_path.write_text(
+                    json.dumps([[w, s, e] for (w, s, e) in words]),
+                    encoding="utf-8",
+                )
+                _log(f"alignment done in {time.time() - t0:.1f}s ({len(words)} words)")
+            except Exception as e:
+                _log(
+                    f"WARNING: whisperx alignment failed "
+                    f"({type(e).__name__}: {e}); falling back to ASR-only segments"
+                )
+                words = []
+
+        if words:
+            pre_count = len(raw_segments)
+            raw_segments = subtitle._split_segments_on_pauses(
+                raw_segments, words,
+                pause_threshold_s=args.pause_split_seconds,
+            )
+            _log(
+                f"pause-split (>={args.pause_split_seconds}s): "
+                f"{pre_count} → {len(raw_segments)} segments"
+            )
+
+    # Cleanup (with threshold-keyed cache, since cleanup input depends on
+    # pause-split output). Filename: `.cleaned.p{th}.srt` where th replaces
+    # `.` with `p` (e.g. 0.6 → p0p6). Forces re-cleanup on threshold change.
+    th_suffix = _threshold_filename_suffix(args.pause_split_seconds)
+    cleaned_srt_path = args.segment.parent / f"{args.segment.stem}.cleaned.{th_suffix}.srt"
     if args.skip_cleanup:
         cleaned_segments = raw_segments
         _log("cleanup skipped (--skip-cleanup)")

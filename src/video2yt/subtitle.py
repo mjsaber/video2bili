@@ -400,41 +400,33 @@ def _run_alignment(wav_path: Path) -> list[tuple[str, float, float]]:
     return run_whisperx_alignment(wav_path)
 
 
-def transcribe(
-    video_path: Path,
-    pause_split_seconds: float = 0.6,
-) -> list[FunASRSegment]:
+def transcribe(video_path: Path) -> list[FunASRSegment]:
     """Run whisperx ASR on the segment's audio. Returns whisper-segment-level segments.
 
     The ``FunASRSegment`` name is preserved for downstream compatibility despite
     the engine swap (SenseVoice → whisperx, 2026-05-15).
 
-    When ``pause_split_seconds > 0`` (default 0.6s), additionally run whisperx
-    forced alignment and split each ASR segment at any word-level gap that
-    meets or exceeds the threshold. Set to ``0`` to disable. Alignment failure
-    is downgraded to a WARNING + ASR-only fallback so a flaky alignment model
-    doesn't take down the whole subtitle pipeline.
+    Pause-based splitting is intentionally NOT done here — the CLI runs
+    alignment + ``_split_segments_on_pauses`` as separate cacheable steps so
+    that changing the pause threshold doesn't force a re-ASR.
     """
     with tempfile.TemporaryDirectory() as td:
         wav = _extract_wav(video_path, Path(td))
         raw = _run_asr(wav)
-        segments = [
-            FunASRSegment(start, end, text.strip())
-            for (start, end, text) in raw
-        ]
-        if pause_split_seconds > 0:
-            try:
-                words = _run_alignment(wav)
-            except Exception as e:
-                _log.warning(
-                    "whisperx alignment failed (%s: %s); falling back to ASR-only segments",
-                    type(e).__name__, e,
-                )
-                return segments
-            segments = _split_segments_on_pauses(
-                segments, words, pause_threshold_s=pause_split_seconds,
-            )
-        return segments
+    return [FunASRSegment(start, end, text.strip()) for (start, end, text) in raw]
+
+
+def transcribe_alignment(video_path: Path) -> list[tuple[str, float, float]]:
+    """Run whisperx forced alignment on the segment's audio and return the
+    full ``[(word, start, end), ...]`` list. The result is independent of the
+    pause threshold, so the CLI caches it separately from the cleanup output.
+
+    Alignment failure raises — the CLI catches and falls back to ASR-only
+    segments with a WARNING log.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        wav = _extract_wav(video_path, Path(td))
+        return _run_alignment(wav)
 
 
 # Tolerance for word-to-segment membership. whisperx alignment can land a few
@@ -525,19 +517,40 @@ def _split_segments_on_pauses(
             out.append(seg)
             continue
 
-        for gi, group in enumerate(groups):
+        # Build provisional sub-segments using each group's word boundaries,
+        # then drop any whose clamped range is degenerate (a pre- or post-
+        # boundary-tolerated word that splits off into its own group can fall
+        # entirely outside [seg.start, seg.end]). The FIRST and LAST groups
+        # that SURVIVE the drop inherit seg.start / seg.end so the parent's
+        # full time range is still covered.
+        candidates: list[tuple[float, float, str]] = []
+        for group in groups:
             if not group:
                 continue
             text = _join_words([w for (w, _s, _e) in group])
-            if gi == 0:
-                start = seg.start
-            else:
-                start = group[0][1]
-            if gi == len(groups) - 1:
-                end = seg.end
-            else:
-                end = group[-1][2]
-            out.append(FunASRSegment(start, end, text))
+            cand_start = max(group[0][1], seg.start)
+            cand_end = min(group[-1][2], seg.end)
+            if cand_end <= cand_start:
+                continue
+            candidates.append((cand_start, cand_end, text))
+
+        if not candidates:
+            out.append(seg)
+            continue
+
+        # First surviving claims seg.start, last claims seg.end. If only one
+        # candidate survives (because all other groups were dropped at the
+        # boundary), that single sub-segment spans the whole parent.
+        if len(candidates) == 1:
+            _, _, t = candidates[0]
+            out.append(FunASRSegment(seg.start, seg.end, t))
+            continue
+        first_s, first_e, first_t = candidates[0]
+        candidates[0] = (seg.start, first_e, first_t)
+        last_s, last_e, last_t = candidates[-1]
+        candidates[-1] = (last_s, seg.end, last_t)
+        for (s, e, t) in candidates:
+            out.append(FunASRSegment(s, e, t))
     return out
 
 
