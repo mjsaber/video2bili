@@ -91,6 +91,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--force-asr", action="store_true")
     parser.add_argument("--force-cleanup", action="store_true")
     parser.add_argument("--skip-cleanup", action="store_true")
+    parser.add_argument(
+        "--pause-split-seconds", type=float, default=0.6,
+        help=(
+            "Split ASR segments at any word-level pause >= this many seconds "
+            "(needs whisperx forced alignment, adds ~2-3 min). 0 disables. "
+            "Default: 0.6s — typical inter-sentence pauses are 0.3-0.8s."
+        ),
+    )
 
     parser.add_argument("--font-face", default="Hiragino Sans GB")
     parser.add_argument("--font-size", type=int, default=None,
@@ -164,8 +172,14 @@ def run(args: argparse.Namespace) -> Path:
         )
     else:
         t0 = time.time()
-        _log(f"ASR: whisperx (large-v3) on {info.duration:.2f}s audio...")
-        raw_segments = subtitle.transcribe(args.segment)
+        _log(
+            f"ASR: whisperx (large-v3) on {info.duration:.2f}s audio "
+            f"(pause-split threshold={args.pause_split_seconds}s)..."
+        )
+        raw_segments = subtitle.transcribe(
+            args.segment,
+            pause_split_seconds=args.pause_split_seconds,
+        )
         raw_srt_path.write_text(
             subtitle.segments_to_srt(raw_segments), encoding="utf-8"
         )

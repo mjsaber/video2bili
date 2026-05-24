@@ -391,16 +391,154 @@ def _run_asr(wav_path: Path, model_name: str = "large-v3") -> list[tuple[float, 
     return out
 
 
-def transcribe(video_path: Path) -> list[FunASRSegment]:
+def _run_alignment(wav_path: Path) -> list[tuple[str, float, float]]:
+    """Run whisperx forced alignment on ``wav_path`` and return word-level
+    timestamps. Thin wrapper over ``transcribe.run_whisperx_alignment`` so
+    tests can monkeypatch ``video2yt.subtitle._run_alignment`` independently
+    of the intro flow."""
+    from .transcribe import run_whisperx_alignment
+    return run_whisperx_alignment(wav_path)
+
+
+def transcribe(
+    video_path: Path,
+    pause_split_seconds: float = 0.6,
+) -> list[FunASRSegment]:
     """Run whisperx ASR on the segment's audio. Returns whisper-segment-level segments.
 
     The ``FunASRSegment`` name is preserved for downstream compatibility despite
     the engine swap (SenseVoice → whisperx, 2026-05-15).
+
+    When ``pause_split_seconds > 0`` (default 0.6s), additionally run whisperx
+    forced alignment and split each ASR segment at any word-level gap that
+    meets or exceeds the threshold. Set to ``0`` to disable. Alignment failure
+    is downgraded to a WARNING + ASR-only fallback so a flaky alignment model
+    doesn't take down the whole subtitle pipeline.
     """
     with tempfile.TemporaryDirectory() as td:
         wav = _extract_wav(video_path, Path(td))
         raw = _run_asr(wav)
-    return [FunASRSegment(start, end, text.strip()) for (start, end, text) in raw]
+        segments = [
+            FunASRSegment(start, end, text.strip())
+            for (start, end, text) in raw
+        ]
+        if pause_split_seconds > 0:
+            try:
+                words = _run_alignment(wav)
+            except Exception as e:
+                _log.warning(
+                    "whisperx alignment failed (%s: %s); falling back to ASR-only segments",
+                    type(e).__name__, e,
+                )
+                return segments
+            segments = _split_segments_on_pauses(
+                segments, words, pause_threshold_s=pause_split_seconds,
+            )
+        return segments
+
+
+# Tolerance for word-to-segment membership. whisperx alignment can land a few
+# tens of ms outside a segment's start/end; accept words within this slack.
+_PAUSE_SPLIT_BOUNDARY_TOLERANCE_S = 0.2
+
+
+def _is_cjk(s: str) -> bool:
+    """True if ``s`` contains any CJK Unified Ideograph (U+4E00 .. U+9FFF)."""
+    return any("一" <= c <= "鿿" for c in s)
+
+
+def _join_words(words: list[str]) -> str:
+    """Join word tokens with spacing rules that match CJK conventions.
+
+    Rule: insert a single space between two adjacent tokens only when BOTH
+    end-edges are non-CJK (e.g. ``"123" + "ok" → "123 ok"``); if either side
+    is CJK, concatenate directly (``"Hello" + "世界" → "Hello世界"``,
+    ``"你" + "好" → "你好"``). This matches what readers expect for mixed
+    Chinese-with-Latin transcripts.
+    """
+    if not words:
+        return ""
+    out = [words[0]]
+    for w in words[1:]:
+        prev = out[-1]
+        if not prev or not w:
+            out.append(w)
+            continue
+        if _is_cjk(prev[-1]) or _is_cjk(w[0]):
+            out.append(w)
+        else:
+            out.append(" " + w)
+    return "".join(out)
+
+
+def _split_segments_on_pauses(
+    segments: list[FunASRSegment],
+    words: list[tuple[str, float, float]],
+    pause_threshold_s: float,
+) -> list[FunASRSegment]:
+    """Split each ASR ``segment`` at any word-level gap >= ``pause_threshold_s``.
+
+    ``words`` is the full whisperx forced-alignment output for the whole
+    audio: a list of ``(word, start, end)`` tuples. For each segment, the
+    words that fall inside (with a small boundary tolerance) are walked and
+    a new sub-segment is opened wherever ``words[i+1].start - words[i].end
+    >= pause_threshold_s``.
+
+    Each sub-segment's text is the joined words within it (CJK convention,
+    see ``_join_words``). The FIRST sub-segment keeps the original
+    ``segment.start`` and the LAST keeps the original ``segment.end`` so
+    total time coverage is preserved (matters for downstream alignment with
+    audio and per-segment hard-floor logic).
+
+    Special cases:
+    - ``pause_threshold_s == 0`` → splitting disabled; segments pass through.
+    - Empty ``words`` (alignment failed or returned nothing) → segments pass
+      through unchanged. The caller decides whether to log a warning.
+    - A segment with no in-range words → passed through unchanged.
+    """
+    if pause_threshold_s <= 0 or not words:
+        return list(segments)
+
+    out: list[FunASRSegment] = []
+    for seg in segments:
+        in_range = [
+            (w, s, e) for (w, s, e) in words
+            if s >= seg.start - _PAUSE_SPLIT_BOUNDARY_TOLERANCE_S
+            and e <= seg.end + _PAUSE_SPLIT_BOUNDARY_TOLERANCE_S
+        ]
+        if not in_range:
+            out.append(seg)
+            continue
+        # Find split points: indices i where the gap to i+1 >= threshold.
+        groups: list[list[tuple[str, float, float]]] = [[in_range[0]]]
+        for prev_idx in range(len(in_range) - 1):
+            _, _, prev_end = in_range[prev_idx]
+            _, next_start, _ = in_range[prev_idx + 1]
+            gap = next_start - prev_end
+            if gap >= pause_threshold_s:
+                groups.append([])
+            groups[-1].append(in_range[prev_idx + 1])
+
+        if len(groups) == 1:
+            # No internal pause hit threshold — return segment unchanged so
+            # text and timing match exactly what the ASR produced.
+            out.append(seg)
+            continue
+
+        for gi, group in enumerate(groups):
+            if not group:
+                continue
+            text = _join_words([w for (w, _s, _e) in group])
+            if gi == 0:
+                start = seg.start
+            else:
+                start = group[0][1]
+            if gi == len(groups) - 1:
+                end = seg.end
+            else:
+                end = group[-1][2]
+            out.append(FunASRSegment(start, end, text))
+    return out
 
 
 def _format_srt_time(seconds: float) -> str:
