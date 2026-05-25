@@ -546,9 +546,9 @@ def test_generate_ass_passes_font_params(tmp_path, monkeypatch):
         captured["kwargs"] = kwargs
         return "[Script Info]\nTitle: test\n\n[Events]\nDialogue: 0,0,0,Default,hi\n"
 
-    monkeypatch.setattr("video2yt.download.biliass.convert_to_ass", fake_convert)
+    monkeypatch.setattr("video2yt.fetch.biliass.convert_to_ass", fake_convert)
 
-    from video2yt.download import generate_ass
+    from video2yt.fetch import generate_ass
     generate_ass(
         xml_path=xml,
         ass_path=ass,
@@ -953,7 +953,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
         )
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
 
     probe_calls = []
     source_info = MediaInfo(
@@ -1022,7 +1022,7 @@ def test_run_deletes_derived_ass_on_success(tmp_path, monkeypatch):
         ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr(
         "video2yt.cli.validate.probe",
         lambda p: MediaInfo(
@@ -1089,7 +1089,7 @@ def test_run_cleanup_removes_cut_ass_by_default(tmp_path, monkeypatch):
         return info if len(probe_calls) == 1 else out_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -1154,7 +1154,7 @@ def test_run_keep_temp_keeps_all_including_derived(tmp_path, monkeypatch):
         return info if len(probe_calls) == 1 else out_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -1201,7 +1201,7 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
         ass_path.write_text("[Events]\nDialogue: 0,0,0,D,x\n", encoding="utf-8")
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr(
         "video2yt.cli.validate.probe",
         lambda p: MediaInfo(
@@ -1267,7 +1267,7 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
         return source_info if len(probe_calls) == 1 else output_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -1323,7 +1323,7 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
         return source_info if len(probe_calls) == 1 else output_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -1390,7 +1390,7 @@ def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
         return []
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
@@ -1452,7 +1452,7 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
         return []
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
@@ -1509,7 +1509,7 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
         return source_info if len(probe_calls) == 1 else output_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -1570,7 +1570,7 @@ def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
         return info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -2068,7 +2068,7 @@ def test_run_passes_keep_ranges_and_rewrites_ass(tmp_path, monkeypatch):
         return output_path
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
     monkeypatch.setattr("video2yt.cli.validate.check_output", lambda s, o, expected_duration=None: [])
@@ -2145,7 +2145,7 @@ def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
         return output_path
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
@@ -2245,7 +2245,7 @@ def test_run_passes_speed_to_burn_and_scales_expected_duration(tmp_path, monkeyp
         return []
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
@@ -2312,7 +2312,7 @@ def test_run_speed_with_cut_scales_kept_duration(tmp_path, monkeypatch):
         return []
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr("video2yt.cli.burn.render", fake_render)
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
@@ -2411,7 +2411,7 @@ def test_run_output_filename_includes_cut_suffix(tmp_path, monkeypatch):
         return info if len(probe_calls) == 1 else out_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -2469,7 +2469,7 @@ def test_run_output_filename_includes_speed_suffix(tmp_path, monkeypatch):
         return info if len(probe_calls) == 1 else out_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -2527,7 +2527,7 @@ def test_run_output_filename_combines_cut_speed_preview(tmp_path, monkeypatch):
         return info if len(probe_calls) == 1 else out_info
 
     monkeypatch.setattr("video2yt.cli.download.fetch", fake_fetch)
-    monkeypatch.setattr("video2yt.cli.download.generate_ass", fake_generate_ass)
+    monkeypatch.setattr("video2yt.fetch.generate_ass", fake_generate_ass)
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
@@ -7391,3 +7391,164 @@ def test_measure_chunk_loudness_parses_astats_output(tmp_path, monkeypatch):
         assert cmd[0] == "ffmpeg"
         assert str(wav) in cmd
         assert any("astats" in a for a in cmd)
+
+
+
+# ---------- T2: video2yt-fetch / fetch.fetch_and_build ----------
+
+from video2yt import fetch as _fetch_mod
+
+
+def _stub_fetch_setup(monkeypatch, tmp_path, video_height=1080, video_width=1920):
+    """Wire up mocks for download.get_metadata / download.fetch / validate.probe
+    / biliass so fetch.fetch_and_build runs without touching the network.
+    Returns a dict of call counters / arg captures the test can assert on."""
+    captured = {
+        "metadata_calls": 0,
+        "yt_dlp_calls": 0,
+        "biliass_calls": 0,
+    }
+
+    def fake_metadata(url, browser):
+        captured["metadata_calls"] += 1
+        return {"title": "Title", "uploader": "Up"}
+
+    def fake_yt_dlp_fetch(url, temp_dir, quality, browser, bv_id, codec="h264"):
+        captured["yt_dlp_calls"] += 1
+        v = temp_dir / f"{bv_id}.mp4"
+        v.write_bytes(b"fakevideo")
+        x = temp_dir / f"{bv_id}.danmaku.xml"
+        x.write_bytes(b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>")
+        return v, x, False
+
+    def fake_probe(path):
+        return MediaInfo(
+            duration=60.0, width=video_width, height=video_height,
+            has_video=True, has_audio=True,
+            vcodec="h264", acodec="aac", size_bytes=10_000_000,
+        )
+
+    def fake_biliass(xml_bytes, *, stage_width, stage_height,
+                    font_face, font_size):
+        captured["biliass_calls"] += 1
+        captured["biliass_font_size"] = font_size
+        captured["biliass_stage_height"] = stage_height
+        return (
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Text\n"
+            "Dialogue: 0,0:00:01.00,0:00:05.00,Default,hi\n"
+        )
+
+    monkeypatch.setattr("video2yt.fetch.download.get_metadata", fake_metadata)
+    monkeypatch.setattr("video2yt.fetch.download.fetch", fake_yt_dlp_fetch)
+    monkeypatch.setattr("video2yt.fetch.validate.probe", fake_probe)
+    monkeypatch.setattr("video2yt.fetch.biliass.convert_to_ass", fake_biliass)
+    return captured
+
+
+def test_fetch_returns_fetchresult_with_canonical_paths(tmp_path, monkeypatch):
+    captured = _stub_fetch_setup(monkeypatch, tmp_path)
+    result = _fetch_mod.fetch_and_build(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/",
+        temp_dir=tmp_path / "temp",
+    )
+    assert result.bv_id == "BV191DpBmE2t"
+    assert result.raw_video.name == "BV191DpBmE2t.mp4"
+    assert result.danmaku_xml.name == "BV191DpBmE2t.danmaku.xml"
+    assert result.danmaku_ass.name == "BV191DpBmE2t.danmaku.ass"
+    # Subfolder uses uploader prefix + title (sanitized)
+    assert result.temp_subdir.name == "Up：Title"
+    # Sanity on populated fields
+    assert result.metadata["title"] == "Title"
+    assert result.info.height == 1080
+    assert result.n_danmaku == 1
+    assert result.from_cache is False
+    assert captured["metadata_calls"] == 1
+    assert captured["yt_dlp_calls"] == 1
+
+
+def test_fetch_does_not_call_cuts_rewrite(tmp_path, monkeypatch):
+    """T2 invariant: fetch.fetch_and_build never invokes cuts.rewrite_ass_for_cuts.
+    Cuts are applied in Stage 5 (burn), not Stage 1. If this contract breaks,
+    cache invalidation will silently regress (a fetch keyed by URL would
+    suddenly depend on per-run --cut flags)."""
+    _stub_fetch_setup(monkeypatch, tmp_path)
+    rewrite_calls = []
+
+    def fake_rewrite(text, ranges):
+        rewrite_calls.append(ranges)
+        return text
+
+    monkeypatch.setattr("video2yt.cuts.rewrite_ass_for_cuts", fake_rewrite)
+    _fetch_mod.fetch_and_build(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/",
+        temp_dir=tmp_path / "temp",
+    )
+    assert rewrite_calls == []
+
+
+def test_fetch_always_regenerates_ass_even_if_stale_exists(tmp_path, monkeypatch):
+    """ASS regen is unconditional — codex T2 review 2026-05-24. A cached ASS
+    keyed only on file presence would silently serve stale styling whenever
+    --font-size / --font-face changed (especially under --keep-temp where the
+    cleanup pass also doesn't run). Always regenerate; biliass is sub-second."""
+    captured = _stub_fetch_setup(monkeypatch, tmp_path)
+
+    # Pre-create a "stale" ASS that fetch would otherwise have reused.
+    subdir = tmp_path / "temp" / "Up：Title"
+    subdir.mkdir(parents=True)
+    ass = subdir / "BV191DpBmE2t.danmaku.ass"
+    ass.write_text(
+        "[Events]\nFormat: Layer\nDialogue: 0,0:00:01.00,0:00:02.00,Default,stale\n",
+        encoding="utf-8",
+    )
+
+    _fetch_mod.fetch_and_build(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/",
+        temp_dir=tmp_path / "temp",
+    )
+    assert captured["biliass_calls"] == 1
+
+
+def test_fetch_auto_computes_font_size_from_video_height(tmp_path, monkeypatch):
+    """Bilibili native: standard danmaku at height * 25/540 px (= 50 at 1080p)."""
+    captured = _stub_fetch_setup(monkeypatch, tmp_path, video_height=1080)
+    _fetch_mod.fetch_and_build(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/",
+        temp_dir=tmp_path / "temp",
+    )
+    # 1080 * 25 / 540 = 50
+    assert captured["biliass_font_size"] == 50
+
+
+def test_fetch_auto_font_size_for_852p_source(tmp_path, monkeypatch):
+    """Real-world: a 480x852 vertical Bilibili clip -> 39px standard danmaku."""
+    captured = _stub_fetch_setup(
+        monkeypatch, tmp_path, video_height=852, video_width=480,
+    )
+    _fetch_mod.fetch_and_build(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/",
+        temp_dir=tmp_path / "temp",
+    )
+    # round(852 * 25 / 540) = 39
+    assert captured["biliass_font_size"] == 39
+    assert captured["biliass_stage_height"] == 852
+
+
+def test_fetch_explicit_font_size_overrides_auto(tmp_path, monkeypatch):
+    captured = _stub_fetch_setup(monkeypatch, tmp_path, video_height=1080)
+    _fetch_mod.fetch_and_build(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/",
+        temp_dir=tmp_path / "temp",
+        font_size=42,
+    )
+    assert captured["biliass_font_size"] == 42
+
+
+def test_fetch_invalid_url_raises(tmp_path, monkeypatch):
+    _stub_fetch_setup(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="BV id"):
+        _fetch_mod.fetch_and_build(
+            url="https://www.youtube.com/watch?v=abc",
+            temp_dir=tmp_path / "temp",
+        )

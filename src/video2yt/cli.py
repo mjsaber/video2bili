@@ -1,80 +1,21 @@
 import argparse
 import importlib
-import re
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from video2yt import burn, cuts, download, validate
+from video2yt import burn, cuts, download, fetch, validate
 
-BV_PATTERN = re.compile(r"/video/(BV[A-Za-z0-9]+)")
-
-# Bilibili's native danmaku scaling: the web/client player renders a standard
-# (nominal size=25) danmaku at ``player_height * 25 / 540`` pixels. This
-# matches what a user sees on bilibili.com, so computing font_size from the
-# real video height reproduces the same on-screen size.
-REFERENCE_PLAYER_HEIGHT = 540
-REFERENCE_STANDARD_SIZE = 25
-
-MAX_TITLE_DIR_LENGTH = 60
-UPLOADER_PREFIX_LENGTH = 4
-UPLOADER_TITLE_SEPARATOR = "："  # U+FF1A fullwidth colon (safe on all filesystems)
-
-
-def _build_dir_name(
-    metadata: dict,
-    bv_id: str,
-    uploader_prefix_length: int = UPLOADER_PREFIX_LENGTH,
-) -> str:
-    """Build the per-video subfolder name: ``<uploader_prefix>：<title>``, sanitized.
-
-    Falls back to just the title if uploader is missing or empty. Falls back
-    to the BV id if title is also missing.
-    """
-    uploader = metadata.get("uploader") or metadata.get("channel") or ""
-    uploader_prefix = uploader[:uploader_prefix_length]
-    title = metadata.get("title") or bv_id
-    if uploader_prefix:
-        combined = f"{uploader_prefix}{UPLOADER_TITLE_SEPARATOR}{title}"
-    else:
-        combined = title
-    return _sanitize_title(combined)
-
-
-def _sanitize_title(title: str, max_length: int = MAX_TITLE_DIR_LENGTH) -> str:
-    """Sanitize a video title for use as a directory name.
-
-    - Replace filesystem-unsafe characters with ``_``
-    - Collapse whitespace
-    - Strip leading/trailing whitespace and dots
-    - Truncate to ``max_length`` characters
-    - Return ``"unnamed"`` if result would be empty
-
-    The max_length is in characters, not bytes. On macOS and Linux the
-    per-component byte limit is 255; at max_length=60 even all-CJK
-    titles (3 bytes per char in UTF-8) fit in 180 bytes, leaving safe
-    headroom.
-    """
-    # Replace characters disallowed on common filesystems (Windows-safe set):
-    #   < > : " / \ | ? *  and control chars 0x00-0x1f
-    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', title)
-    # Collapse whitespace (including newlines, tabs) to a single space
-    cleaned = re.sub(r'\s+', ' ', cleaned)
-    # Collapse runs of underscores produced by the replace above
-    cleaned = re.sub(r'_+', '_', cleaned)
-    # Strip leading/trailing whitespace, dots, and underscores
-    cleaned = cleaned.strip(' ._')
-    # Truncate to max_length characters (not bytes)
-    if len(cleaned) > max_length:
-        cleaned = cleaned[:max_length].rstrip(' ._')
-    return cleaned or "unnamed"
-
-
-def compute_font_size(video_height: int) -> int:
-    """Compute danmaku font size using Bilibili's native scaling formula."""
-    return round(video_height * REFERENCE_STANDARD_SIZE / REFERENCE_PLAYER_HEIGHT)
+# Re-exports: fetch.py is the canonical home for these (T2 of step6-restructure).
+# Each name is reached as `cli.<name>` by either compose_cli/merge_cli or tests.
+# Constants left off (BV_PATTERN, REFERENCE_*, MAX_TITLE_DIR_LENGTH,
+# UPLOADER_*): no caller accesses them via `cli.`.
+_build_dir_name = fetch._build_dir_name
+_sanitize_title = fetch._sanitize_title
+compute_font_size = fetch.compute_font_size
+extract_bv_id = fetch.extract_bv_id
 
 
 def _build_output_filename(
@@ -100,17 +41,6 @@ def _build_output_filename(
         parts.append("preview")
     suffix = ("_" + "_".join(parts)) if parts else ""
     return f"{bv_id}_with_danmaku{suffix}.mp4"
-
-
-def extract_bv_id(url: str) -> str:
-    """Extract the BV id from a Bilibili video URL."""
-    m = BV_PATTERN.search(url)
-    if not m:
-        raise ValueError(
-            f"URL does not contain a BV id: {url!r}\n"
-            f"expected format: https://www.bilibili.com/video/BV..."
-        )
-    return m.group(1)
 
 
 def preflight() -> None:
@@ -230,73 +160,50 @@ def run(args: argparse.Namespace) -> Path:
         )
 
     preflight()
-    bv_id = extract_bv_id(args.url)
 
-    # Metadata + subfolder setup BEFORE creating any temp files
+    # Stage 1: fetch + biliass via the new fetch.py module (T2 of step6-restructure).
+    # This single call replaces the old metadata / download.fetch /
+    # download.generate_ass / validate.check_ass chain. Timings for the
+    # individual sub-phases are no longer broken out — fetch_and_build reports
+    # one combined elapsed.
     t0 = time.monotonic()
-    _log(f"fetching metadata for {bv_id}")
-    metadata = download.get_metadata(args.url, args.browser)
-    title = metadata.get("title") or bv_id
-    uploader = metadata.get("uploader") or metadata.get("channel") or ""
-    safe_title = _build_dir_name(metadata, bv_id)
     _log(
-        f"title: {title!r} uploader: {uploader!r} -> subfolder: {safe_title!r}"
-    )
-    timings["metadata"] = time.monotonic() - t0
-
-    temp_subdir = args.temp_dir / safe_title
-    output_subdir = args.output_dir / safe_title
-    temp_subdir.mkdir(parents=True, exist_ok=True)
-    output_subdir.mkdir(parents=True, exist_ok=True)
-
-    _log(
-        f"downloading {bv_id} (quality<={args.quality}, "
+        f"fetching {args.url} (quality<={args.quality}, "
         f"codec={args.codec}, browser={args.browser})"
     )
-    t0 = time.monotonic()
-    video_path, xml_path, from_cache = download.fetch(
+    fetch_result = fetch.fetch_and_build(
         url=args.url,
-        temp_dir=temp_subdir,
+        temp_dir=args.temp_dir,
         quality=args.quality,
-        browser=args.browser,
-        bv_id=bv_id,
         codec=args.codec,
+        browser=args.browser,
+        font_face=args.font_face,
+        font_size=args.font_size,
     )
-    if from_cache:
-        _log(f"using cached download from {temp_subdir}")
-    timings["download"] = time.monotonic() - t0
+    timings["fetch"] = time.monotonic() - t0
 
-    _log("probing source video")
-    t0 = time.monotonic()
-    source_info = validate.probe(video_path)
+    bv_id = fetch_result.bv_id
+    metadata = fetch_result.metadata
+    temp_subdir = fetch_result.temp_subdir
+    source_info = fetch_result.info
+    video_path = fetch_result.raw_video
+    ass_path = fetch_result.danmaku_ass
+    n_danmaku = fetch_result.n_danmaku
+
+    # Per-segment output subdir mirrors the temp subdir name.
+    output_subdir = args.output_dir / temp_subdir.name
+    output_subdir.mkdir(parents=True, exist_ok=True)
+
     for w in validate.check_source(source_info, args.quality):
         _log(f"warning: {w}")
-    timings["probe_source"] = time.monotonic() - t0
 
-    font_size = (
-        args.font_size if args.font_size is not None
-        else compute_font_size(source_info.height)
-    )
+    if fetch_result.from_cache:
+        _log(f"using cached download from {temp_subdir}")
     _log(
-        f"danmaku font: face={args.font_face!r} size={font_size}px "
-        f"(video is {source_info.width}x{source_info.height}, "
-        f"codec={source_info.vcodec})"
+        f"title: {metadata.get('title')!r} -> subfolder: {temp_subdir.name!r}; "
+        f"source {source_info.width}x{source_info.height}, codec={source_info.vcodec}, "
+        f"{n_danmaku} danmaku lines"
     )
-
-    t0 = time.monotonic()
-    ass_path = temp_subdir / f"{bv_id}.danmaku.ass"
-    download.generate_ass(
-        xml_path=xml_path,
-        ass_path=ass_path,
-        width=source_info.width,
-        height=source_info.height,
-        font_face=args.font_face,
-        font_size=font_size,
-    )
-
-    n_danmaku = validate.check_ass(ass_path)
-    _log(f"detected {n_danmaku} danmaku lines")
-    timings["generate_ass"] = time.monotonic() - t0
 
     # Parse --cut arguments (if any), normalize, and compute keep ranges.
     raw_cuts = [cuts.parse_cut_range(s) for s in args.cut]
@@ -379,10 +286,7 @@ def run(args: argparse.Namespace) -> Path:
 
     total = time.monotonic() - t_start
     _log(
-        f"timings: metadata={timings['metadata']:.2f}s "
-        f"download={timings['download']:.1f}s "
-        f"probe_src={timings['probe_source']:.2f}s "
-        f"gen_ass={timings['generate_ass']:.2f}s "
+        f"timings: fetch={timings['fetch']:.1f}s "
         f"burn={timings['burn']:.1f}s "
         f"validate_out={timings['validate_output']:.2f}s "
         f"total={total:.1f}s"

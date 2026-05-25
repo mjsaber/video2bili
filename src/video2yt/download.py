@@ -1,8 +1,8 @@
+"""Thin yt-dlp subprocess wrapper. The biliass invocation lives in fetch.py."""
+
 import json
 import subprocess
 from pathlib import Path
-
-import biliass
 
 
 def get_metadata(url: str, browser: str) -> dict:
@@ -103,8 +103,8 @@ def fetch(
     ``from_cache=True``. Otherwise run yt-dlp (which will overwrite any
     partial artifacts) and return ``from_cache=False``.
 
-    The ASS conversion happens separately in ``generate_ass`` so we can
-    supply the real video dimensions (known only after probing the
+    The ASS conversion happens separately in ``fetch.generate_ass`` so we
+    can supply the real video dimensions (known only after probing the
     downloaded file) to biliass.
     """
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -172,29 +172,3 @@ def fetch(
         )
 
     return video_path, xml_path, False
-
-
-def generate_ass(
-    xml_path: Path,
-    ass_path: Path,
-    width: int,
-    height: int,
-    font_face: str,
-    font_size: int,
-) -> Path:
-    """Convert Bilibili danmaku XML to ASS via biliass.
-
-    The ``font_size`` parameter is what biliass renders a standard
-    (nominal size=25) danmaku as — biliass itself scales non-standard danmaku
-    proportionally.
-    """
-    xml_bytes = xml_path.read_bytes()
-    ass_text = biliass.convert_to_ass(
-        xml_bytes,
-        stage_width=width,
-        stage_height=height,
-        font_face=font_face,
-        font_size=font_size,
-    )
-    ass_path.write_text(ass_text, encoding="utf-8")
-    return ass_path
