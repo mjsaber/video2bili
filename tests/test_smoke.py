@@ -579,7 +579,7 @@ def test_render_uses_cwd_and_relative_paths(tmp_path, monkeypatch):
     ass = temp_dir / "BV.danmaku.ass"
     ass.write_text("data", encoding="utf-8")
     output_dir = tmp_path / "output"
-    output = output_dir / "BV_with_danmaku.mp4"
+    output = output_dir / "BV_final.mp4"
 
     captured = {}
 
@@ -629,7 +629,7 @@ def test_render_adds_t_flag_with_max_duration(tmp_path, monkeypatch):
     video.write_bytes(b"v")
     ass = temp_dir / "BV.danmaku.ass"
     ass.write_text("data", encoding="utf-8")
-    output = tmp_path / "output" / "BV_with_danmaku.mp4"
+    output = tmp_path / "output" / "BV_final.mp4"
 
     captured = {}
     def fake_run(cmd, **kwargs):
@@ -658,7 +658,7 @@ def test_render_omits_t_flag_without_max_duration(tmp_path, monkeypatch):
     video.write_bytes(b"v")
     ass = temp_dir / "BV.danmaku.ass"
     ass.write_text("data", encoding="utf-8")
-    output = tmp_path / "output" / "BV_with_danmaku.mp4"
+    output = tmp_path / "output" / "BV_final.mp4"
 
     captured = {}
     def fake_run(cmd, **kwargs):
@@ -974,7 +974,7 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
 
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0, **kwargs):
         call_log.append(f"render:{output_path.name}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"burnedoutput")
@@ -986,25 +986,28 @@ def test_run_orchestrates_full_pipeline(tmp_path, monkeypatch, capsys):
         "https://www.bilibili.com/video/BV191DpBmE2t/",
         "-o", str(tmp_path / "output"),
         "-t", str(tmp_path / "temp"),
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     result = cli.run(args)
     captured_out = capsys.readouterr()
 
-    assert result == tmp_path / "output" / "Test Title" / "BV191DpBmE2t_with_danmaku.mp4"
+    assert result == tmp_path / "output" / "Test Title" / "BV191DpBmE2t_final.mp4"
     assert result.exists()
     # Verify call order
     assert call_log[0] == "preflight"
     assert call_log[1] == "fetch:BV191DpBmE2t:1080:chrome:h264"
     assert call_log[2] == "generate_ass:1920x1080:Hiragino Sans GB:50"
-    assert call_log[3] == "render:BV191DpBmE2t_with_danmaku.mp4"
+    assert call_log[3] == "render:BV191DpBmE2t_final.mp4"
     # Probe called twice: source then output
     assert len(probe_calls) == 2
     # Timing summary should be printed at the end
     assert "timings:" in captured_out.err
 
 
-def test_run_deletes_derived_ass_on_success(tmp_path, monkeypatch):
-    """Default cleanup: derived ASS is removed, raw video+XML preserved for cache."""
+def test_run_keeps_all_artifacts_after_success(tmp_path, monkeypatch):
+    """T7: --keep-temp is a no-op now (spec §8: raw + stems + cache files
+    ALWAYS preserved). All fetch-stage artifacts survive cli.run."""
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
     monkeypatch.setattr(
         "video2yt.cli.download.get_metadata",
@@ -1032,7 +1035,7 @@ def test_run_deletes_derived_ass_on_success(tmp_path, monkeypatch):
         ),
     )
 
-    def fake_render(v, a, o, max_duration=None, keep_ranges=None, speed=1.0):
+    def fake_render(v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs):
         o.parent.mkdir(parents=True, exist_ok=True)
         o.write_bytes(b"x")
         return o
@@ -1043,18 +1046,24 @@ def test_run_deletes_derived_ass_on_success(tmp_path, monkeypatch):
         "https://x/video/BV1",
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
 
-    # Raw preserved for cache, derived ASS removed
+    # T7: ALL fetch-stage artifacts kept — danmaku.ass is no longer
+    # cleanup'd by cli.run. Stage 5 (burn) reads it; subsequent runs hit
+    # the warm cache.
     subdir = tmp_path / "tmp" / "Test Title"
     assert (subdir / "BV1.mp4").exists()
     assert (subdir / "BV1.danmaku.xml").exists()
-    assert not (subdir / "BV1.danmaku.ass").exists()
+    assert (subdir / "BV1.danmaku.ass").exists()
 
 
-def test_run_cleanup_removes_cut_ass_by_default(tmp_path, monkeypatch):
-    """With --cut, both .danmaku.ass and .danmaku.cut.ass are removed by default (raw kept)."""
+def test_run_with_cut_keeps_danmaku_ass_cut_ass_is_ephemeral(tmp_path, monkeypatch):
+    """T7: with --cut, the .danmaku.cut.ass file is ephemeral inside
+    burn.render (created and deleted in one ffmpeg invocation). It is
+    NOT visible to cli.run, and cli.run preserves the un-cut .danmaku.ass."""
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
     monkeypatch.setattr(
         "video2yt.cli.download.get_metadata",
@@ -1093,7 +1102,7 @@ def test_run_cleanup_removes_cut_ass_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1106,20 +1115,23 @@ def test_run_cleanup_removes_cut_ass_by_default(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--cut", "30~60",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
 
     subdir = tmp_path / "tmp" / "UP：T"
-    # Raw preserved
+    # Raw + un-cut danmaku.ass preserved.
     assert (subdir / "BV1.mp4").exists()
     assert (subdir / "BV1.danmaku.xml").exists()
-    # Both derived ASS removed
-    assert not (subdir / "BV1.danmaku.ass").exists()
+    assert (subdir / "BV1.danmaku.ass").exists()
+    # .cut.ass is ephemeral inside burn.render; since burn is mocked here,
+    # it never existed in the first place.
     assert not (subdir / "BV1.danmaku.cut.ass").exists()
 
 
-def test_run_keep_temp_keeps_all_including_derived(tmp_path, monkeypatch):
-    """With --keep-temp and --cut, all four artifacts are preserved after run()."""
+def test_run_keep_temp_is_no_op_all_artifacts_kept_regardless(tmp_path, monkeypatch):
+    """T7: --keep-temp is a no-op (spec §8); all artifacts are kept by default."""
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
     monkeypatch.setattr(
         "video2yt.cli.download.get_metadata",
@@ -1158,7 +1170,7 @@ def test_run_keep_temp_keeps_all_including_derived(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1172,15 +1184,18 @@ def test_run_keep_temp_keeps_all_including_derived(tmp_path, monkeypatch):
         "-t", str(tmp_path / "tmp"),
         "--cut", "30~60",
         "--keep-temp",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
 
     subdir = tmp_path / "tmp" / "UP：T"
-    # All four artifacts preserved
+    # T7: --keep-temp is a no-op; ALL fetch artifacts kept by default.
     assert (subdir / "BV1.mp4").exists()
     assert (subdir / "BV1.danmaku.xml").exists()
     assert (subdir / "BV1.danmaku.ass").exists()
-    assert (subdir / "BV1.danmaku.cut.ass").exists()
+    # .cut.ass is still ephemeral inside burn.render even with --keep-temp.
+    assert not (subdir / "BV1.danmaku.cut.ass").exists()
 
 
 def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
@@ -1212,7 +1227,7 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -1220,6 +1235,8 @@ def test_run_keeps_temp_when_flag_set(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--keep-temp",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
     subdir = tmp_path / "tmp" / "Test Title"
@@ -1271,13 +1288,15 @@ def test_run_computes_font_size_when_auto(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
         "https://www.bilibili.com/video/BV1/",
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
     # auto-computed for height=852: 852/21.6 ≈ 39
@@ -1327,7 +1346,7 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (o.parent.mkdir(parents=True, exist_ok=True), o.write_bytes(b"x"), o)[-1],
     )
 
     args = cli.parse_args([
@@ -1335,6 +1354,8 @@ def test_run_uses_explicit_font_size_when_given(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--font-size", "60",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
     # Explicit value should be used as-is, bypassing compute_font_size
@@ -1395,7 +1416,7 @@ def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1407,6 +1428,8 @@ def test_run_passes_expected_duration_in_preview_mode(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--preview-seconds", "60",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
     assert captured["expected_duration"] == 60.0
@@ -1457,7 +1480,7 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.check_output", fake_check_output)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1468,6 +1491,8 @@ def test_run_passes_source_duration_when_not_preview(tmp_path, monkeypatch):
         "https://x/video/BV1",
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
     assert captured["expected_duration"] == 1260.0
@@ -1513,7 +1538,7 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1525,6 +1550,8 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--keep-temp",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     result = cli.run(args)
 
@@ -1536,7 +1563,7 @@ def test_run_creates_subfolder_from_video_title(tmp_path, monkeypatch):
     expected_dir = "我 的_视频_ Test"
     assert (tmp_path / "tmp" / expected_dir).is_dir()
     assert (tmp_path / "out" / expected_dir).is_dir()
-    assert result == tmp_path / "out" / expected_dir / "BV1_with_danmaku.mp4"
+    assert result == tmp_path / "out" / expected_dir / "BV1_final.mp4"
 
 
 def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
@@ -1574,7 +1601,7 @@ def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -1586,12 +1613,14 @@ def test_run_subfolder_includes_uploader_prefix(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--keep-temp",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     result = cli.run(args)
     expected_dir = "炉石郭枫：恶魔必选"
     assert (tmp_path / "tmp" / expected_dir).is_dir()
     assert (tmp_path / "out" / expected_dir).is_dir()
-    assert result == tmp_path / "out" / expected_dir / "BV1_with_danmaku.mp4"
+    assert result == tmp_path / "out" / expected_dir / "BV1_final.mp4"
 
 
 # =============================================================================
@@ -2021,9 +2050,10 @@ def test_parse_args_cut_multiple():
     assert args.cut == ["30~60", "2:15~2:45"]
 
 
-def test_run_passes_keep_ranges_and_rewrites_ass(tmp_path, monkeypatch):
-    """End-to-end mock: --cut should cause keep_ranges to reach burn.render and
-    the ASS to be rewritten before burn."""
+def test_run_passes_keep_ranges_and_cut_ranges_to_burn(tmp_path, monkeypatch):
+    """T7: cli.run no longer rewrites the ASS itself — it passes keep_ranges
+    AND cut_ranges to burn.render, which does the ephemeral rewrite inside
+    the single ffmpeg pass. Verify both params reach the mock."""
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
     monkeypatch.setattr(
         "video2yt.cli.download.get_metadata",
@@ -2063,9 +2093,12 @@ def test_run_passes_keep_ranges_and_rewrites_ass(tmp_path, monkeypatch):
         return info if len(probe_calls) == 1 else out_info
 
     captured_render = {}
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0, **kwargs):
         captured_render["keep_ranges"] = keep_ranges
+        captured_render["cut_ranges"] = kwargs.get("cut_ranges")
         captured_render["ass_path"] = ass_path
+        # ass_path is the UN-CUT danmaku.ass — cli.run no longer rewrites
+        # it. burn.render does the ephemeral rewrite internally (T6).
         captured_render["ass_text"] = ass_path.read_text(encoding="utf-8")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"x")
@@ -2083,19 +2116,19 @@ def test_run_passes_keep_ranges_and_rewrites_ass(tmp_path, monkeypatch):
         "-t", str(tmp_path / "tmp"),
         "--cut", "30~60",
         "--keep-temp",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
 
     assert captured_render["keep_ranges"] == [(0.0, 30.0), (60.0, 200.0)]
+    assert captured_render["cut_ranges"] == [(30.0, 60.0)]
     ass = captured_render["ass_text"]
-    # keep1 unchanged (before cut)
-    assert "0:00:10.00" in ass
-    assert "0:00:15.00" in ass
-    # keep2 shifted by 30s: 70-75 -> 40-45
-    assert "0:00:40.00" in ass
-    assert "0:00:45.00" in ass
-    # "cut" line at 40-50 should be dropped entirely
-    assert "cut" not in ass
+    # cli.run passes the UN-CUT ASS; the rewrite is burn.render's job now.
+    # All three dialogues should still be present in the on-disk ass_path.
+    assert "0:00:10.00" in ass  # keep1
+    assert "0:00:40.00" in ass  # the "cut" line (still in un-cut ASS)
+    assert "0:01:10.00" in ass  # keep2 at original timestamp
 
 
 def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
@@ -2141,7 +2174,7 @@ def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
         captured["expected_duration"] = expected_duration
         return []
 
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0, **kwargs):
         captured["keep_ranges"] = keep_ranges
         captured["max_duration"] = max_duration
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2161,6 +2194,8 @@ def test_run_with_cut_and_preview_seconds(tmp_path, monkeypatch):
         "--cut", "30~60",
         "--preview-seconds", "60",
         "--keep-temp",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
 
@@ -2190,14 +2225,14 @@ def test_parse_args_speed_accepts_float():
 
 def test_run_rejects_speed_above_range(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
-    args = cli.parse_args(["https://x/video/BV1", "--speed", "3.0"])
+    args = cli.parse_args(["https://x/video/BV1", "--speed", "3.0", "--no-subtitle", "--no-music-swap"])
     with pytest.raises(ValueError, match="0.5 and 2.0"):
         cli.run(args)
 
 
 def test_run_rejects_speed_below_range(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.preflight", lambda: None)
-    args = cli.parse_args(["https://x/video/BV1", "--speed", "0.25"])
+    args = cli.parse_args(["https://x/video/BV1", "--speed", "0.25", "--no-subtitle", "--no-music-swap"])
     with pytest.raises(ValueError, match="0.5 and 2.0"):
         cli.run(args)
 
@@ -2238,7 +2273,7 @@ def test_run_passes_speed_to_burn_and_scales_expected_duration(tmp_path, monkeyp
         return source_info if len(probe_calls) == 1 else output_info
 
     captured = {}
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0, **kwargs):
         captured["speed"] = speed
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"x")
@@ -2259,6 +2294,8 @@ def test_run_passes_speed_to_burn_and_scales_expected_duration(tmp_path, monkeyp
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--speed", "2.0",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
 
@@ -2304,7 +2341,7 @@ def test_run_speed_with_cut_scales_kept_duration(tmp_path, monkeypatch):
         return source_info if len(probe_calls) == 1 else output_info
 
     captured = {}
-    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0):
+    def fake_render(video_path, ass_path, output_path, max_duration=None, keep_ranges=None, speed=1.0, **kwargs):
         captured["speed"] = speed
         captured["keep_ranges"] = keep_ranges
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2327,6 +2364,8 @@ def test_run_speed_with_cut_scales_kept_duration(tmp_path, monkeypatch):
         "-t", str(tmp_path / "tmp"),
         "--cut", "30~60",
         "--speed", "1.5",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     cli.run(args)
 
@@ -2340,43 +2379,43 @@ def test_run_speed_with_cut_scales_kept_duration(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_build_output_filename_default():
-    assert cli._build_output_filename("BV1", False, 1.0, False) == "BV1_with_danmaku.mp4"
+    assert cli._build_output_filename("BV1", False, 1.0, False) == "BV1_final.mp4"
 
 
 def test_build_output_filename_cut_only():
-    assert cli._build_output_filename("BV1", True, 1.0, False) == "BV1_with_danmaku_cut.mp4"
+    assert cli._build_output_filename("BV1", True, 1.0, False) == "BV1_final_cut.mp4"
 
 
 def test_build_output_filename_speed_only():
-    assert cli._build_output_filename("BV1", False, 1.5, False) == "BV1_with_danmaku_1.5x.mp4"
+    assert cli._build_output_filename("BV1", False, 1.5, False) == "BV1_final_1.5x.mp4"
 
 
 def test_build_output_filename_integer_speed():
-    assert cli._build_output_filename("BV1", False, 2.0, False) == "BV1_with_danmaku_2x.mp4"
+    assert cli._build_output_filename("BV1", False, 2.0, False) == "BV1_final_2x.mp4"
 
 
 def test_build_output_filename_fractional_speed():
-    assert cli._build_output_filename("BV1", False, 1.25, False) == "BV1_with_danmaku_1.25x.mp4"
+    assert cli._build_output_filename("BV1", False, 1.25, False) == "BV1_final_1.25x.mp4"
 
 
 def test_build_output_filename_preview_only():
-    assert cli._build_output_filename("BV1", False, 1.0, True) == "BV1_with_danmaku_preview.mp4"
+    assert cli._build_output_filename("BV1", False, 1.0, True) == "BV1_final_preview.mp4"
 
 
 def test_build_output_filename_cut_and_speed():
-    assert cli._build_output_filename("BV1", True, 1.5, False) == "BV1_with_danmaku_cut_1.5x.mp4"
+    assert cli._build_output_filename("BV1", True, 1.5, False) == "BV1_final_cut_1.5x.mp4"
 
 
 def test_build_output_filename_all_three():
-    assert cli._build_output_filename("BV1", True, 1.25, True) == "BV1_with_danmaku_cut_1.25x_preview.mp4"
+    assert cli._build_output_filename("BV1", True, 1.25, True) == "BV1_final_cut_1.25x_preview.mp4"
 
 
 def test_build_output_filename_cut_and_preview():
-    assert cli._build_output_filename("BV1", True, 1.0, True) == "BV1_with_danmaku_cut_preview.mp4"
+    assert cli._build_output_filename("BV1", True, 1.0, True) == "BV1_final_cut_preview.mp4"
 
 
 def test_build_output_filename_speed_and_preview():
-    assert cli._build_output_filename("BV1", False, 1.5, True) == "BV1_with_danmaku_1.5x_preview.mp4"
+    assert cli._build_output_filename("BV1", False, 1.5, True) == "BV1_final_1.5x_preview.mp4"
 
 
 def test_run_output_filename_includes_cut_suffix(tmp_path, monkeypatch):
@@ -2419,7 +2458,7 @@ def test_run_output_filename_includes_cut_suffix(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -2432,9 +2471,11 @@ def test_run_output_filename_includes_cut_suffix(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--cut", "30~60",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     result = cli.run(args)
-    assert result.name == "BV1_with_danmaku_cut.mp4"
+    assert result.name == "BV1_final_cut.mp4"
 
 
 def test_run_output_filename_includes_speed_suffix(tmp_path, monkeypatch):
@@ -2477,7 +2518,7 @@ def test_run_output_filename_includes_speed_suffix(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -2490,9 +2531,11 @@ def test_run_output_filename_includes_speed_suffix(tmp_path, monkeypatch):
         "-o", str(tmp_path / "out"),
         "-t", str(tmp_path / "tmp"),
         "--speed", "1.25",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     result = cli.run(args)
-    assert result.name == "BV1_with_danmaku_1.25x.mp4"
+    assert result.name == "BV1_final_1.25x.mp4"
 
 
 def test_run_output_filename_combines_cut_speed_preview(tmp_path, monkeypatch):
@@ -2535,7 +2578,7 @@ def test_run_output_filename_combines_cut_speed_preview(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.cli.validate.probe", fake_probe)
     monkeypatch.setattr(
         "video2yt.cli.burn.render",
-        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0: (
+        lambda v, a, o, max_duration=None, keep_ranges=None, speed=1.0, **kwargs: (
             o.parent.mkdir(parents=True, exist_ok=True),
             o.write_bytes(b"x"),
             o,
@@ -2550,9 +2593,11 @@ def test_run_output_filename_combines_cut_speed_preview(tmp_path, monkeypatch):
         "--cut", "30~60",
         "--speed", "1.5",
         "--preview-seconds", "30",
+        "--no-subtitle",
+        "--no-music-swap",
     ])
     result = cli.run(args)
-    assert result.name == "BV1_with_danmaku_cut_1.5x_preview.mp4"
+    assert result.name == "BV1_final_cut_1.5x_preview.mp4"
 
 
 # ---------------------------------------------------------------------------
@@ -7556,3 +7601,241 @@ def test_fetch_invalid_url_raises(tmp_path, monkeypatch):
             url="https://www.youtube.com/watch?v=abc",
             temp_dir=tmp_path / "temp",
         )
+
+
+# ---------- T7: orchestrator five-stage chain ----------
+
+def _setup_orchestrator_fixture(tmp_path, monkeypatch):
+    """Wire up mocks for every stage so cli.run can be exercised without
+    touching any subprocess. Returns a call_log list that records the
+    order in which stages fired."""
+    call_log = []
+
+    monkeypatch.setattr("video2yt.cli.preflight",
+                       lambda: call_log.append("preflight"))
+
+    # Stage 1 (fetch) — mock fetch.fetch_and_build directly.
+    from video2yt.fetch import FetchResult
+    info = MediaInfo(
+        duration=60.0, width=1920, height=1080,
+        has_video=True, has_audio=True,
+        vcodec="h264", acodec="aac", size_bytes=10_000_000,
+    )
+
+    def fake_fetch_and_build(url, temp_dir, **kwargs):
+        call_log.append("fetch")
+        bv_id = "BV1"
+        subdir = temp_dir / "Sub"
+        subdir.mkdir(parents=True, exist_ok=True)
+        v = subdir / f"{bv_id}.mp4"
+        v.write_bytes(b"v")
+        x = subdir / f"{bv_id}.danmaku.xml"
+        x.write_bytes(b"<i></i>")
+        a = subdir / f"{bv_id}.danmaku.ass"
+        a.write_text("[Events]\nDialogue: 0,0,0,Default,x\n", encoding="utf-8")
+        return FetchResult(
+            bv_id=bv_id, raw_video=v, danmaku_xml=x, danmaku_ass=a,
+            metadata={"title": "T"}, info=info,
+            from_cache=False, n_danmaku=1, temp_subdir=subdir,
+            elapsed=0.0,
+        )
+
+    monkeypatch.setattr("video2yt.cli.fetch.fetch_and_build", fake_fetch_and_build)
+
+    # Stage 2 (stems)
+    from video2yt.stems import StemsResult
+
+    def fake_separate(raw_mp4, **kwargs):
+        call_log.append("stems")
+        bv_dir = raw_mp4.parent / raw_mp4.stem
+        bv_dir.mkdir(exist_ok=True)
+        sp = bv_dir / "speech.wav"
+        sp.write_bytes(b"PCM")
+        return StemsResult(
+            bv_dir=bv_dir, speech_wav=sp,
+            music_wav=bv_dir / "music.wav",
+            sfx_wav=bv_dir / "sfx.wav",
+            no_music_wav=bv_dir / "no_music.wav",
+            no_music_gain_txt=None,
+            from_cache=False, elapsed=0.0,
+        )
+
+    monkeypatch.setattr("video2yt.cli.stems.separate", fake_separate)
+
+    # Stage 3 (subtitle) — mock subtitle_cli.run
+    def fake_subtitle_run(subtitle_args):
+        call_log.append("subtitle")
+        # Stage 3 produces speech.cleaned.ass under <bv>/.
+        bv_dir = subtitle_args.segment.parent / subtitle_args.segment.stem
+        bv_dir.mkdir(exist_ok=True)
+        (bv_dir / "speech.cleaned.ass").write_text(
+            "[Events]\nDialogue: 0,0,0,Default,sub\n", encoding="utf-8")
+        return bv_dir / "speech.cleaned.ass"
+
+    # subtitle_cli is lazy-imported inside cli.run; we have to patch the
+    # actual module attribute since the lazy import is `from video2yt
+    # import subtitle_cli`.
+    monkeypatch.setattr("video2yt.subtitle_cli.run", fake_subtitle_run)
+
+    # Stage 4 (music-mix)
+    from video2yt.music_mix import MusicMixResult
+
+    def fake_music_mix(raw_mp4, **kwargs):
+        call_log.append("music_mix")
+        bed = raw_mp4.with_name(raw_mp4.stem + ".music_bed.wav")
+        bed.write_bytes(b"PCM-bed")
+        credits_p = raw_mp4.with_name(raw_mp4.stem + ".music_credits.txt")
+        credits_p.write_text("credits")
+        return MusicMixResult(
+            bed_wav=bed, credits_txt=credits_p,
+            meta_path=raw_mp4.with_name(raw_mp4.stem + ".music_bed_meta.json"),
+            duration_seconds=60.0, tracks_used=2,
+            from_cache=False, elapsed=0.0,
+        )
+
+    monkeypatch.setattr("video2yt.cli.music_mix.render", fake_music_mix)
+
+    # Stage 5 (burn)
+    captured_burn_kwargs = {}
+
+    def fake_burn_render(video_path, ass_path, output_path, **kwargs):
+        call_log.append("burn")
+        captured_burn_kwargs.update(kwargs)
+        captured_burn_kwargs["video_path"] = video_path
+        captured_burn_kwargs["ass_path"] = ass_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"out")
+        return output_path
+
+    monkeypatch.setattr("video2yt.cli.burn.render", fake_burn_render)
+    monkeypatch.setattr(
+        "video2yt.cli.validate.probe",
+        lambda p: info if p.suffix == ".mp4" else info,
+    )
+    monkeypatch.setattr("video2yt.cli.validate.check_source", lambda i, q: [])
+    monkeypatch.setattr("video2yt.cli.validate.check_output",
+                       lambda s, o, expected_duration=None: [])
+
+    return call_log, captured_burn_kwargs
+
+
+def test_orchestrator_runs_all_five_stages_in_order(tmp_path, monkeypatch):
+    """T7: with both --no-* flags OFF (default), all 5 stages fire in order."""
+    call_log, captured = _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+    ])
+    cli.run(args)
+    # Skip the preflight entry; assert the 5 stages fired in order.
+    pipeline = [x for x in call_log if x != "preflight"]
+    assert pipeline == ["fetch", "stems", "subtitle", "music_mix", "burn"]
+    assert captured["apply_subtitle"] is True
+    assert captured["apply_music_swap"] is True
+    assert captured["cleaned_ass"] is not None
+    assert captured["speech_wav"] is not None
+    assert captured["music_bed_wav"] is not None
+
+
+def test_orchestrator_no_subtitle_no_music_swap_skips_stages_2_3_4(
+    tmp_path, monkeypatch,
+):
+    """T7 skip-flag contract: --no-subtitle --no-music-swap skips stems
+    (nothing downstream consumes speech.wav), subtitle, AND music-mix.
+    Only fetch + burn fire."""
+    call_log, captured = _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+        "--no-music-swap",
+    ])
+    cli.run(args)
+    pipeline = [x for x in call_log if x != "preflight"]
+    assert pipeline == ["fetch", "burn"]
+    assert captured["apply_subtitle"] is False
+    assert captured["apply_music_swap"] is False
+    assert captured["cleaned_ass"] is None
+    assert captured["speech_wav"] is None
+    assert captured["music_bed_wav"] is None
+
+
+def test_orchestrator_no_subtitle_alone_still_runs_stems_for_music_swap(
+    tmp_path, monkeypatch,
+):
+    """--no-subtitle alone doesn't skip stems — music-swap still needs
+    speech.wav as the dry-vocals input for the sidechain-ducked bed mix."""
+    call_log, captured = _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+    ])
+    cli.run(args)
+    pipeline = [x for x in call_log if x != "preflight"]
+    assert "stems" in pipeline
+    assert "music_mix" in pipeline
+    assert "subtitle" not in pipeline
+    assert captured["apply_subtitle"] is False
+    assert captured["apply_music_swap"] is True
+    assert captured["speech_wav"] is not None
+
+
+def test_orchestrator_no_music_swap_alone_still_runs_stems_for_subtitle(
+    tmp_path, monkeypatch,
+):
+    """--no-music-swap alone doesn't skip stems — subtitle still needs
+    speech.wav as the ASR input."""
+    call_log, captured = _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--no-music-swap",
+    ])
+    cli.run(args)
+    pipeline = [x for x in call_log if x != "preflight"]
+    assert "stems" in pipeline
+    assert "subtitle" in pipeline
+    assert "music_mix" not in pipeline
+    # speech_wav goes through to burn ONLY when music_swap is on (since
+    # the chain consumes it for amix).
+    assert captured["apply_music_swap"] is False
+    assert captured["speech_wav"] is None
+    assert captured["cleaned_ass"] is not None
+
+
+def test_orchestrator_output_filename_is_bv_final(tmp_path, monkeypatch):
+    """T7: <bv>_final.mp4 (the legacy _with_danmaku / _clean / _subbed
+    pipeline-stage suffixes are gone)."""
+    call_log, captured = _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+        "--no-music-swap",
+    ])
+    result = cli.run(args)
+    assert result.name == "BV1_final.mp4"
+
+
+def test_orchestrator_copies_music_credits_next_to_final_mp4(
+    tmp_path, monkeypatch,
+):
+    """Stage 4's <bv>.music_credits.txt is copied to
+    <bv>_final_music_credits.txt next to the final mp4 — keeps the
+    YouTube-description-ready file with the upload artifact."""
+    call_log, captured = _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+    ])
+    cli.run(args)
+    out_credits = tmp_path / "out" / "Sub" / "BV1_final_music_credits.txt"
+    assert out_credits.exists()

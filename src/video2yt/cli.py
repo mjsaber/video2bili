@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from video2yt import burn, cuts, download, fetch, validate
+from video2yt import burn, cuts, download, fetch, music_mix, stems, validate
 
 # Re-exports: fetch.py is the canonical home for these (T2 of step6-restructure).
 # Each name is reached as `cli.<name>` by either compose_cli/merge_cli or tests.
@@ -24,13 +24,16 @@ def _build_output_filename(
     speed: float,
     has_preview: bool,
 ) -> str:
-    """Build the per-run output filename with suffixes indicating non-default settings.
+    """Build the per-run output filename with suffixes describing what's IN the output.
 
-    Format: ``<bv_id>_with_danmaku[_cut][_<speed>x][_preview].mp4``.
+    Format: ``<bv_id>_final[_cut][_<speed>x][_preview].mp4`` (T7 of
+    step6-restructure replaced the legacy ``_with_danmaku`` /
+    ``_clean`` / ``_subbed`` pipeline-stage suffixes with a single
+    ``_final``; the new orchestrator does all three in one ffmpeg pass).
 
     The suffix order is fixed (cut, speed, preview) so a given parameter
     combination always produces the same filename. Default filename
-    (no modifiers) is ``<bv_id>_with_danmaku.mp4`` for backward compatibility.
+    (no modifiers) is ``<bv_id>_final.mp4``.
     """
     parts = []
     if has_cut:
@@ -40,7 +43,7 @@ def _build_output_filename(
     if has_preview:
         parts.append("preview")
     suffix = ("_" + "_".join(parts)) if parts else ""
-    return f"{bv_id}_with_danmaku{suffix}.mp4"
+    return f"{bv_id}_final{suffix}.mp4"
 
 
 def preflight() -> None:
@@ -143,6 +146,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Applies to video, audio (pitch-preserved via atempo), and danmaku."
         ),
     )
+    # T7 step6-restructure orchestrator flags.
+    parser.add_argument(
+        "--no-subtitle", action="store_true",
+        help=(
+            "Skip Stage 3 (STT subtitle generation). For source material "
+            "that already has burned-in subs (e.g. 郭楓荷's stream)."
+        ),
+    )
+    parser.add_argument(
+        "--no-music-swap", action="store_true",
+        help=(
+            "Skip Stage 4 (CC0 music bed build) and use the source's "
+            "native audio in Stage 5. For streamers whose source music is "
+            "already royalty-clear or already CC-licensed."
+        ),
+    )
+    parser.add_argument(
+        "--device", default="remote", choices=["cpu", "mps", "auto", "remote"],
+        help=(
+            "Stage 2 (song-remover) separation device. Default: 'remote' "
+            "(Modal T4 GPU, ~7.2× faster than local CPU; see CLAUDE.md "
+            "'External dependencies' for the one-time setup)."
+        ),
+    )
+    parser.add_argument(
+        "--chunk-min", type=int, default=5,
+        help=(
+            "Stage 2 chunk length in minutes for --device remote (ignored "
+            "otherwise). Default 5 (matches song-remover's own default)."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -205,11 +239,68 @@ def run(args: argparse.Namespace) -> Path:
         f"{n_danmaku} danmaku lines"
     )
 
+    # Stage 2 (stems) runs unless --no-music-swap AND --no-subtitle (in
+    # that case nothing downstream consumes speech.wav, so the slow
+    # song-remover call would be wasted).
+    needs_stems = not (args.no_subtitle and args.no_music_swap)
+    bv_dir = temp_subdir / bv_id
+    speech_wav: Path | None = None
+    if needs_stems:
+        _log(
+            f"stems: song-remover (device={args.device}, "
+            f"chunk_min={args.chunk_min}) on {video_path.name}..."
+        )
+        t0 = time.monotonic()
+        stems_result = stems.separate(
+            raw_mp4=video_path,
+            device=args.device,
+            chunk_min=args.chunk_min if args.device == "remote" else None,
+        )
+        timings["stems"] = time.monotonic() - t0
+        speech_wav = stems_result.speech_wav
+        cache_tag = " (cached)" if stems_result.from_cache else ""
+        _log(f"stems done{cache_tag} in {timings['stems']:.1f}s -> {speech_wav}")
+
+    # Stage 3 (subtitle): produces <bv>/speech.cleaned.ass for Stage 5
+    # to pick up. Uses the legacy preview burn under --no-preview-burn so
+    # the orchestrator doesn't re-encode twice (T4 added that flag).
+    cleaned_ass_path: Path | None = None
+    if not args.no_subtitle:
+        from video2yt import subtitle_cli  # lazy: brings in whisperx
+        _log("subtitle: whisperx ASR + codex cleanup...")
+        t0 = time.monotonic()
+        subtitle_args = subtitle_cli.parse_args([
+            str(video_path),
+            "--font-face", args.font_face,
+            "--no-preview-burn",
+        ])
+        subtitle_cli.run(subtitle_args)
+        timings["subtitle"] = time.monotonic() - t0
+        cleaned_ass_path = bv_dir / "speech.cleaned.ass"
+        _log(f"subtitle done in {timings['subtitle']:.1f}s -> {cleaned_ass_path}")
+
+    # Stage 4 (music-mix): build the CC0 bed for Stage 5 to amix.
+    music_bed_path: Path | None = None
+    music_credits_path: Path | None = None
+    if not args.no_music_swap:
+        _log("music-mix: building CC0 bed...")
+        t0 = time.monotonic()
+        mix_result = music_mix.render(raw_mp4=video_path)
+        timings["music_mix"] = time.monotonic() - t0
+        music_bed_path = mix_result.bed_wav
+        music_credits_path = mix_result.credits_txt
+        cache_tag = " (cached)" if mix_result.from_cache else ""
+        _log(
+            f"music-mix done{cache_tag} in {timings['music_mix']:.1f}s "
+            f"({mix_result.tracks_used} tracks) -> {music_bed_path}"
+        )
+
     # Parse --cut arguments (if any), normalize, and compute keep ranges.
+    # Cut-rewrite is NOT done here in T7 — burn.render does the ephemeral
+    # rewrite on both ASS files inside the single ffmpeg invocation.
     raw_cuts = [cuts.parse_cut_range(s) for s in args.cut]
     cut_ranges: list[tuple[float, float]] = []
     keep_ranges: list[tuple[float, float]] | None = None
-    ass_path_for_burn = ass_path
     if raw_cuts:
         cut_ranges = cuts.normalize_cuts(
             raw_cuts, total_duration=source_info.duration
@@ -222,14 +313,6 @@ def run(args: argparse.Namespace) -> Path:
             f"cut ranges (raw): {raw_cuts} -> normalized: {cut_ranges} "
             f"-> keep: {keep_ranges} (removed {total_removed:.2f}s)"
         )
-        # Rewrite the ASS file so dialogues inside cut ranges are dropped
-        # and dialogues after cuts are shifted onto the new timeline.
-        # Keep the original ASS on disk for debugging.
-        cut_ass_path = temp_subdir / f"{bv_id}.danmaku.cut.ass"
-        original_ass_text = ass_path.read_text(encoding="utf-8")
-        rewritten = cuts.rewrite_ass_for_cuts(original_ass_text, cut_ranges)
-        cut_ass_path.write_text(rewritten, encoding="utf-8")
-        ass_path_for_burn = cut_ass_path
 
     has_cut = len(args.cut) > 0
     has_preview = args.preview_seconds is not None
@@ -246,17 +329,37 @@ def run(args: argparse.Namespace) -> Path:
     )
     cut_tag = f" (cuts applied: {len(cut_ranges)})" if cut_ranges else ""
     speed_tag = f" @ {args.speed}x" if args.speed != 1.0 else ""
-    _log(f"burning danmaku into {output_path.name}{preview_tag}{cut_tag}{speed_tag}")
+    sub_tag = "" if args.no_subtitle else " +subtitle"
+    swap_tag = "" if args.no_music_swap else " +music-swap"
+    _log(
+        f"burning {output_path.name}{preview_tag}{cut_tag}{speed_tag}"
+        f"{sub_tag}{swap_tag}"
+    )
     t0 = time.monotonic()
     burn.render(
         video_path,
-        ass_path_for_burn,
+        ass_path,
         output_path,
         max_duration=args.preview_seconds,
         keep_ranges=keep_ranges,
         speed=args.speed,
+        cleaned_ass=cleaned_ass_path,
+        speech_wav=speech_wav if not args.no_music_swap else None,
+        music_bed_wav=music_bed_path,
+        apply_subtitle=not args.no_subtitle,
+        apply_music_swap=not args.no_music_swap,
+        cut_ranges=cut_ranges or None,
     )
     timings["burn"] = time.monotonic() - t0
+
+    # Copy the music_credits.txt next to the final mp4 so the YouTube
+    # description has everything in one folder.
+    if music_credits_path is not None and music_credits_path.exists():
+        dest = output_path.with_name(
+            output_path.stem + "_music_credits.txt"
+        )
+        dest.write_text(music_credits_path.read_text(encoding="utf-8"),
+                       encoding="utf-8")
 
     _log("validating output")
     t0 = time.monotonic()
@@ -277,20 +380,16 @@ def run(args: argparse.Namespace) -> Path:
         _log(f"warning: {w}")
     timings["validate_output"] = time.monotonic() - t0
 
-    if not args.keep_temp:
-        _log("cleaning up derived ASS files (keeping raw download for cache)")
-        ass_path.unlink(missing_ok=True)
-        if ass_path_for_burn != ass_path:
-            ass_path_for_burn.unlink(missing_ok=True)
-        # raw video_path and xml_path are preserved intentionally for caching
+    # --keep-temp is a no-op now (raw + stems + subtitle SRT caches are
+    # ALWAYS preserved per spec §8). The flag remains for backwards CLI
+    # compat — orchestrator-managed cleanup is a follow-up.
+    _ = args.keep_temp
 
     total = time.monotonic() - t_start
-    _log(
-        f"timings: fetch={timings['fetch']:.1f}s "
-        f"burn={timings['burn']:.1f}s "
-        f"validate_out={timings['validate_output']:.2f}s "
-        f"total={total:.1f}s"
+    stage_timings = " ".join(
+        f"{name}={t:.1f}s" for name, t in timings.items()
     )
+    _log(f"timings: {stage_timings} total={total:.1f}s")
     return output_path
 
 
