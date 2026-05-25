@@ -31,6 +31,7 @@ subtitle = [
 
 [project.scripts]
 video2yt = "video2yt.cli:main"
+video2yt-burn = "video2yt.burn_cli:main"
 video2yt-compose = "video2yt.compose_cli:main"
 video2yt-fetch = "video2yt.fetch_cli:main"
 video2yt-image = "video2yt.image_gen_cli:main"
@@ -45,9 +46,8 @@ video2yt-topic = "video2yt.topic_cli:main"
 video2yt-transcribe = "video2yt.transcribe_cli:main"
 video2yt-tts = "video2yt.tts_cli:main"
 video2yt-upload = "video2yt.upload_cli:main"
-# Step6-restructure plan re-adds these in their own tasks when the backing
-# modules land (so every commit leaves the repo in a runnable state):
-#   video2yt-burn      → plan T6
+# All step6-restructure entry points are now registered alongside their
+# backing modules (T1 fetch, T3 stems, T5 music-mix, T6 burn).
 
 [build-system]
 requires = ["hatchling"]

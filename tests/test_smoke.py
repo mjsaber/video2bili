@@ -1814,7 +1814,7 @@ def test_build_filter_complex_speed_only_no_cut():
     fc = _build_filter_complex(None, "x.ass", speed=1.5)
     assert "[0:v]null[cv]" in fc
     assert "[0:a]anull[ca]" in fc
-    assert "subtitles=f='x.ass'[sv]" in fc
+    assert "subtitles=f='x.ass'" in fc
     assert "setpts=PTS/1.5[outv]" in fc
     assert "atempo=1.5[outa]" in fc
 
@@ -1824,8 +1824,11 @@ def test_build_filter_complex_cut_and_speed():
     fc = _build_filter_complex([(0.0, 30.0), (60.0, 100.0)], "x.ass", speed=2.0)
     assert "trim=start=0.0:end=30.0" in fc
     assert "trim=start=60.0:end=100.0" in fc
-    assert "concat=n=2:v=1:a=1[cv][ca]" in fc
-    assert "subtitles=f='x.ass'[sv]" in fc
+    # T6: video and audio concat are now separate so the audio chain can
+    # also drive the speech+bed amix path. Both still produce [outv]/[outa].
+    assert "concat=n=2:v=1:a=0[cv]" in fc
+    assert "concat=n=2:v=0:a=1[ca]" in fc
+    assert "subtitles=f='x.ass'" in fc
     assert "setpts=PTS/2.0[outv]" in fc
     assert "atempo=2.0[outa]" in fc
 
@@ -1834,8 +1837,9 @@ def test_build_filter_complex_cut_no_speed_still_produces_outv_outa():
     """With cuts but speed=1.0, still emits [outv] and [outa] via null filters."""
     from video2yt.burn import _build_filter_complex
     fc = _build_filter_complex([(0.0, 30.0), (60.0, 100.0)], "x.ass", speed=1.0)
-    assert "concat=n=2:v=1:a=1[cv][ca]" in fc
-    assert "subtitles=f='x.ass'[sv]" in fc
+    assert "concat=n=2:v=1:a=0[cv]" in fc
+    assert "concat=n=2:v=0:a=1[ca]" in fc
+    assert "subtitles=f='x.ass'" in fc
     assert "[sv]null[outv]" in fc
     assert "[ca]anull[outa]" in fc
     # Should NOT contain setpts or atempo
