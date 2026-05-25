@@ -64,16 +64,15 @@ Tasks 1–2 set up scaffolding so subsequent CLIs can be added one by one withou
 - Modify: `pyproject.toml`
 - Create: `src/video2yt/__init__.py` (probably unchanged, verify)
 
-- [ ] **Step 1: Register new console scripts**
+- [x] **Step 1: Register `video2yt-fetch` console script only**
 
-In `pyproject.toml`, under `[project.scripts]`, add these lines (alphabetized with existing entries):
+In `pyproject.toml`, under `[project.scripts]`, add (alphabetized with existing entries):
 
 ```toml
-video2yt-burn = "video2yt.burn_cli:main"
 video2yt-fetch = "video2yt.fetch_cli:main"
-video2yt-music-mix = "video2yt.music_mix_cli:main"
-video2yt-stems = "video2yt.stems_cli:main"
 ```
+
+**The other three (`video2yt-burn`, `-music-mix`, `-stems`) are registered in their own tasks** (T3 stems, T5 music-mix, T6 burn) so that every commit leaves the repo in a runnable state — registering a script before its module exists makes `uv run video2yt-X` fail with a confusing `ModuleNotFoundError`. (Original T1 registered all four at once and codex stop-hook caught the broken-entry-point regression after T2.)
 
 (Keep the existing `video2yt-music-swap` line for now — it's removed in Task 9 after the new path is verified.)
 
@@ -89,18 +88,15 @@ Add a section to `CLAUDE.md` "External dependencies" listing the song-remover in
 
 (Don't touch any other part of CLAUDE.md yet — full rewrite is in Task 10.)
 
-- [ ] **Step 3: Verify all four new scripts resolve**
+- [x] **Step 3: Verify the new script resolves AND that no broken entry points exist**
 
 ```bash
 uv sync
-uv run video2yt-burn --help     # should fail with ModuleNotFoundError (expected — module not yet created)
-uv run video2yt-fetch --help    # same
-uv run video2yt-music-mix --help # same
-uv run video2yt-stems --help    # same
-uv run pytest                    # should still pass (no code changes yet)
+uv run video2yt-fetch --help    # should fail with ModuleNotFoundError BEFORE T2 lands (expected); succeeds after.
+uv run pytest                    # must stay green (no code changes yet)
 ```
 
-Failure with `ModuleNotFoundError` for the four new CLIs is expected; existing pytest must stay green.
+Do NOT pre-register `video2yt-burn` / `-music-mix` / `-stems` here. They land in T3 / T5 / T6 alongside their modules so each commit leaves the entry-point set in a runnable state.
 
 **Definition of Done:**
 - `pyproject.toml` has the four new script lines.
@@ -246,6 +242,13 @@ raw_mp4: positional
 
 Output: `[video2yt-stems] success: <bv_dir>/speech.wav  elapsed=<N>s  from_cache=<bool>`.
 
+**Register the script in this task** (deferred from T1):
+
+```toml
+# pyproject.toml
+video2yt-stems = "video2yt.stems_cli:main"
+```
+
 - [ ] **Step 5: Tests in `tests/test_stems.py`**
 
 Mock subprocess.run. Cover:
@@ -389,6 +392,13 @@ raw_mp4: positional
 
 Output: `[video2yt-music-mix] success: <out_bed>  duration=<N>s  tracks_used=<M>  from_cache=<bool>`.
 
+**Register the script in this task** (deferred from T1):
+
+```toml
+# pyproject.toml
+video2yt-music-mix = "video2yt.music_mix_cli:main"
+```
+
 - [ ] **Step 4: Tests in `tests/test_music_mix.py`**
 
 Mock `subprocess.run` (the ffmpeg concat invocation) and `music_library.select_tracks_for_duration`. Cover:
@@ -472,6 +482,13 @@ temp_dir: positional      # the <dir>/ that contains <bv>.mp4 etc.
 ```
 
 Output: `[video2yt-burn] success: <output>  elapsed=<N>s`.
+
+**Register the script in this task** (deferred from T1):
+
+```toml
+# pyproject.toml
+video2yt-burn = "video2yt.burn_cli:main"
+```
 
 - [ ] **Step 4: Tests in `tests/test_burn_all.py`**
 
