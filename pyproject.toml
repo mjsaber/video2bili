@@ -35,6 +35,7 @@ video2yt-compose = "video2yt.compose_cli:main"
 video2yt-fetch = "video2yt.fetch_cli:main"
 video2yt-image = "video2yt.image_gen_cli:main"
 video2yt-merge = "video2yt.merge_cli:main"
+video2yt-music-mix = "video2yt.music_mix_cli:main"
 video2yt-music-swap = "video2yt.music_swap_cli:main"
 video2yt-research-card = "video2yt.research_card_cli:main"
 video2yt-stems = "video2yt.stems_cli:main"
@@ -46,7 +47,6 @@ video2yt-tts = "video2yt.tts_cli:main"
 video2yt-upload = "video2yt.upload_cli:main"
 # Step6-restructure plan re-adds these in their own tasks when the backing
 # modules land (so every commit leaves the repo in a runnable state):
-#   video2yt-music-mix → plan T5
 #   video2yt-burn      → plan T6
 
 [build-system]
