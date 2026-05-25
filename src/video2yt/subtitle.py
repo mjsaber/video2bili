@@ -443,18 +443,27 @@ def detect_silences(
     return intervals
 
 
-def transcribe(video_path: Path) -> list[FunASRSegment]:
-    """Run whisperx ASR on the segment's audio. Returns whisper-segment-level segments.
+def transcribe(audio_or_video_path: Path) -> list[FunASRSegment]:
+    """Run whisperx ASR on the input's audio. Returns whisper-segment-level segments.
 
-    The ``FunASRSegment`` name is preserved for downstream compatibility despite
-    the engine swap (SenseVoice → whisperx, 2026-05-15).
+    Accepts either a video file (any container with an audio stream) or a
+    bare wav: ``_extract_wav`` runs ``ffmpeg -i <input> -ac 1 -ar 16000 -vn``,
+    and ``-vn`` is a no-op on audio-only inputs (it just disables a video
+    stream that isn't there). T4 of the step6-restructure plan switched
+    the CLI to pass ``<bv>/speech.wav`` directly instead of extracting
+    audio from the video — both inputs work; the wav path skips one
+    decode step in the upstream caller.
+
+    The ``FunASRSegment`` name is preserved for downstream compatibility
+    despite the engine swap (SenseVoice → whisperx, 2026-05-15).
 
     Pause-based splitting is NOT done here — the CLI calls
-    ``detect_silences`` + ``_split_segments_on_silences`` separately when the
-    ``<input>.vocals.wav`` sidecar from ``video2yt-music-swap`` is available.
+    ``detect_silences`` + ``_split_segments_on_silences`` separately,
+    targeting the same ``speech.wav`` so silence boundaries land on the
+    cleanest possible audio.
     """
     with tempfile.TemporaryDirectory() as td:
-        wav = _extract_wav(video_path, Path(td))
+        wav = _extract_wav(audio_or_video_path, Path(td))
         raw = _run_asr(wav)
     return [FunASRSegment(start, end, text.strip()) for (start, end, text) in raw]
 

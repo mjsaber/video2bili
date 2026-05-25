@@ -872,41 +872,30 @@ def test_passthrough_overwrites_existing(tmp_path):
 from video2yt import subtitle_cli
 
 
-def test_parse_args_mutex_force_flags_rejected():
-    with pytest.raises(SystemExit):
-        subtitle_cli.parse_args(["seg.mp4", "--force-add", "--force-skip"])
-
-
 def test_parse_args_defaults():
     args = subtitle_cli.parse_args(["seg.mp4"])
     assert args.segment == Path("seg.mp4")
-    assert args.danmaku is None
     assert args.glossary is None
-    assert args.force is None
-    assert args.enable_ocr is False
-    assert args.ocr_interval == 5.0
-    assert args.danmaku_min_fixed == 10
-    assert args.danmaku_min_coverage == 30
     assert args.skip_cleanup is False
     assert args.font_face == "Hiragino Sans GB"
     assert args.outline_px == 2
     assert args.shadow_px == 0
     assert args.margin_v == 15
+    assert args.pause_split_seconds == 0.6
 
 
-def test_parse_args_enable_ocr():
-    args = subtitle_cli.parse_args(["seg.mp4", "--enable-ocr"])
-    assert args.enable_ocr is True
-
-
-def test_parse_args_force_add():
-    args = subtitle_cli.parse_args(["seg.mp4", "--force-add"])
-    assert args.force == "add"
-
-
-def test_parse_args_force_skip():
-    args = subtitle_cli.parse_args(["seg.mp4", "--force-skip"])
-    assert args.force == "skip"
+def test_parse_args_no_longer_accepts_detection_flags():
+    """T4 dropped --force-add / --force-skip / --enable-ocr / --danmaku.
+    Per-segment skip decision moves to the T7 orchestrator's --no-subtitle."""
+    for flag in ("--force-add", "--force-skip", "--enable-ocr",
+                 "--danmaku", "--ocr-interval"):
+        with pytest.raises(SystemExit):
+            if flag in ("--ocr-interval",):
+                subtitle_cli.parse_args(["seg.mp4", flag, "5"])
+            elif flag == "--danmaku":
+                subtitle_cli.parse_args(["seg.mp4", flag, "d.xml"])
+            else:
+                subtitle_cli.parse_args(["seg.mp4", flag])
 
 
 def test_default_output_path_uses_subbed_suffix():
@@ -1076,116 +1065,262 @@ def test_split_on_silences_preserves_total_text_across_many_silences():
     assert "".join(o.text for o in out) == seg.text
 
 
-@patch("video2yt.subtitle_cli.preflight")
-@patch("video2yt.validate.probe")
-@patch("video2yt.subtitle.transcribe")
-@patch("video2yt.subtitle.detect_silences")
-@patch("video2yt.subtitle._split_segments_on_silences")
-@patch("video2yt.subtitle.cleanup_with_codex")
-@patch("video2yt.subtitle.split_segments")
-@patch("video2yt.subtitle.burn_subtitles")
-@patch("video2yt.subtitle.scan_danmaku")
-def test_cli_pause_split_uses_silencedetect_when_sidecar_present(
-    mock_scan_danmaku,
-    mock_burn, mock_char_split, mock_cleanup,
-    mock_split_on_silences, mock_detect, mock_transcribe,
-    mock_probe, mock_preflight,
-    tmp_path,
-):
+# ---------- T4 CLI tests: sibling speech.wav lookup + cache invalidation ----------
+
+def _setup_subtitle_cli_fixture(tmp_path, monkeypatch):
+    """Return (seg_mp4, bv_dir) with speech.wav populated; mock everything
+    expensive so subtitle_cli.run only exercises the CLI plumbing under test."""
     seg_mp4 = tmp_path / "x.mp4"
-    seg_mp4.write_bytes(b"v")
-    # Sidecar present: silencedetect path is taken.
-    (tmp_path / "x.vocals.wav").write_bytes(b"audio")
-    mock_probe.return_value = validate.MediaInfo(
-        duration=300.0, width=1920, height=1080,
-        has_video=True, has_audio=True,
-        vcodec="h264", acodec="aac", size_bytes=1,
+    seg_mp4.write_bytes(b"video-bytes")
+    bv_dir = tmp_path / "x"
+    bv_dir.mkdir()
+    speech_wav = bv_dir / "speech.wav"
+    speech_wav.write_bytes(b"PCM-speech")
+
+    monkeypatch.setattr("video2yt.subtitle_cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.validate.probe",
+        lambda path: validate.MediaInfo(
+            duration=300.0, width=1920, height=1080,
+            has_video=True, has_audio=True,
+            vcodec="h264", acodec="aac", size_bytes=1,
+        ),
     )
     raw = [subtitle.FunASRSegment(0.0, 300.0, "全部")]
-    mock_transcribe.return_value = raw
-    mock_detect.return_value = [(10.0, 11.0)]
-    mock_split_on_silences.return_value = raw + raw  # pretend it split
-    mock_cleanup.return_value = raw + raw
-    mock_char_split.return_value = []
-    mock_burn.return_value = None
-
-    from video2yt import subtitle_cli
-    args = subtitle_cli.parse_args([str(seg_mp4), "--force-add"])
-    subtitle_cli.run(args)
-    assert mock_detect.called
-    assert mock_split_on_silences.called
-    # Verify silencedetect was called on the sidecar, not the segment mp4
-    call_arg = mock_detect.call_args[0][0]
-    assert call_arg.name == "x.vocals.wav"
+    monkeypatch.setattr("video2yt.subtitle.transcribe", lambda p: raw)
+    monkeypatch.setattr("video2yt.subtitle.cleanup_with_codex",
+                       lambda segs, glos: segs)
+    monkeypatch.setattr("video2yt.subtitle.split_segments",
+                       lambda segs, max_line_chars: segs)
+    monkeypatch.setattr("video2yt.subtitle.burn_subtitles",
+                       lambda *a, **kw: None)
+    return seg_mp4, bv_dir, speech_wav
 
 
-@patch("video2yt.subtitle_cli.preflight")
-@patch("video2yt.validate.probe")
-@patch("video2yt.subtitle.transcribe")
-@patch("video2yt.subtitle.detect_silences")
-@patch("video2yt.subtitle.cleanup_with_codex")
-@patch("video2yt.subtitle.split_segments")
-@patch("video2yt.subtitle.burn_subtitles")
-@patch("video2yt.subtitle.scan_danmaku")
-def test_cli_pause_split_skipped_when_sidecar_missing(
-    mock_scan_danmaku,
-    mock_burn, mock_char_split, mock_cleanup,
-    mock_detect, mock_transcribe,
-    mock_probe, mock_preflight,
-    tmp_path, capsys,
-):
+def test_cli_errors_when_speech_wav_missing(tmp_path, monkeypatch):
+    """T4: subtitle_cli now requires <bv>/speech.wav as a sibling. No
+    silent fallback — the user must run video2yt-stems first."""
+    monkeypatch.setattr("video2yt.subtitle_cli.preflight", lambda: None)
+    monkeypatch.setattr(
+        "video2yt.validate.probe",
+        lambda path: validate.MediaInfo(
+            duration=60.0, width=1920, height=1080,
+            has_video=True, has_audio=True,
+            vcodec="h264", acodec="aac", size_bytes=1,
+        ),
+    )
     seg_mp4 = tmp_path / "x.mp4"
     seg_mp4.write_bytes(b"v")
-    # No sidecar — silencedetect MUST NOT be called.
-    mock_probe.return_value = validate.MediaInfo(
-        duration=300.0, width=1920, height=1080,
-        has_video=True, has_audio=True,
-        vcodec="h264", acodec="aac", size_bytes=1,
-    )
-    raw = [subtitle.FunASRSegment(0.0, 300.0, "你好")]
-    mock_transcribe.return_value = raw
-    mock_cleanup.return_value = raw
-    mock_char_split.return_value = []
-    mock_burn.return_value = None
+    # NO <bv>/speech.wav
 
     from video2yt import subtitle_cli
-    args = subtitle_cli.parse_args([str(seg_mp4), "--force-add"])
-    subtitle_cli.run(args)
-    assert not mock_detect.called
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    with pytest.raises(FileNotFoundError, match="required stem not found"):
+        subtitle_cli.run(args)
 
 
-@patch("video2yt.subtitle_cli.preflight")
-@patch("video2yt.validate.probe")
-@patch("video2yt.subtitle.transcribe")
-@patch("video2yt.subtitle.detect_silences")
-@patch("video2yt.subtitle.cleanup_with_codex")
-@patch("video2yt.subtitle.split_segments")
-@patch("video2yt.subtitle.burn_subtitles")
-@patch("video2yt.subtitle.scan_danmaku")
-def test_cli_pause_split_skipped_when_threshold_zero(
-    mock_scan_danmaku,
-    mock_burn, mock_char_split, mock_cleanup,
-    mock_detect, mock_transcribe,
-    mock_probe, mock_preflight,
-    tmp_path,
+def test_cli_silencedetect_runs_on_speech_wav_not_vocals_sidecar(
+    tmp_path, monkeypatch,
 ):
-    seg_mp4 = tmp_path / "x.mp4"
-    seg_mp4.write_bytes(b"v")
-    (tmp_path / "x.vocals.wav").write_bytes(b"audio")  # sidecar PRESENT
-    mock_probe.return_value = validate.MediaInfo(
-        duration=300.0, width=1920, height=1080,
-        has_video=True, has_audio=True,
-        vcodec="h264", acodec="aac", size_bytes=1,
+    """T4: silencedetect now points at <bv>/speech.wav, not <input>.vocals.wav."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+
+    silence_calls = []
+    def fake_detect(wav, **kwargs):
+        silence_calls.append(wav)
+        return [(10.0, 11.0)]
+    monkeypatch.setattr("video2yt.subtitle.detect_silences", fake_detect)
+
+    split_calls = []
+    raw = [subtitle.FunASRSegment(0.0, 300.0, "全部")]
+    def fake_split(segs, silences, min_split_seconds):
+        split_calls.append((segs, silences))
+        return segs
+    monkeypatch.setattr("video2yt.subtitle._split_segments_on_silences",
+                       fake_split)
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+
+    assert silence_calls == [speech_wav]
+    assert split_calls != []
+
+
+def test_cli_pause_split_skipped_when_threshold_zero(tmp_path, monkeypatch):
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    silence_calls = []
+    monkeypatch.setattr(
+        "video2yt.subtitle.detect_silences",
+        lambda wav, **kw: silence_calls.append(wav) or [],
     )
-    raw = [subtitle.FunASRSegment(0.0, 300.0, "你好")]
-    mock_transcribe.return_value = raw
-    mock_cleanup.return_value = raw
-    mock_char_split.return_value = []
-    mock_burn.return_value = None
 
     from video2yt import subtitle_cli
     args = subtitle_cli.parse_args([
-        str(seg_mp4), "--force-add", "--pause-split-seconds", "0",
+        str(seg_mp4), "--pause-split-seconds", "0",
     ])
     subtitle_cli.run(args)
-    assert not mock_detect.called
+    assert silence_calls == []  # detect_silences NOT called when threshold=0
+
+
+def test_cli_writes_speech_source_meta_sidecar_first_run(tmp_path, monkeypatch):
+    """T4: .speech_source_meta.json is written on first run alongside the
+    SRT caches under <bv>/."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr("video2yt.subtitle.detect_silences",
+                       lambda wav, **kw: [])
+
+    from video2yt import subtitle_cli, meta as meta_mod
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+
+    sidecar = bv_dir / ".speech_source_meta.json"
+    assert sidecar.exists()
+    recorded = meta_mod.read_meta(sidecar)
+    assert recorded == {"sha256": meta_mod.compute_first_1mb_sha256(speech_wav)}
+
+
+def test_cli_stale_speech_meta_drops_raw_and_every_cleaned_srt(
+    tmp_path, monkeypatch,
+):
+    """T4 invariant (codex stop-hook 2026-05-24): a stale
+    .speech_source_meta.json must invalidate raw.srt AND every cleaned.*.srt
+    (not just the current run's threshold). Avoids the subtle "fresh raw +
+    stale cleaned at different threshold silently wins" bug."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr("video2yt.subtitle.detect_silences",
+                       lambda wav, **kw: [])
+
+    # Count transcribe / cleanup invocations so we can prove rerun.
+    asr_calls = []
+    monkeypatch.setattr(
+        "video2yt.subtitle.transcribe",
+        lambda p: asr_calls.append(p) or [subtitle.FunASRSegment(0, 1, "fresh-raw")],
+    )
+    cleanup_calls = []
+    monkeypatch.setattr(
+        "video2yt.subtitle.cleanup_with_codex",
+        lambda segs, glos: cleanup_calls.append(segs) or
+            [subtitle.FunASRSegment(0, 1, "fresh-cleaned")],
+    )
+
+    # Plant the full "stale" cache: raw, two threshold-variants of cleaned,
+    # and a sidecar whose sha256 doesn't match the current speech.wav.
+    raw_srt = bv_dir / "speech.raw.srt"
+    raw_srt.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nOLD-RAW\n", encoding="utf-8")
+    cleaned_p0p6 = bv_dir / "speech.cleaned.p0p6.srt"
+    cleaned_p0p6.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nOLD-P0P6\n", encoding="utf-8")
+    cleaned_p0p8 = bv_dir / "speech.cleaned.p0p8.srt"
+    cleaned_p0p8.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nOLD-P0P8\n", encoding="utf-8")
+    from video2yt import meta as meta_mod
+    meta_mod.write_meta(
+        bv_dir / ".speech_source_meta.json", {"sha256": "deadbeef" * 8})
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+
+    # 1. ASR was re-run (stale raw.srt was deleted, so the cache check missed).
+    assert len(asr_calls) == 1
+    # 2. raw.srt was re-created with FRESH content (not the OLD-RAW text).
+    assert raw_srt.exists()
+    assert "OLD-RAW" not in raw_srt.read_text(encoding="utf-8")
+    # 3. The current-threshold cleanup was re-run (its stale file was deleted).
+    assert len(cleanup_calls) == 1
+    # 4. Current-threshold cleanup file is back AND has FRESH content.
+    assert cleaned_p0p6.exists()
+    assert "OLD-P0P6" not in cleaned_p0p6.read_text(encoding="utf-8")
+    # 5. The OTHER threshold's cleanup file stays gone (key invariant — covers
+    # the codex stop-hook finding "invalidation only deletes the default cleanup
+    # cache"). It's NOT regenerated because the current run uses threshold=0.6.
+    assert not cleaned_p0p8.exists()
+    # 6. The sidecar now records the CURRENT speech.wav's sha256.
+    recorded = meta_mod.read_meta(bv_dir / ".speech_source_meta.json")
+    assert recorded == {"sha256": meta_mod.compute_first_1mb_sha256(speech_wav)}
+
+
+def test_cli_writes_speech_cleaned_ass_for_stage5(tmp_path, monkeypatch):
+    """T4 Step 3 (new output): <bv>/speech.cleaned.ass is produced via
+    compose.srt_to_ass with the subtitle-CLI tuned defaults, ready for
+    Stage 5 (burn) to pick up in T6+T7."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr("video2yt.subtitle.detect_silences",
+                       lambda wav, **kw: [])
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+
+    cleaned_ass = bv_dir / "speech.cleaned.ass"
+    assert cleaned_ass.exists()
+    text = cleaned_ass.read_text(encoding="utf-8")
+    assert "[Script Info]" in text
+    assert "PlayResX: 1920" in text
+    assert "PlayResY: 1080" in text
+    # Dialogue line(s) survive from the mocked split output.
+    assert "Dialogue:" in text
+
+
+def test_cli_no_preview_burn_skips_burn_subtitles(tmp_path, monkeypatch):
+    """T4: --no-preview-burn skips the legacy <bv>_subbed.mp4 burn. The T7
+    orchestrator passes this so Stage 5 (burn) does the real one without a
+    wasted preview re-encode."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr("video2yt.subtitle.detect_silences",
+                       lambda wav, **kw: [])
+
+    burn_calls = []
+    def fake_burn(*args, **kwargs):
+        burn_calls.append((args, kwargs))
+    monkeypatch.setattr("video2yt.subtitle.burn_subtitles", fake_burn)
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([str(seg_mp4), "--no-preview-burn"])
+    result = subtitle_cli.run(args)
+
+    assert burn_calls == []
+    # When skipping the preview burn, run() returns the cleaned.ass path
+    # instead of the would-have-been mp4 output.
+    assert result == bv_dir / "speech.cleaned.ass"
+
+
+def test_cli_warm_cache_skips_asr_and_cleanup(tmp_path, monkeypatch):
+    """Second invocation with matching meta sidecar + raw.srt + cleaned.p0p6.srt:
+    no ASR, no cleanup subprocess fires."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+
+    asr_calls = []
+    monkeypatch.setattr(
+        "video2yt.subtitle.transcribe",
+        lambda p: (asr_calls.append(p) or [subtitle.FunASRSegment(0, 1, "x")]),
+    )
+    cleanup_calls = []
+    monkeypatch.setattr(
+        "video2yt.subtitle.cleanup_with_codex",
+        lambda segs, glos: cleanup_calls.append(segs) or segs,
+    )
+    monkeypatch.setattr("video2yt.subtitle.detect_silences",
+                       lambda wav, **kw: [])
+
+    # Plant warm cache.
+    raw_srt = bv_dir / "speech.raw.srt"
+    raw_srt.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nhello\n", encoding="utf-8")
+    cleaned_srt = bv_dir / "speech.cleaned.p0p6.srt"
+    cleaned_srt.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nhello\n", encoding="utf-8")
+    from video2yt import meta as meta_mod
+    meta_mod.write_meta(
+        bv_dir / ".speech_source_meta.json",
+        {"sha256": meta_mod.compute_first_1mb_sha256(speech_wav)},
+    )
+
+    from video2yt import subtitle_cli
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+
+    assert asr_calls == []
+    assert cleanup_calls == []
