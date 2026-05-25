@@ -39,9 +39,9 @@ output/back2back/
 ├── thumbnail_bg.png              # Bonus step bg
 ├── thumbnail.png                 # Bonus step composed thumbnail (1280x720)
 ├── <uploader>：<title>/          # Step 6 burnt segment 1
-│   └── BV...._with_danmaku_*.mp4
+│   └── BV...._final*.mp4
 ├── <uploader>：<title>/          # Step 6 burnt segment 2
-│   └── BV...._with_danmaku_*.mp4
+│   └── BV...._final*.mp4
 ├── back2back_final.mp4           # Step 7 merged final video
 ├── back2back_final_chapters.txt  # Step 7 YouTube chapters (description paste)
 ├── back2back_final_ffmeta.txt    # Step 7 ffmetadata embedded into the MP4
@@ -172,63 +172,75 @@ Then move/rename the result to `output/<project>/intro.mp4` so Step 7 can refere
 
 `compose.render` was patched in this session to probe the audio and pass `-t <audio_duration>` to ffmpeg, working around `-shortest` not stopping the looped image stream when AAC flushes. Output now matches the audio within ~80ms.
 
-### Step 6 — Burn N Bilibili segments
+### Step 6 — Burn N Bilibili segments (five-stage pipeline)
 
 **Input**: Bilibili URL + optional `--cut START~END` ranges + optional `--speed`.
-**Output**: `output/<project>/<uploader>：<title>/<bv>_with_danmaku_*.mp4`.
-**Tool**: existing `video2yt`.
+**Output**: `output/<project>/<uploader>：<title>/<bv>_final[_cut][_<speed>x][_preview].mp4` + sidecar `<bv>_final_music_credits.txt`.
+**Tool**: `video2yt` (one CLI that orchestrates 5 stages).
 
 ```bash
 uv run video2yt "<bilibili_url>" \
-  [--cut 0~6]   \
-  [--speed 1.25] \
+  [--cut 0~6]      \
+  [--speed 1.25]   \
+  [--no-subtitle]  \
+  [--no-music-swap] \
   -o output/<project>/
 ```
 
-Each segment becomes a 1920x1080 30fps h264 MP4 with danmaku burnt in. The output filename gets `_cut`, `_<speed>x`, `_preview` suffixes based on flags. The raw download (mp4 + danmaku XML) is preserved under `temp/<uploader>：<title>/` for caching.
+The five stages, all gated by the right skip flags (full details in `docs/superpowers/specs/2026-05-24-step6-restructure.md`):
 
-**Per-streamer subtitle status (Step 6.6 implication):**
+1. **fetch** — yt-dlp downloads the raw mp4 + danmaku XML; biliass converts to ASS. Raw artifacts cached under `temp/<uploader>：<title>/<bv>.*`.
+2. **stems** — `song-remover` (Bandit-v2, default `--device remote` = Modal cloud GPU, ~7.2× faster than local CPU) writes 4 stems to `<bv>/{speech,music,sfx,no_music}.wav`. Only `speech.wav` is consumed downstream; the others stay on disk. Cache: `<bv>/.stems_source_meta.json`.
+3. **subtitle** — whisperx ASR on `speech.wav` → silencedetect pause-split → codex glossary cleanup → `<bv>/speech.cleaned.ass`. Cache: `<bv>/.speech_source_meta.json` + threshold-keyed cleanup SRT.
+4. **music-mix** — CC0 bed stitched from `~/.cache/video2yt/music/` (Kevin MacLeod, CC BY 3.0 by default — attribution required, written to `<bv>.music_credits.txt`). Cache: `<bv>.music_bed_meta.json`.
+5. **burn** — ONE ffmpeg `-filter_complex` invocation: danmaku ASS + cleaned subtitle ASS burned together; speech + bed sidechain-ducked amix replaces source audio; optional cuts and speed applied last. Output: `-pix_fmt yuv420p -r 30 -ar 48000` for downstream merge compatibility.
 
-| Streamer | Burnt-in subs? | Step 6.6 action |
-|---|---|---|
-| 炉石郭枫荷 (郭楓荷) | YES — source already has subs at the bottom | `video2yt-subtitle ... --force-skip` |
-| 炉石传说瓦莉拉 | NO | run subtitle pipeline (default) |
-| 炉石Kimmy | NO | run subtitle pipeline (default) |
-| 高冷难神衣锦夜行 (夜吹) | NO | run subtitle pipeline (default) |
-
-For any new streamer, eyeball the source video once before committing — if the streamer's stream has a bottom subtitle track (most Bilibili UP 主 add their own), skip subtitle generation to save the ~24 min cold pipeline cost AND avoid double-subtitle visual mess.
-
-### Step 6.5 — Replace copyrighted background music
-
-**Input**: a burnt segment MP4 from Step 6.
-**Output**: `<segment>_clean.mp4` — same video, music bed swapped — plus a
-`<segment>_clean_music_credits.txt` sidecar.
-**Tool**: `video2yt-music-swap`.
+Each stage has its own per-CLI for partial reruns:
 
 ```bash
-uv run video2yt-music-swap output/<project>/<uploader>：<title>/<bv>_with_danmaku_*.mp4
+uv run video2yt-fetch "<url>" -o temp/
+uv run video2yt-stems temp/<dir>/<bv>.mp4
+uv run video2yt-subtitle temp/<dir>/<bv>.mp4
+uv run video2yt-music-mix temp/<dir>/<bv>.mp4
+uv run video2yt-burn temp/<dir>/ --bv <bv> -o output/<project>/<dir>/<bv>_final.mp4
 ```
 
-Isolates the streamer's commentary voice with Demucs, discards the original
-music + game SFX, and lays a stitched royalty-free music bed underneath
-(auto-ducked under the voice). This suppresses the streamer's copyrighted
-background music so the upload is very unlikely to draw a Content ID claim on
-it — **risk reduction, not a guarantee** (see the music-swap design spec).
+The orchestrator skip flags:
 
-**Music library + attribution.** The bed is built from
-`~/.cache/video2yt/music/`. On first run the tool auto-downloads a shipped set
-of calm Kevin MacLeod tracks (Internet Archive, CC BY 3.0). CC BY **requires
-attribution**: the tool writes `<segment>_clean_music_credits.txt` — paste its
-lines into the YouTube description (Step 8) and keep them there. To skip
-attribution entirely, drop your own tracks from the **YouTube Audio Library**
-(download from YouTube Studio → Audio Library, filter mood = Calm / genre =
-Ambient or Cinematic) into `~/.cache/video2yt/music/`; the cache directory is
-the source of truth, and cache files with no manifest entry need no credit.
+| Flag combination | Stages run |
+|---|---|
+| (no flags) | 1+2+3+4+5 — full pipeline |
+| `--no-subtitle` | 1+2+4+5 (stems still runs; music-swap needs `speech.wav`) |
+| `--no-music-swap` | 1+2+3+5 (stems still runs; subtitle needs `speech.wav`; Stage 5 maps source audio) |
+| `--no-subtitle --no-music-swap` | 1+5 (legacy danmaku-only path) |
 
-Run this **before** the subtitle step so its speech recognition works on
-clean isolated vocals. **Performance**: Demucs is slow — a 17-minute segment
-can take 10–30 minutes on CPU; faster on Apple Silicon (MPS). Plan accordingly,
-like the subtitle step.
+**Per-streamer skip-flag matrix:**
+
+| Streamer | Burnt-in subs? | Recommended flags |
+|---|---|---|
+| 炉石郭枫荷 (郭楓荷) | YES — source already has subs at the bottom | `--no-subtitle` |
+| 炉石传说瓦莉拉 | NO | (default — run subtitle) |
+| 炉石Kimmy | NO | (default) |
+| 高冷难神衣锦夜行 (夜吹) | NO | (default) |
+
+For any new streamer, eyeball the source video once before committing — if the streamer's stream has a bottom subtitle track (most Bilibili UP 主 add their own), pass `--no-subtitle` to save the ~21 min subtitle pipeline cost AND avoid double-subtitle visual mess.
+
+**Performance** (17 min source segment):
+
+| Phase | Cold | Warm cache |
+|---|---|---|
+| Stage 1 fetch | ~30s | ~0s (cache hit) |
+| Stage 2 stems (`--device remote`) | ~12–15 min | ~0s |
+| Stage 2 stems (`--device cpu`) | ~3 hr | ~0s |
+| Stage 3 subtitle | ~21 min (8 ASR + 13 cleanup) | ~0s |
+| Stage 4 music-mix | ~30s | ~0s |
+| Stage 5 burn | ~3 min | ~3 min (no cache) |
+| **Total cold (remote)** | **~36 min** | — |
+| **Total warm** | — | **~3 min** |
+
+Modal cost: ~$0.10 per 17-min segment, within Modal's $30/mo free tier for personal use.
+
+**Migration note (2026-05-24)**: The old three-step pipeline (`video2yt` → `video2yt-music-swap` → `video2yt-subtitle`) was collapsed into this five-stage pipeline by the step6-restructure plan. The legacy `_with_danmaku.mp4`, `_clean.mp4`, `_subbed.mp4` intermediates are gone — the only segment output is `<bv>_final.mp4`. `video2yt-music-swap` was deleted; its bed-build logic moved into `video2yt-music-mix`, its Demucs separation was replaced by song-remover, and its mix step moved into Stage 5's `-filter_complex`.
 
 ### Step 7 — Merge into final video
 
@@ -239,8 +251,8 @@ like the subtitle step.
 ```bash
 uv run video2yt-merge \
   --segment output/<project>/intro.mp4                            --label "intro" \
-  --segment output/<project>/<uploader1>：.../<bv1>_with_danmaku_cut.mp4 --label "教程" \
-  --segment output/<project>/<uploader2>：.../<bv2>_with_danmaku_1.25x.mp4 --label "郭楓荷實戰" \
+  --segment output/<project>/<uploader1>：.../<bv1>_final_cut.mp4 --label "教程" \
+  --segment output/<project>/<uploader2>：.../<bv2>_final_1.25x.mp4 --label "郭楓荷實戰" \
   --title   "<working_title>" \
   -o        output/<project>/<project>_final.mp4
 ```
@@ -485,8 +497,7 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
 - [ ] Step 5 — compose intro via `video2yt-compose`
 - [ ] Step 6 — burn N Bilibili segments via `video2yt`
-- [ ] Step 6.5 — replace background music via `video2yt-music-swap`
-- [ ] Step 6.6 — add STT subtitles via `video2yt-subtitle` (per-segment; default flow uses danmaku-XML detection, OCR opt-in via `--enable-ocr`; whisperx ASR + Codex cleanup + style-aware split). Slower than realtime (~22 min cold / ~4 min warm on a 17-min segment). Skip when source already has burnt-in subs OR you want a faster turnaround
+- [ ] Step 6 covers the full per-segment pipeline (fetch → stems → subtitle → music-mix → burn) in one `video2yt` invocation. Per-segment skip flags `--no-subtitle` / `--no-music-swap` replace the old Step 6.5 / 6.6 sub-steps. See the table in §"Step 6 — Burn N Bilibili segments (five-stage pipeline)" above.
 - [ ] Step 7 — merge via `video2yt-merge`
 - [ ] Bonus — thumbnail (`video2yt-research-card` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`
