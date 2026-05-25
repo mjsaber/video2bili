@@ -86,7 +86,7 @@ Add a section to `CLAUDE.md` "External dependencies" listing the song-remover in
   Verify with `song-remover --version`.
 ```
 
-(Don't touch any other part of CLAUDE.md yet — full rewrite is in Task 10.)
+(Don't touch any other part of CLAUDE.md yet — full rewrite is in Task 9.)
 
 - [x] **Step 3: Verify the new script resolves AND that no broken entry points exist**
 
@@ -129,7 +129,7 @@ class FetchResult:
     from_cache: bool
 ```
 
-Behavior identical to today's combined call chain. Crucially, **do NOT call `cuts.rewrite_ass_for_cuts` from this function** — that responsibility moves to Stage 5 (Task 7).
+Behavior identical to today's combined call chain. Crucially, **do NOT call `cuts.rewrite_ass_for_cuts` from this function** — that responsibility moves to Stage 5 (Task 6, burn).
 
 - [ ] **Step 2: Slim `download.py` down to just the yt-dlp subprocess wrapper**
 
@@ -362,7 +362,7 @@ Drop the detection-logic tests. Add:
 
 - [ ] **Step 1: Carve out the bed-build path**
 
-From today's `music_swap.py`, copy (don't move yet — music_swap.py stays alive until Task 9) into `music_mix.py`:
+From today's `music_swap.py`, copy (don't move yet — music_swap.py stays alive until Task 8) into `music_mix.py`:
 - `build_music_bed(...)` and any private helpers it calls.
 - The CC0 credits-text writer.
 
