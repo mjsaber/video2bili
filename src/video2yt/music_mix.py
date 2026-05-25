@@ -1,10 +1,9 @@
 """Stage 4 of the per-segment pipeline: build the CC0 music bed for Stage 5.
 
-Carved out of ``music_swap.py`` (which goes away in plan T8 once the new
-pipeline is verified end-to-end). The bed-build is the only part of
-music_swap that's still relevant under the new design — Demucs is replaced
-by song-remover (Stage 2), and the bed-vs-vocals mix moves into the single
-ffmpeg burn pass (Stage 5).
+Originally carved out of the now-deleted ``music_swap.py``. The bed-build
+is the only part of the old music-swap path that survived the
+step6-restructure — Demucs was replaced by song-remover (Stage 2), and
+the bed-vs-vocals mix moved into the single ffmpeg burn pass (Stage 5).
 
 Contract: given ``<bv>.mp4``, produce ``<bv>.music_bed.wav`` (a stitched
 CC0 bed exactly matching the source duration) plus
@@ -114,9 +113,9 @@ def _build_music_bed(
 ) -> None:
     """Stitch ``tracks`` into a single music bed of exactly ``target_duration``.
 
-    Copied (with the surrounding helpers inlined) from ``music_swap.build_music_bed``
-    so this module can stand alone after T8 deletes music_swap. Consecutive
-    tracks are joined with an ``acrossfade`` of ``crossfade`` seconds. The
+    Inlined from the old ``music_swap.build_music_bed`` so this module
+    stands alone post-step6-restructure. Consecutive tracks are joined
+    with an ``acrossfade`` of ``crossfade`` seconds. The
     result is trimmed to the target with ``-t`` and a ``crossfade``-second
     ``afade`` out is applied at the tail.
     """

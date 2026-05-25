@@ -6495,6 +6495,10 @@ def _setup_orchestrator_fixture(tmp_path, monkeypatch):
 
     monkeypatch.setattr("video2yt.cli.preflight",
                        lambda: call_log.append("preflight"))
+    # T7 N6: cli.run early-aborts on missing Modal token when --device remote.
+    # Mock that preflight too so orchestrator tests don't need real Modal setup.
+    monkeypatch.setattr("video2yt.stems_cli.preflight",
+                       lambda device="remote": None)
 
     # Stage 1 (fetch) — mock fetch.fetch_and_build directly.
     from video2yt.fetch import FetchResult

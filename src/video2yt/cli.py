@@ -195,6 +195,14 @@ def run(args: argparse.Namespace) -> Path:
 
     preflight()
 
+    # Early Modal-token check: stems' Modal preflight otherwise fires only
+    # AFTER fetch completes (30s wasted on every misconfigured remote run).
+    # Codex T7 review N6.
+    needs_stems_early = not (args.no_subtitle and args.no_music_swap)
+    if needs_stems_early and args.device == "remote":
+        from video2yt import stems_cli
+        stems_cli.preflight(device="remote")
+
     # Stage 1: fetch + biliass via the new fetch.py module (T2 of step6-restructure).
     # This single call replaces the old metadata / download.fetch /
     # download.generate_ass / validate.check_ass chain. Timings for the
