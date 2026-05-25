@@ -44,7 +44,7 @@
 | `tests/test_burn_all.py` | CREATE | filter_complex string assertions for all (cuts × speed × subtitle × music-swap) combinations. |
 | `tests/test_smoke.py` | MODIFY | Drop music_swap tests; add orchestrator-level five-stage ordering + stage-skip-on-cache-hit tests. |
 | `tests/test_subtitle.py` | MODIFY | Drop detection-logic tests; add `.speech_source_meta.json` + glob-delete tests. |
-| `pyproject.toml` | MODIFY | Add new `[project.scripts]` lines; remove `video2yt-music-swap` line; remove `demucs`, `torchaudio`, `soundfile` deps (used only by deleted music_swap path). |
+| `pyproject.toml` | MODIFY | Add `video2yt-fetch` in T1; add `video2yt-stems` in T3, `video2yt-music-mix` in T5, `video2yt-burn` in T6 (each script registered in the same commit as its backing module, so no commit ever leaves a dangling entry point). Remove `video2yt-music-swap` line in T8; remove `demucs`, `torchaudio`, `soundfile` deps in T8 (used only by deleted music_swap path). |
 | `CLAUDE.md` | MODIFY | Commands, architecture map, gotchas — full rewrite of the per-segment pipeline section. |
 | `docs/superpowers/specs/2026-04-18-video-production-workflow.md` | MODIFY | Step 6 / 6.5 / 6.6 collapsed to a single Step 6 with the new five-stage flow. |
 
@@ -52,7 +52,7 @@
 
 ## Task ordering rationale
 
-Tasks 1–2 set up scaffolding so subsequent CLIs can be added one by one without breaking anything. Tasks 3–7 build the five new stages in dependency order (fetch → stems → subtitle → music-mix → burn). Task 8 wires the orchestrator. Task 9 deletes the old music-swap code (kept until the new path is verified end-to-end). Tasks 10–11 cover docs + workflow-spec updates and the real-ffmpeg smoke test that codex review N3 owes us.
+Tasks 1–2 set up scaffolding so subsequent CLIs can be added one by one without breaking anything. Tasks 3–6 build the four remaining stages in dependency order (stems → subtitle → music-mix → burn); each task registers its own console-script entry in pyproject.toml alongside the module so no commit ever leaves a dangling entry point. Task 7 wires the orchestrator. Task 8 deletes the old music-swap code (kept until the new path is verified end-to-end). Tasks 9–11 cover docs + workflow-spec updates, the real-ffmpeg smoke test that codex review N3 owes us, and the production regression run.
 
 **Do not commit until each task's full Definition-of-Done checklist passes**, including `uv run pytest` (full suite green) and `uv run mypy src/` (no new errors).
 
@@ -74,7 +74,7 @@ video2yt-fetch = "video2yt.fetch_cli:main"
 
 **The other three (`video2yt-burn`, `-music-mix`, `-stems`) are registered in their own tasks** (T3 stems, T5 music-mix, T6 burn) so that every commit leaves the repo in a runnable state — registering a script before its module exists makes `uv run video2yt-X` fail with a confusing `ModuleNotFoundError`. (Original T1 registered all four at once and codex stop-hook caught the broken-entry-point regression after T2.)
 
-(Keep the existing `video2yt-music-swap` line for now — it's removed in Task 9 after the new path is verified.)
+(Keep the existing `video2yt-music-swap` line for now — it's removed in Task 8 after the new path is verified end-to-end.)
 
 - [ ] **Step 2: Document the song-remover one-time setup in this plan**
 
@@ -99,10 +99,10 @@ uv run pytest                    # must stay green (no code changes yet)
 Do NOT pre-register `video2yt-burn` / `-music-mix` / `-stems` here. They land in T3 / T5 / T6 alongside their modules so each commit leaves the entry-point set in a runnable state.
 
 **Definition of Done:**
-- `pyproject.toml` has the four new script lines.
+- `pyproject.toml` has the `video2yt-fetch` entry only. (`video2yt-stems` / `-music-mix` / `-burn` land in T3 / T5 / T6 alongside their modules — see the §"File structure" pyproject.toml row.)
 - `uv run pytest` passes (full existing suite).
 - CLAUDE.md has the song-remover install paragraph.
-- Commit: `chore(step6): register new entry points and document song-remover setup`
+- Commit: `chore(step6): register video2yt-fetch entry point and document song-remover setup`
 
 ---
 
