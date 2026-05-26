@@ -5268,3 +5268,712 @@ def test_upload_cli_main_returns_0_on_dry_run(tmp_path, monkeypatch):
     )
     rc = upload_cli.main(["--metadata", str(meta), "--dry-run"])
     assert rc == 0
+
+
+# ===================== video2yt-topic =====================
+
+def _topic_candidate(
+    bvid="BV1xx",
+    title="郭枫战旗实战",
+    streamer="郭枫",
+    play=100000,
+    duration=900,
+    description="实战录像",
+    created_ts=1_700_000_000,
+):
+    from video2yt.topic import VideoCandidate
+    return VideoCandidate(
+        bvid=bvid,
+        title=title,
+        description=description,
+        duration_seconds=duration,
+        play_count=play,
+        created_ts=created_ts,
+        streamer=streamer,
+    )
+
+
+def _topic_summary(
+    candidate=None,
+    strategy="戒指龙流",
+    core_card="戒指龙",
+    summary="戒指龙滚雪球",
+    highlights="新饰品加速",
+):
+    from video2yt.topic import VideoSummary
+    return VideoSummary(
+        candidate=candidate or _topic_candidate(),
+        strategy=strategy,
+        core_card=core_card,
+        summary=summary,
+        highlights=highlights,
+    )
+
+
+def test_topic_parse_streamers_basic(tmp_path):
+    from video2yt import topic
+    f = tmp_path / "s.txt"
+    f.write_text(
+        "# comment\n\n炉石郭枫 12345\n超凡景清 67890\n瓦莉拉 11 mixed\n",
+        encoding="utf-8",
+    )
+    out = topic.parse_streamers(f)
+    assert len(out) == 3
+    assert out[0].name == "炉石郭枫" and out[0].uid == 12345 and out[0].is_mixed is False
+    assert out[1].name == "超凡景清" and out[1].uid == 67890 and out[1].is_mixed is False
+    assert out[2].name == "瓦莉拉" and out[2].uid == 11 and out[2].is_mixed is True
+
+
+def test_topic_parse_streamers_invalid_3rd_token(tmp_path):
+    from video2yt import topic
+    f = tmp_path / "s.txt"
+    f.write_text("瓦莉拉 11 something\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="3rd token must be 'mixed'"):
+        topic.parse_streamers(f)
+
+
+def test_topic_parse_streamers_missing_file(tmp_path):
+    from video2yt import topic
+    with pytest.raises(FileNotFoundError):
+        topic.parse_streamers(tmp_path / "nope.txt")
+
+
+def test_topic_parse_streamers_invalid_format(tmp_path):
+    from video2yt import topic
+    f = tmp_path / "s.txt"
+    f.write_text("郭枫\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"expected '<name> <uid> \[mixed\]'"):
+        topic.parse_streamers(f)
+    f.write_text("郭枫 1 mixed extra\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"expected '<name> <uid> \[mixed\]'"):
+        topic.parse_streamers(f)
+
+
+def test_topic_parse_streamers_uid_must_be_positive_int(tmp_path):
+    from video2yt import topic
+    f = tmp_path / "s.txt"
+    f.write_text("郭枫 0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="uid must be positive"):
+        topic.parse_streamers(f)
+    f.write_text("郭枫 abc\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="uid must be int"):
+        topic.parse_streamers(f)
+
+
+def test_topic_parse_streamers_empty_raises(tmp_path):
+    from video2yt import topic
+    f = tmp_path / "s.txt"
+    f.write_text("# only comments\n\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no valid streamer entries"):
+        topic.parse_streamers(f)
+
+
+def test_topic_parse_done_topics_returns_set(tmp_path):
+    from video2yt import topic
+    f = tmp_path / "d.txt"
+    f.write_text("# comment\n戒指龙\n\n背靠背流\n", encoding="utf-8")
+    assert topic.parse_done_topics(f) == {"戒指龙", "背靠背流"}
+
+
+def test_topic_parse_done_topics_missing_returns_empty(tmp_path):
+    from video2yt import topic
+    assert topic.parse_done_topics(tmp_path / "nope.txt") == set()
+
+
+def test_topic_scan_done_corpus_from_output(tmp_path):
+    from video2yt import topic
+    out_root = tmp_path / "output"
+    proj = out_root / "back2back"
+    proj.mkdir(parents=True)
+    (proj / "intro_script.txt").write_text("S13 版本最强的背靠背流", encoding="utf-8")
+    proj2 = out_root / "ringnaga"
+    proj2.mkdir(parents=True)
+    (proj2 / "intro_script.txt").write_text("護戒娜迦：核心是戒指龍", encoding="utf-8")
+    corpus = topic.scan_done_corpus_from_output(out_root)
+    assert set(corpus.keys()) == {"output/back2back", "output/ringnaga"}
+    # blob includes folder name + script body
+    assert "back2back" in corpus["output/back2back"]
+    assert "背靠背流" in corpus["output/back2back"]
+    assert "戒指龍" in corpus["output/ringnaga"]
+
+
+def test_topic_scan_done_corpus_from_output_missing(tmp_path):
+    from video2yt import topic
+    assert topic.scan_done_corpus_from_output(tmp_path / "missing") == {}
+
+
+def test_topic_parse_length_string_mmss():
+    from video2yt import topic
+    assert topic.parse_length_string("12:34") == 12 * 60 + 34
+
+
+def test_topic_parse_length_string_hhmmss():
+    from video2yt import topic
+    assert topic.parse_length_string("1:02:03") == 3600 + 120 + 3
+
+
+def test_topic_parse_length_string_invalid():
+    from video2yt import topic
+    with pytest.raises(ValueError):
+        topic.parse_length_string("nope")
+
+
+def test_topic_fetch_recent_videos_filters(monkeypatch):
+    """Default behavior: no positive title filter (BG-dedicated streamer)."""
+    from video2yt import topic
+
+    fixture = [
+        # passes: recent, long enough, plain title — no '战棋' required for BG-only channels
+        {"bvid": "BV1aa", "title": "实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
+        # filtered: too short
+        {"bvid": "BV1bb", "title": "实战对局", "description": "d", "length": "05:00", "play": 50000, "created": 2000},
+        # filtered: bad title (教程)
+        {"bvid": "BV1cc", "title": "新版本教程", "description": "d", "length": "12:00", "play": 50000, "created": 2000},
+        # filtered: too old (created < since_ts)
+        {"bvid": "BV1dd", "title": "实战对局", "description": "d", "length": "12:00", "play": 50000, "created": 500},
+    ]
+    async def fake(uid, pages, credential=None):
+        assert uid == 999 and pages == 2
+        return fixture
+    monkeypatch.setattr(topic, "_async_fetch_videos", fake)
+
+    out = topic.fetch_recent_videos(
+        topic.Streamer(name="测试", uid=999),
+        since_ts=1000,
+        min_duration_seconds=600,
+        pages=2,
+    )
+    assert len(out) == 1
+    assert out[0].bvid == "BV1aa"
+    assert out[0].streamer == "测试"
+    assert out[0].duration_seconds == 720
+
+
+def test_topic_fetch_recent_videos_include_filter_accepts_zhanqi_variants(monkeypatch):
+    """When the include filter is supplied, both 战棋 and 战旗 pass; non-BG fails."""
+    from video2yt import topic
+
+    fixture = [
+        {"bvid": "BV1q", "title": "酒馆战棋实战", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+        {"bvid": "BV1z", "title": "炉石战旗对局", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+        {"bvid": "BV1n", "title": "炉石传说宿伞之魂", "description": "d", "length": "12:00", "play": 1, "created": 2000},
+    ]
+    async def fake(uid, pages, credential=None):
+        return fixture
+    monkeypatch.setattr(topic, "_async_fetch_videos", fake)
+
+    out = topic.fetch_recent_videos(
+        topic.Streamer(name="测试", uid=999, is_mixed=True),
+        since_ts=1000,
+        min_duration_seconds=600,
+        pages=1,
+        include_title_re=topic.DEFAULT_INCLUDE_TITLE_RE,
+    )
+    assert {c.bvid for c in out} == {"BV1q", "BV1z"}
+
+
+def test_topic_fetch_danmaku_sample_evenly_spaced(monkeypatch):
+    from video2yt import topic
+    texts = [f"d{i}" for i in range(1000)]
+    async def fake(bvid, credential=None):
+        assert bvid == "BV1aa"
+        return texts
+    monkeypatch.setattr(topic, "_async_fetch_danmaku", fake)
+    out = topic.fetch_danmaku_sample("BV1aa", sample_size=10)
+    assert len(out) == 10
+    assert out[0] == "d0"
+    # last sample picks index round(9*100) = d900
+    assert out[-1].startswith("d9")
+
+
+def test_topic_fetch_danmaku_sample_returns_all_when_small(monkeypatch):
+    from video2yt import topic
+    async def fake(bvid, credential=None):
+        return ["a", "b", "c"]
+    monkeypatch.setattr(topic, "_async_fetch_danmaku", fake)
+    assert topic.fetch_danmaku_sample("BV", sample_size=10) == ["a", "b", "c"]
+
+
+def test_topic_summarize_with_codex_writes_input_reads_output(tmp_path, monkeypatch):
+    from video2yt import topic
+
+    cands = [_topic_candidate(bvid="BV1aa"), _topic_candidate(bvid="BV1bb", title="景清实战", streamer="景清")]
+    danmaku = {"BV1aa": ["d1", "d2"], "BV1bb": ["x", "y"]}
+
+    captured: dict = {}
+
+    def fake_run(cmd, **kw):
+        # cmd[3] is "--cd", cmd[4] is the tempdir
+        cd_idx = cmd.index("--cd") + 1
+        tmpdir = Path(cmd[cd_idx])
+        captured["input"] = json.loads((tmpdir / "input.json").read_text(encoding="utf-8"))
+        # Simulate Codex writing the output file:
+        out = [
+            {"bvid": "BV1aa", "strategy": "戒指龙流", "core_card": "戒指龙",
+             "summary": "郭枫戒指龙", "highlights": "新饰品"},
+            {"bvid": "BV1bb", "strategy": "戒指龙流", "core_card": "戒指龙",
+             "summary": "景清戒指龙", "highlights": "更激进英雄选择"},
+        ]
+        (tmpdir / "output.json").write_text(json.dumps(out), encoding="utf-8")
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.topic.subprocess.run", fake_run)
+    summaries = topic.summarize_with_codex(cands, danmaku, timeout=60)
+
+    assert len(summaries) == 2
+    assert summaries[0].strategy == "戒指龙流"
+    assert summaries[1].candidate.streamer == "景清"
+    # Input JSON well-formed and contains expected keys
+    assert captured["input"]["videos"][0]["bvid"] == "BV1aa"
+    assert captured["input"]["videos"][0]["danmaku"] == ["d1", "d2"]
+
+
+def test_topic_summarize_with_codex_no_candidates_skips(monkeypatch):
+    from video2yt import topic
+    called: list = []
+    monkeypatch.setattr("video2yt.topic.subprocess.run", lambda *a, **kw: called.append(1))
+    assert topic.summarize_with_codex([], {}) == []
+    assert called == []
+
+
+def test_topic_summarize_with_codex_missing_output_raises(tmp_path, monkeypatch):
+    from video2yt import topic
+    cands = [_topic_candidate()]
+    monkeypatch.setattr(
+        "video2yt.topic.subprocess.run",
+        lambda *a, **kw: MagicMock(returncode=0),
+    )
+    with pytest.raises(RuntimeError, match="does not exist"):
+        topic.summarize_with_codex(cands, {"BV1xx": []}, timeout=60)
+
+
+def test_topic_summarize_with_codex_subprocess_failure_raises(monkeypatch):
+    from video2yt import topic
+    import subprocess as sp
+    cands = [_topic_candidate()]
+    def fake(*a, **kw):
+        raise sp.CalledProcessError(returncode=2, cmd=a[0] if a else [])
+    monkeypatch.setattr("video2yt.topic.subprocess.run", fake)
+    with pytest.raises(RuntimeError, match="codex exec failed"):
+        topic.summarize_with_codex(cands, {"BV1xx": []}, timeout=60)
+
+
+def test_topic_group_pairs_keeps_two_distinct_streamers():
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫", play=100000),
+        strategy="戒指龙流", core_card="戒指龙",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清", play=80000),
+        strategy="戒指龙流", core_card="戒指龙",
+    )
+    s3 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV3", streamer="郭枫", play=50000),
+        strategy="戒指龙流", core_card="戒指龙",
+    )  # second video by same streamer; should be dropped
+    pairs = topic.group_pairs([s1, s2, s3])
+    assert len(pairs) == 1
+    assert pairs[0].strategy == "戒指龙流"
+    assert {s.candidate.streamer for s in pairs[0].summaries} == {"郭枫", "景清"}
+
+
+def test_topic_group_pairs_unifies_via_core_card_when_strategy_differs():
+    """Real-world case: Codex returns slightly different strategy names for
+    the same comp ('戒指龙流' vs '亡灵戒指龙'), but core_card is the same."""
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫", play=100000),
+        strategy="戒指龙流", core_card="戒指龙",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清", play=80000),
+        strategy="亡灵戒指龙", core_card="戒指龙",
+    )
+    pairs = topic.group_pairs([s1, s2])
+    assert len(pairs) == 1
+    # The displayed strategy is the higher-played one's strategy
+    assert pairs[0].strategy == "戒指龙流"
+
+
+def test_topic_group_pairs_drops_singletons():
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(streamer="郭枫"),
+        strategy="孤儿流", core_card="孤儿卡",
+    )
+    assert topic.group_pairs([s1]) == []
+
+
+def test_topic_group_pairs_skips_blank_core_card():
+    from video2yt import topic
+    s1 = _topic_summary(candidate=_topic_candidate(streamer="郭枫"), core_card="")
+    s2 = _topic_summary(candidate=_topic_candidate(streamer="景清"), core_card="")
+    assert topic.group_pairs([s1, s2]) == []
+
+
+def test_topic_annotate_already_done_via_corpus_substring():
+    from video2yt import topic
+    pair = topic.TopicPair(
+        strategy="戒指龙流",
+        summaries=[_topic_summary(), _topic_summary()],
+        is_already_done=False,
+        done_marker=None,
+    )
+    corpus = {"output/ringnaga": "ringnaga\n戒指龙阵容是核心"}
+    topic.annotate_already_done([pair], corpus, set())
+    assert pair.is_already_done is True
+    assert pair.done_marker == "output/ringnaga/"
+
+
+def test_topic_annotate_already_done_matches_via_core_card():
+    """If only the core_card appears in the past corpus (not the strategy name)
+    the pair should still be marked done."""
+    from video2yt import topic
+    s1 = _topic_summary(strategy="新名字流", core_card="戒指龙")
+    s2 = _topic_summary(strategy="新名字流", core_card="戒指龙")
+    pair = topic.TopicPair(
+        strategy="新名字流",
+        summaries=[s1, s2],
+        is_already_done=False,
+        done_marker=None,
+    )
+    corpus = {"output/ringnaga": "ringnaga\n核心是戒指龙"}
+    topic.annotate_already_done([pair], corpus, set())
+    assert pair.is_already_done is True
+
+
+def test_topic_annotate_already_done_via_done_topics_file():
+    from video2yt import topic
+    pair = topic.TopicPair(
+        strategy="背靠背流",
+        summaries=[_topic_summary(), _topic_summary()],
+        is_already_done=False,
+        done_marker=None,
+    )
+    topic.annotate_already_done([pair], {}, {"背靠背"})
+    assert pair.is_already_done is True
+    assert pair.done_marker.startswith("done_topics:")
+
+
+def test_topic_annotate_already_done_no_match_keeps_novel():
+    from video2yt import topic
+    s1 = _topic_summary(strategy="火车头流", core_card="火车头")
+    s2 = _topic_summary(strategy="火车头流", core_card="火车头")
+    pair = topic.TopicPair(
+        strategy="火车头流",
+        summaries=[s1, s2],
+        is_already_done=False,
+        done_marker=None,
+    )
+    corpus = {"output/x": "x\n背靠背流是T0"}
+    topic.annotate_already_done([pair], corpus, {"戒指龙"})
+    assert pair.is_already_done is False
+    assert pair.done_marker is None
+
+
+def test_topic_annotate_skips_one_char_needles():
+    """Strategy '流' alone (norm length 0) must not match every blob."""
+    from video2yt import topic
+    s1 = _topic_summary(strategy="流", core_card="单")
+    s2 = _topic_summary(strategy="流", core_card="单")
+    pair = topic.TopicPair(
+        strategy="流",
+        summaries=[s1, s2],
+        is_already_done=False,
+        done_marker=None,
+    )
+    topic.annotate_already_done([pair], {"output/x": "anything"}, {"anything"})
+    assert pair.is_already_done is False
+
+
+def test_topic_annotate_traditional_simplified_bridged_via_done_topics():
+    """Regression: ringnaga's intro is in 繁體 ('戒指龍'); a Codex strategy of
+    '戒指龙流' (簡體) won't match the corpus directly, but a done_topics.txt
+    entry of '戒指龙' must bridge the gap."""
+    from video2yt import topic
+    s1 = _topic_summary(strategy="戒指龙流", core_card="戒指龙")
+    s2 = _topic_summary(strategy="戒指龙流", core_card="戒指龙")
+    pair = topic.TopicPair(
+        strategy="戒指龙流",
+        summaries=[s1, s2],
+        is_already_done=False,
+        done_marker=None,
+    )
+    trad_corpus = {"output/ringnaga": "ringnaga\n核心是戒指龍，靠酒館法術"}
+    topic.annotate_already_done([pair], trad_corpus, {"戒指龙"})
+    assert pair.is_already_done is True
+    assert "戒指龙" in pair.done_marker
+
+
+def test_topic_score_pair_novel_gets_bonus():
+    from video2yt import topic
+    s1 = _topic_summary(candidate=_topic_candidate(play=100000, streamer="A"))
+    s2 = _topic_summary(candidate=_topic_candidate(play=100000, streamer="B"))
+    novel = topic.TopicPair(strategy="x", summaries=[s1, s2], is_already_done=False, done_marker=None)
+    done = topic.TopicPair(strategy="x", summaries=[s1, s2], is_already_done=True, done_marker="output/x/")
+    assert topic.score_pair(novel) == pytest.approx(topic.score_pair(done) + 2.0)
+
+
+def test_topic_render_markdown_empty_message():
+    from video2yt import topic
+    md = topic.render_markdown([], window_days=7, generated_at="2026-05-09")
+    assert "选题候选" in md
+    assert "2026-05-09" in md
+    assert "没有任何流派" in md
+
+
+def test_topic_render_markdown_populated_includes_links_and_marker():
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫", title="郭枫战旗"),
+        strategy="戒指龙流",
+        summary="郭枫戒指龙",
+        highlights="新饰品",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清", title="景清战旗"),
+        strategy="戒指龙流",
+        summary="景清戒指龙",
+        highlights="更激进英雄",
+    )
+    pair_novel = topic.TopicPair(strategy="戒指龙流", summaries=[s1, s2], is_already_done=False, done_marker=None, score=7.5)
+    pair_done = topic.TopicPair(strategy="背靠背流", summaries=[s1, s2], is_already_done=True, done_marker="output/back2back/", score=5.0)
+    md = topic.render_markdown([pair_novel, pair_done], window_days=7, generated_at="2026-05-09")
+    assert "戒指龙流" in md
+    assert "[新流派" in md
+    assert "已做过 → output/back2back/" in md
+    assert "https://www.bilibili.com/video/BV1" in md
+    assert "https://www.bilibili.com/video/BV2" in md
+
+
+def test_topic_run_topic_orchestrator_writes_report(tmp_path, monkeypatch):
+    from video2yt import topic
+
+    streamers = [topic.Streamer(name="郭枫", uid=1), topic.Streamer(name="景清", uid=2)]
+
+    def fake_fetch(s, **kw):
+        if s.name == "郭枫":
+            return [_topic_candidate(bvid="BVa", streamer="郭枫", play=100000)]
+        return [_topic_candidate(bvid="BVb", streamer="景清", play=80000)]
+    monkeypatch.setattr(topic, "fetch_recent_videos", fake_fetch)
+    monkeypatch.setattr(topic, "fetch_danmaku_sample", lambda b, *a, **kw: ["d"])
+    monkeypatch.setattr(
+        topic,
+        "summarize_with_codex",
+        lambda cs, dm, **kw: [
+            _topic_summary(candidate=cs[0], strategy="戒指龙流"),
+            _topic_summary(candidate=cs[1], strategy="戒指龙流"),
+        ],
+    )
+
+    report = tmp_path / "out" / "report.md"
+    result = topic.run_topic(
+        streamers=streamers,
+        days=7,
+        output_root=tmp_path / "no_output",
+        done_topics_file=None,
+        report_path=report,
+        now_ts=1_700_000_000,
+    )
+    assert result == report
+    text = report.read_text(encoding="utf-8")
+    assert "戒指龙流" in text
+    assert "[新流派" in text  # nothing under output_root
+
+
+def test_topic_run_topic_applies_include_filter_only_to_mixed_streamers(tmp_path, monkeypatch):
+    """BG-only streamers fetch with no include filter; mixed streamers get the
+    战棋|战旗 filter so constructed-mode uploads are dropped before Codex."""
+    from video2yt import topic
+
+    streamers = [
+        topic.Streamer(name="郭枫", uid=1),                 # BG-dedicated
+        topic.Streamer(name="瓦莉拉", uid=2, is_mixed=True),  # general HS
+    ]
+    seen: dict[str, object] = {}
+
+    def fake_fetch(s, **kw):
+        seen[s.name] = kw.get("include_title_re")
+        return []
+    monkeypatch.setattr(topic, "fetch_recent_videos", fake_fetch)
+
+    topic.run_topic(
+        streamers=streamers,
+        days=7,
+        output_root=tmp_path / "no_output",
+        done_topics_file=None,
+        report_path=tmp_path / "report.md",
+    )
+    assert seen["郭枫"] is None
+    assert seen["瓦莉拉"] is topic.DEFAULT_INCLUDE_TITLE_RE
+
+
+def test_topic_run_topic_no_candidates_writes_empty_report(tmp_path, monkeypatch):
+    from video2yt import topic
+    monkeypatch.setattr(topic, "fetch_recent_videos", lambda s, **kw: [])
+    summary_called: list = []
+    monkeypatch.setattr(
+        topic,
+        "summarize_with_codex",
+        lambda *a, **kw: summary_called.append(1) or [],
+    )
+    report = tmp_path / "report.md"
+    topic.run_topic(
+        streamers=[topic.Streamer(name="x", uid=1)],
+        days=7,
+        output_root=tmp_path / "no_output",
+        done_topics_file=None,
+        report_path=report,
+    )
+    assert report.exists()
+    assert "没有任何流派" in report.read_text(encoding="utf-8")
+    assert summary_called == [], "should not call codex when there are no candidates"
+
+
+def test_topic_run_topic_swallows_per_streamer_fetch_failure(tmp_path, monkeypatch):
+    from video2yt import topic
+    def fake_fetch(s, **kw):
+        if s.name == "broken":
+            raise RuntimeError("boom")
+        return [_topic_candidate(streamer=s.name)]
+    monkeypatch.setattr(topic, "fetch_recent_videos", fake_fetch)
+    monkeypatch.setattr(topic, "fetch_danmaku_sample", lambda b, *a, **kw: [])
+    monkeypatch.setattr(topic, "summarize_with_codex", lambda cs, dm, **kw: [])
+    streamers = [
+        topic.Streamer(name="broken", uid=1),
+        topic.Streamer(name="ok", uid=2),
+    ]
+    report = tmp_path / "r.md"
+    topic.run_topic(
+        streamers=streamers,
+        days=7,
+        output_root=tmp_path / "no_output",
+        done_topics_file=None,
+        report_path=report,
+    )
+    assert report.exists()
+
+
+def test_topic_cli_parse_args_defaults():
+    from video2yt import topic_cli
+    args = topic_cli.parse_args([])
+    assert args.days == 7
+    assert args.whitelist == Path("assets/topic/streamers.txt")
+    assert args.done_topics == Path("assets/topic/done_topics.txt")
+    assert args.output_root == Path("output")
+    assert args.report is None
+
+
+def test_topic_cli_parse_args_overrides():
+    from video2yt import topic_cli
+    args = topic_cli.parse_args([
+        "--days", "14", "--whitelist", "/tmp/s.txt",
+        "--report", "/tmp/r.md", "--min-duration", "300",
+    ])
+    assert args.days == 14
+    assert args.whitelist == Path("/tmp/s.txt")
+    assert args.report == Path("/tmp/r.md")
+    assert args.min_duration == 300
+
+
+def test_topic_cli_run_invokes_run_topic_with_parsed_args(tmp_path, monkeypatch):
+    from video2yt import topic, topic_cli
+    streamers_file = tmp_path / "s.txt"
+    streamers_file.write_text("郭枫 1\n", encoding="utf-8")
+    captured: dict = {}
+    def fake_run_topic(**kw):
+        captured.update(kw)
+        return kw["report_path"]
+    monkeypatch.setattr(topic, "run_topic", fake_run_topic)
+    monkeypatch.setattr(topic, "load_credential_from_browser", lambda b: f"CRED:{b}")
+    args = topic_cli.parse_args([
+        "--whitelist", str(streamers_file),
+        "--report", str(tmp_path / "r.md"),
+        "--days", "3",
+    ])
+    out = topic_cli.run(args)
+    assert out == tmp_path / "r.md"
+    assert captured["days"] == 3
+    assert captured["report_path"] == tmp_path / "r.md"
+    assert len(captured["streamers"]) == 1
+    assert captured["credential"] == "CRED:chrome"
+
+
+def test_topic_cli_run_skips_credential_when_browser_empty(tmp_path, monkeypatch):
+    from video2yt import topic, topic_cli
+    streamers_file = tmp_path / "s.txt"
+    streamers_file.write_text("郭枫 1\n", encoding="utf-8")
+    captured: dict = {}
+    monkeypatch.setattr(topic, "run_topic", lambda **kw: captured.update(kw) or kw["report_path"])
+    def boom(b):
+        raise AssertionError("should not be called when --cookies-from-browser=''")
+    monkeypatch.setattr(topic, "load_credential_from_browser", boom)
+    args = topic_cli.parse_args([
+        "--whitelist", str(streamers_file),
+        "--report", str(tmp_path / "r.md"),
+        "--cookies-from-browser", "",
+    ])
+    topic_cli.run(args)
+    assert captured["credential"] is None
+
+
+def test_topic_cli_run_default_report_path_uses_today(tmp_path, monkeypatch):
+    from video2yt import topic, topic_cli
+    streamers_file = tmp_path / "s.txt"
+    streamers_file.write_text("郭枫 1\n", encoding="utf-8")
+    captured: dict = {}
+    monkeypatch.setattr(topic, "run_topic", lambda **kw: captured.update(kw) or kw["report_path"])
+    monkeypatch.setattr(topic, "load_credential_from_browser", lambda b: None)
+    args = topic_cli.parse_args(["--whitelist", str(streamers_file)])
+    topic_cli.run(args)
+    assert captured["report_path"].parent == Path("output") / "topics"
+    assert captured["report_path"].suffix == ".md"
+
+
+def test_topic_cli_main_returns_1_on_missing_whitelist(tmp_path):
+    from video2yt import topic_cli
+    rc = topic_cli.main(["--whitelist", str(tmp_path / "missing.txt")])
+    assert rc == 1
+
+
+def test_topic_load_credential_wraps_yt_dlp_exception(monkeypatch):
+    """yt_dlp can raise a wide range of exception types (browser missing,
+    keyring failure, locked cookie DB, unsupported browser). They must NOT
+    bubble out — they must surface as a RuntimeError that main() can catch."""
+    from video2yt import topic
+    class WeirdYtDlpError(Exception):
+        pass
+    def boom(browser):
+        raise WeirdYtDlpError("simulated keyring blowup")
+    monkeypatch.setattr("yt_dlp.cookies.extract_cookies_from_browser", boom)
+    with pytest.raises(RuntimeError, match="could not load cookies"):
+        topic.load_credential_from_browser("chrome")
+
+
+def test_topic_cli_main_returns_1_when_browser_cookies_blow_up(tmp_path, monkeypatch):
+    """Default `--cookies-from-browser chrome` must not produce a stack trace
+    when the user has no Chrome / no Bilibili login / locked DB."""
+    from video2yt import topic_cli
+    streamers_file = tmp_path / "s.txt"
+    streamers_file.write_text("郭枫 1\n", encoding="utf-8")
+    class WeirdYtDlpError(Exception):
+        pass
+    def boom(browser):
+        raise WeirdYtDlpError("no chrome installed")
+    monkeypatch.setattr("yt_dlp.cookies.extract_cookies_from_browser", boom)
+    rc = topic_cli.main(["--whitelist", str(streamers_file)])
+    assert rc == 1
+
+
+def test_topic_cli_main_returns_0_on_success(tmp_path, monkeypatch):
+    from video2yt import topic, topic_cli
+    streamers_file = tmp_path / "s.txt"
+    streamers_file.write_text("郭枫 1\n", encoding="utf-8")
+    monkeypatch.setattr(topic, "run_topic", lambda **kw: kw["report_path"])
+    monkeypatch.setattr(topic, "load_credential_from_browser", lambda b: None)
+    rc = topic_cli.main([
+        "--whitelist", str(streamers_file),
+        "--report", str(tmp_path / "r.md"),
+    ])
+    assert rc == 0

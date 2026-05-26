@@ -18,6 +18,7 @@ uv run video2yt "<url>" -o output/<project>/                # nest into per-proj
 uv run python -m video2yt "<url>"                          # run as module
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # compose from stills
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --title "T"   # concat + progress bar + loudnorm + chapters
+uv run video2yt-subtitle seg.mp4 --danmaku raw.xml         # add STT subtitles if not already present
 uv run pytest                                              # run tests (230)
 uv add <pkg>                                               # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
@@ -30,6 +31,13 @@ uv add <pkg>                                               # add a dep (NEVER ed
 ## Project folder convention
 
 When working on a multi-step video project (intro + multiple burnt segments + final merge), pass `-o output/<project>/` to every `video2yt` / `video2yt-compose` / `video2yt-merge` invocation so all artifacts land under one folder. Example: `output/back2back/` contains `intro.mp4`, segment subfolders, the final merged MP4, the YouTube thumbnail, and any scratch files. This keeps unrelated projects isolated and makes cleanup easy.
+
+**⚠️ Worktree cwd hazard**: `video2yt` / `video2yt-compose` / `video2yt-topic` default to a relative `./output` (see `cli.py:144`, `compose_cli.py:52`, `topic_cli.py:50,111`). Running them from inside `.claude/worktrees/<wt>/` puts artifacts in the worktree's local `output/` instead of the main repo's `output/`, splitting them off from every other project's history. **Always do one of**:
+
+- `cd /Users/jun/code/video2yt && uv run video2yt ...` (preferred — main repo cwd)
+- or pass `-o /Users/jun/code/video2yt/output/<project>/` with an absolute path
+
+`video2yt-merge` and `video2yt-subtitle` are NOT affected — their output paths derive from input file locations. Historical incident: `kalecgos-dual-build` (2026-05-17) had to be manually `mv`'d from worktree to main repo on first project run.
 
 ## Battlegrounds workflow rule (intro-script drafting)
 
@@ -69,7 +77,9 @@ src/video2yt/
 │                     # with concat + per-seg loudnorm + overlay + drawbox highlights, chapters file
 ├── merge_cli.py      # video2yt-merge entry point (parse_args/run/main)
 ├── validate.py       # ffprobe + source/ASS/output validators
-└── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
+├── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
+├── subtitle.py       # detect (danmaku XML + OCR) + SenseVoice ASR + Codex cleanup + split + burn
+└── subtitle_cli.py   # video2yt-subtitle entry point
 ```
 
 Tests live in `tests/test_smoke.py` (162 tests). Everything is mocked at the `subprocess.run` boundary — no network, no ffmpeg, no ffprobe is actually invoked in tests.

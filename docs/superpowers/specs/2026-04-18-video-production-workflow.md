@@ -365,6 +365,7 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
 - [ ] Step 5 — compose intro via `video2yt-compose`
 - [ ] Step 6 — burn N Bilibili segments via `video2yt`
+- [ ] Step 6.5 — add STT subtitles via `video2yt-subtitle` (per-segment; default flow uses danmaku-XML detection, OCR opt-in via `--enable-ocr`; whisperx ASR + Codex cleanup + style-aware split). Slower than realtime (~22 min cold / ~4 min warm on a 17-min segment). Skip when source already has burnt-in subs OR you want a faster turnaround
 - [ ] Step 7 — merge via `video2yt-merge`
 - [ ] Bonus — thumbnail (`video2yt-research-card` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`

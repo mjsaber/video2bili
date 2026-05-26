@@ -5,12 +5,14 @@ description = "Download a Bilibili video and burn danmaku into the output MP4"
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
+    "bilibili-api-python>=17.4.1",
     "google-api-python-client>=2.194.0",
     "google-auth-httplib2>=0.3.1",
     "google-auth-oauthlib>=1.3.1",
     "google-genai>=1.73.1",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
     "requests>=2.33.1",
     "whisperx>=3.8.5",
     "yt-dlp>=2025.1.1",
@@ -20,6 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+]
+subtitle = [
+    "rapidocr-onnxruntime>=1.4",
 ]
 
 [project.scripts]
@@ -32,6 +37,8 @@ video2yt-thumbnail = "video2yt.thumbnail_cli:main"
 video2yt-tts = "video2yt.tts_cli:main"
 video2yt-image = "video2yt.image_gen_cli:main"
 video2yt-upload = "video2yt.upload_cli:main"
+video2yt-topic = "video2yt.topic_cli:main"
+video2yt-subtitle = "video2yt.subtitle_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -39,3 +46,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/video2yt"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/video2yt/data/bg_glossary.yaml" = "video2yt/data/bg_glossary.yaml"

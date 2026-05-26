@@ -15,6 +15,16 @@ Download a Bilibili video and burn its danmaku (bullet comments) into a YouTube-
 uv sync
 ```
 
+### Optional: subtitle generation
+
+The `video2yt-subtitle` CLI uses `whisperx` for STT (already a top-level dep — installed by `uv sync`). The optional `subtitle` extra adds `rapidocr-onnxruntime` for bottom-band OCR detection, which is only required when running with `--enable-ocr`:
+
+```bash
+uv sync --extra subtitle    # only needed if you'll use --enable-ocr
+```
+
+It also requires the `codex` CLI for terminology cleanup (`brew install codex && codex login`).
+
 ## Quick start
 
 ```bash

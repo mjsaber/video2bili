@@ -23,6 +23,13 @@ from googleapiclient.http import MediaFileUpload
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
+    # `youtube` (full manage) is needed for videos.update — e.g. fixing chapter
+    # formatting in the description post-upload without re-uploading the video
+    # (kalecgos-dual-build 2026-05-17: YouTube auto-chapters refused to parse
+    # lines like "00:55 紅龍卡雷（夜吹的戰棋日記2214）" because of the trailing
+    # full-width bracketed annotation; the fix required updating the description
+    # via videos.update, which youtube.upload alone can't authorize).
+    "https://www.googleapis.com/auth/youtube",
 ]
 
 REQUIRED_META_FIELDS = (
