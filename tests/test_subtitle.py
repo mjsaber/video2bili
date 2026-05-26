@@ -878,9 +878,9 @@ def test_parse_args_defaults():
     assert args.glossary is None
     assert args.skip_cleanup is False
     assert args.font_face == "Hiragino Sans GB"
-    assert args.outline_px == 2
-    assert args.shadow_px == 0
-    assert args.margin_v == 15
+    assert args.outline_px == 4
+    assert args.shadow_px == 2
+    assert args.margin_v == 80
     assert args.pause_split_seconds == 0.6
 
 

@@ -100,15 +100,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     parser.add_argument("--font-face", default="Hiragino Sans GB")
     parser.add_argument("--font-size", type=int, default=None,
-                        help="Default: auto (height * 18/1080, min 16)")
-    parser.add_argument("--outline-px", type=int, default=2)
-    parser.add_argument("--shadow-px", type=int, default=0)
+                        help="Default: auto (height * 25/540, min 24)")
+    parser.add_argument("--outline-px", type=int, default=4)
+    parser.add_argument("--shadow-px", type=int, default=2)
     parser.add_argument(
-        "--margin-v", type=int, default=15,
+        "--margin-v", type=int, default=80,
         help=(
             "ASS MarginV in pixels (distance from bottom edge for "
-            "bottom-aligned subtitles). Default: 15 — keeps subs close to "
-            "the bottom so they don't cover game UI in HS BG footage."
+            "bottom-aligned subtitles). Default: 80 — matches the pre-298fad4 "
+            "bigger/bolder style validated on the dragon_snip baseline. "
+            "(Earlier 2026-05-24 experiment with margin_v=15 + smaller font "
+            "was reverted 2026-05-25 after A/B against the original style.)"
         ),
     )
 
@@ -251,7 +253,7 @@ def run(args: argparse.Namespace) -> Path:
         _log(f"cleanup done in {time.time() - t0:.1f}s")
 
     # Split (style-dependent, never cached).
-    font_size = args.font_size if args.font_size is not None else max(int(info.height * 18 / 1080), 16)
+    font_size = args.font_size if args.font_size is not None else max(int(info.height * 25 / 540), 24)
     max_line_chars = _effective_chars_per_line(
         font_size=font_size, video_width=info.width, margin_l=80, margin_r=80,
     )
