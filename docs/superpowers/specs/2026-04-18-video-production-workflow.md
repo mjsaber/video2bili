@@ -191,7 +191,7 @@ The five stages, all gated by the right skip flags (full details in `docs/superp
 
 1. **fetch** — yt-dlp downloads the raw mp4 + danmaku XML; biliass converts to ASS. Raw artifacts cached under `temp/<uploader>：<title>/<bv>.*`.
 2. **stems** — `song-remover` (Bandit-v2, default `--device remote` = Modal cloud GPU, ~7.2× faster than local CPU) writes 4 stems to `<bv>/{speech,music,sfx,no_music}.wav`. Only `speech.wav` is consumed downstream; the others stay on disk. Cache: `<bv>/.stems_source_meta.json`.
-3. **subtitle** — whisperx ASR on `speech.wav` → silencedetect pause-split → codex glossary cleanup → `<bv>/speech.cleaned.ass`. Cache: `<bv>/.speech_source_meta.json` + threshold-keyed cleanup SRT.
+3. **subtitle** — `speech2srt` subprocess (out-of-tree at `~/code/speech2srt`) runs Volcengine 豆包 Seed-ASR on `speech.wav` with word-level timing, then codex cleanup using a per-project free-form `--context-file` (authored at `output/<project>/subtitle_context.txt`, ≤ 2 KB). speech2srt owns its own cache at `<bv>/speech.wav.speech2srt.{json,srt}`; video2yt converts the SRT → `<bv>/speech.cleaned.ass` (Stage 5 contract). Cost ~¥0.0003/char (≈ ¥0.1 per 4-min segment).
 4. **music-mix** — CC0 bed stitched from `~/.cache/video2yt/music/` (Kevin MacLeod, CC BY 3.0 by default — attribution required, written to `<bv>.music_credits.txt`). Cache: `<bv>.music_bed_meta.json`.
 5. **burn** — ONE ffmpeg `-filter_complex` invocation: danmaku ASS + cleaned subtitle ASS burned together; speech + bed sidechain-ducked amix replaces source audio; optional cuts and speed applied last. Output: `-pix_fmt yuv420p -r 30 -ar 48000` for downstream merge compatibility.
 
@@ -200,7 +200,7 @@ Each stage has its own per-CLI for partial reruns:
 ```bash
 uv run video2yt-fetch "<url>" -o temp/
 uv run video2yt-stems temp/<dir>/<bv>.mp4
-uv run video2yt-subtitle temp/<dir>/<bv>.mp4
+uv run video2yt-subtitle temp/<dir>/<bv>.mp4 --context-file output/<project>/subtitle_context.txt
 uv run video2yt-music-mix temp/<dir>/<bv>.mp4
 uv run video2yt-burn temp/<dir>/ --bv <bv> -o output/<project>/<dir>/<bv>_final.mp4
 ```
@@ -223,7 +223,15 @@ The orchestrator skip flags:
 | 炉石Kimmy | NO | (default) |
 | 高冷难神衣锦夜行 (夜吹) | NO | (default) |
 
-For any new streamer, eyeball the source video once before committing — if the streamer's stream has a bottom subtitle track (most Bilibili UP 主 add their own), pass `--no-subtitle` to save the ~21 min subtitle pipeline cost AND avoid double-subtitle visual mess.
+For any new streamer, eyeball the source video once before committing — if the streamer's stream has a bottom subtitle track (most Bilibili UP 主 add their own), pass `--no-subtitle` to save the ~3-6 min subtitle pipeline cost AND avoid double-subtitle visual mess.
+
+**Authoring the per-project subtitle context (Stage 3):** speech2srt's `--cleanup` reads `output/<project>/subtitle_context.txt` (≤ 2 KB UTF-8 free-form text). Write one per project describing:
+- Streamer name(s) (e.g. `B站UP主炉石郭枫荷`, `瓦莉拉`)
+- 流派 / 策略 + key 卡牌/隨從 names (繁體 OR 简体 — speech2srt's codex prompt handles both)
+- Streamer-specific 口頭禪 / 黑話
+- Known ASR error patterns (e.g. `'升过级'常被识别成'升过几'`)
+
+Pass via `video2yt --subtitle-context-file output/<project>/subtitle_context.txt`. NO sibling-file fallback — if the flag is omitted, a stderr WARNING fires and speech2srt runs context-less (quality drops; usable but not great).
 
 **Performance** (17 min source segment):
 
@@ -232,10 +240,10 @@ For any new streamer, eyeball the source video once before committing — if the
 | Stage 1 fetch | ~30s | ~0s (cache hit) |
 | Stage 2 stems (`--device remote`) | ~12–15 min | ~0s |
 | Stage 2 stems (`--device cpu`) | ~3 hr | ~0s |
-| Stage 3 subtitle | ~21 min (8 ASR + 13 cleanup) | ~0s |
+| Stage 3 subtitle | ~3–6 min (Volcengine Seed-ASR + codex cleanup) | <5s (speech2srt cache hit) |
 | Stage 4 music-mix | ~30s | ~0s |
 | Stage 5 burn | ~3 min | ~3 min (no cache) |
-| **Total cold (remote)** | **~36 min** | — |
+| **Total cold (remote)** | **~18–24 min** | — |
 | **Total warm** | — | **~3 min** |
 
 Modal cost: ~$0.10 per 17-min segment, within Modal's $30/mo free tier for personal use.
@@ -303,6 +311,14 @@ Rules:
 - DO NOT use `[爐石戰棋]` (China/B站 用法), `[Hearthstone Battlegrounds]` (global English), or 简体字 anywhere in the title.
 
 For Taiwan audience, primary description is 繁體 with TW grammar; append 简体 below as secondary. The first paragraph of the 繁體 description should mention `「爐石戰記：英雄戰場」` once so the channel branding stays connected to Blizzard's Taiwan localization.
+
+**Required hashtags in the description body (locked):** every video's description MUST end with a hashtag line that includes **`#英雄戰場教學`** as a channel-wide tag. Put it among the first three hashtags so YouTube renders it above the title (YouTube only surfaces the first 3 hashtags as the above-title link). Recommended pattern:
+
+```
+#英雄戰場教學 #英雄戰場 #爐石戰記 #<策略名> #<核心隨從> #戰棋 #Hearthstone #Battlegrounds
+```
+
+The remaining hashtags (策略名 / 核心隨從 / 其他) vary per video, but `#英雄戰場教學` is the cross-video channel anchor and is NOT optional.
 
 **Chapter timestamps in the description — required, exactly one ascending block.** The description is the **only officially-supported** way to get the YouTube progress-bar segmentation. Rules YouTube enforces:
 
