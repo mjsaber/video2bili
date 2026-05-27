@@ -284,8 +284,8 @@ def run(args: argparse.Namespace) -> Path:
     # the orchestrator doesn't re-encode twice (T4 added that flag).
     cleaned_ass_path: Path | None = None
     if not args.no_subtitle:
-        from video2yt import subtitle_cli  # lazy: brings in whisperx
-        _log("subtitle: whisperx ASR + codex cleanup...")
+        from video2yt import subtitle_cli  # lazy: shells out to speech2srt
+        _log("subtitle: speech2srt (Volcengine Seed-ASR + codex cleanup)...")
         t0 = time.monotonic()
         subtitle_argv = [
             str(video_path),
