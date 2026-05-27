@@ -33,7 +33,6 @@ directly or just inspect the ASS file.
 """
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys

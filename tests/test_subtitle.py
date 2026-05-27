@@ -429,6 +429,62 @@ def test_t3_cli_emits_warning_when_no_context_file_and_cleanup_on(
 
 
 # ---------------------------------------------------------------------------
+# T5 (speech2srt integration): no legacy cache artifacts written.
+# ---------------------------------------------------------------------------
+
+
+def test_t5_cli_creates_no_speech_source_meta_sidecar(tmp_path, monkeypatch):
+    """T5: .speech_source_meta.json is no longer written. speech2srt owns
+    cache invalidation via its own <wav>.speech2srt.json sidecar."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+    assert not (bv_dir / ".speech_source_meta.json").exists()
+
+
+def test_t5_cli_creates_no_raw_srt_in_bv_dir(tmp_path, monkeypatch):
+    """T5: speech.raw.srt is no longer written — speech2srt owns its
+    canonical SRT cache at <wav>.speech2srt.srt."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+    assert not (bv_dir / "speech.raw.srt").exists()
+
+
+def test_t5_cli_creates_no_threshold_keyed_cleaned_srt_in_bv_dir(
+    tmp_path, monkeypatch,
+):
+    """T5: legacy threshold-keyed cleanup caches (speech.cleaned.p0p6.srt
+    etc.) are no longer written. The only cleaned SRT now is the simple
+    flat `speech.cleaned.srt` at the speech2srt -o path."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+    threshold_keyed = list(bv_dir.glob("speech.cleaned.p*.srt"))
+    assert threshold_keyed == []
+
+
+def test_t5_cli_idempotent_when_speech2srt_cache_warm(tmp_path, monkeypatch):
+    """T5: a second run with the (fixture-mocked) speech2srt cache warm
+    produces a byte-identical speech.cleaned.srt AND speech.cleaned.ass.
+    The fixture mock is deterministic, so the only way these can drift is
+    if our wrapper introduces nondeterminism (which it must not)."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+    srt_1 = (bv_dir / "speech.cleaned.srt").read_bytes()
+    ass_1 = (bv_dir / "speech.cleaned.ass").read_bytes()
+
+    subtitle_cli.run(args)
+    srt_2 = (bv_dir / "speech.cleaned.srt").read_bytes()
+    ass_2 = (bv_dir / "speech.cleaned.ass").read_bytes()
+
+    assert srt_1 == srt_2
+    assert ass_1 == ass_2
+
+
+# ---------------------------------------------------------------------------
 # T2 (speech2srt integration): per-project --context-file flag + resolver.
 # ---------------------------------------------------------------------------
 
