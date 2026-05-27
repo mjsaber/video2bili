@@ -243,7 +243,7 @@ Stage 2-owned artifacts (not touched by T5; listed here so the artifacts list is
 
 ## Risk + rollback
 
-- **Volcengine API key not set / quota exhausted:** T3 preflight catches the missing env var; quota exhaustion surfaces as speech2srt exit code 4. Rollback is `git revert` of the T3 / T4 / T5 commits; whisperx-based Stage 3 code returns.
+- **Volcengine API key not set / quota exhausted:** speech2srt's own preflight catches the missing env var (exits 1 with "VOLCENGINE_API_KEY not set in env or .env"); subtitle_cli propagates that exit code unchanged (delegated check, not duplicated in subtitle_cli's preflight). Quota exhaustion surfaces as speech2srt exit code 4, same propagation path. Rollback is `git revert` of the T3 / T4 / T5 commits; whisperx-based Stage 3 code returns.
 - **speech2srt subprocess hangs:** speech2srt has its own `--cleanup-timeout` (default 1200s); subtitle_cli sets a wider hard timeout (default 1800s) on the subprocess.run call to catch a wedged ASR.
 - **Per-project context content is wrong:** speech2srt will fall back to raw ASR with a stderr warning; ASS still renders, just less clean. User adjusts `subtitle_context.txt` and reruns with `--force-asr` (deletes speech2srt sidecars to force regen).
 

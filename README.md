@@ -21,7 +21,7 @@ Stage 3 (`video2yt-subtitle`) shells out to the external `speech2srt` CLI (Volce
 
 - **Install once**: `cd ~/code/speech2srt && uv tool install . --force`
 - **API key**: `VOLCENGINE_API_KEY` either exported or in `.env` at the cwd (get it from 火山引擎控制台 → 语音技术 → 豆包录音文件识别模型2.0)
-- **Codex CLI**: `brew install codex && codex login` — used both by Stage 3 cleanup and by the Step 4 intro forced-alignment SRT
+- **Codex CLI**: `brew install codex && codex login` — used by Stage 3 cleanup (NOT by the intro forced-alignment SRT, which is whisperx-only)
 - **whisperx (Python dep)**: still in `pyproject.toml`, but ONLY used by `video2yt-transcribe` (intro alignment). NOT used by Stage 3 anymore.
 - **Per-project context file**: `output/<project>/subtitle_context.txt` (≤ 2 KB UTF-8) describing the streamer, 流派, key cards, 口頭禪, known ASR errors. Pass via `--subtitle-context-file` on `video2yt`. See CLAUDE.md "Subtitle / speech2srt" for full operating details.
 - **Skip Stage 3** entirely with `--no-subtitle` for streamers whose source already has burnt-in subs (e.g. 郭楓荷).
