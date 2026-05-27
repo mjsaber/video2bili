@@ -56,7 +56,9 @@ output/back2back/
 |---|---|---|
 | `ffmpeg`, `ffprobe` | system PATH | `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg` (must include libass) |
 | Volcengine BigTTS | API key | Volcano Ark console → API Key 管理 → create. Stored as `VOLCENGINE_API_KEY` in `.env`. Only the new (single-key) auth style works; legacy v1 endpoints need separate AppID. |
-| Codex CLI (default for image gen) | `codex` in PATH, logged in | `brew install codex` then `codex login`. Uses ChatGPT auth; no separate API key required. |
+| Codex CLI (default for image gen + Stage 3 subtitle cleanup + Step 4 intro alignment) | `codex` in PATH, logged in | `brew install codex` then `codex login`. Uses ChatGPT auth; no separate API key required. |
+| `speech2srt` CLI (Stage 3 subtitle backbone — Volcengine 火山 Seed-ASR) | `speech2srt` in PATH | One-time: `cd ~/code/speech2srt && uv tool install . --force`. Requires `VOLCENGINE_API_KEY` (same env var as BigTTS — single key works for both Volcano services if scoped right; otherwise create a separate key under 语音技术 → 豆包录音文件识别模型2.0). Cost ~¥0.0003/char, ≈ ¥0.1 per 4-min segment. |
+| `song-remover` CLI (Stage 2 stems backbone — Bandit-v2 multilingual separator) | `song-remover` in PATH | One-time: `cd ~/code/song-remover && uv tool install '.[remote]'` (the `[remote]` extra bakes the `modal` SDK in). Default `--device remote` needs `uv run modal token new` + Modal app deploys per `song-remover` README. |
 | Google Gemini (image-gen fallback) | API key | Google AI Studio → API key. Image-generation model requires a paid/billed key (free tier limit = 0). Stored as `GEMINI_API_KEY` in `.env`. Only needed when running `image_quick.py --backend gemini`. |
 | YouTube Data API v3 | OAuth client | Google Cloud Console → enable YouTube Data API v3 → create OAuth client (desktop app). Save JSON as `client_secret.json` (gitignored). First run opens browser for consent (test users must be allow-listed during testing mode). Token cached in `youtube_token.json` (gitignored). |
 | Hearthstone Battlegrounds logo | `assets/hsbg_logo.png` | One-time download from Fandom wiki (RGBA, 4098x2146). |
@@ -240,10 +242,10 @@ Pass via `video2yt --subtitle-context-file output/<project>/subtitle_context.txt
 | Stage 1 fetch | ~30s | ~0s (cache hit) |
 | Stage 2 stems (`--device remote`) | ~12–15 min | ~0s |
 | Stage 2 stems (`--device cpu`) | ~3 hr | ~0s |
-| Stage 3 subtitle | ~3–6 min (Volcengine Seed-ASR + codex cleanup) | <5s (speech2srt cache hit) |
+| Stage 3 subtitle | **~3–6 min (provisional)** — extrapolated from a 4-min smoke at 4:43; T7 production verification on a 17-min segment is the canonical measurement | <5s (speech2srt cache hit) |
 | Stage 4 music-mix | ~30s | ~0s |
 | Stage 5 burn | ~3 min | ~3 min (no cache) |
-| **Total cold (remote)** | **~18–24 min** | — |
+| **Total cold (remote)** | **~18–24 min (provisional)** | — |
 | **Total warm** | — | **~3 min** |
 
 Modal cost: ~$0.10 per 17-min segment, within Modal's $30/mo free tier for personal use.

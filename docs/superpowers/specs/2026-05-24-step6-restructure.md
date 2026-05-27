@@ -1,7 +1,7 @@
 # Step 6 Restructure — song-remover Stems + Single-Pass Burn
 
 **Date**: 2026-05-24
-**Status**: Design draft — awaiting codex review and user sign-off
+**Status**: **SHIPPED 2026-05-25 + PARTIALLY SUPERSEDED 2026-05-27.** This spec defined the 5-stage pipeline, which is the canonical structure. However, **Stage 3 (subtitle) was rewritten in the speech2srt-integration plan** (`docs/superpowers/plans/2026-05-27-speech2srt-integration.md`) to shell out to the external `speech2srt` CLI instead of running whisperx + silencedetect + codex internally. Every Stage 3 reference in this doc — `subtitle.py`, `.speech_source_meta.json`, `speech.raw.srt`, threshold-keyed cleanup SRTs, the whisperx ASR + silencedetect pause-split chain — is historical only. Use the speech2srt-integration plan for current Stage 3 behavior. Stages 1/2/4/5 in this spec are still accurate.
 **Target audience**: Future Claude agents implementing the rewrite; the user
 reviewing the approach before code is written.
 
