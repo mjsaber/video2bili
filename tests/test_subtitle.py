@@ -464,6 +464,31 @@ def test_t5_cli_creates_no_threshold_keyed_cleaned_srt_in_bv_dir(
     assert threshold_keyed == []
 
 
+def test_t5_cli_bv_dir_only_contains_expected_stage3_artifacts(
+    tmp_path, monkeypatch,
+):
+    """T5 positive enumeration (codex review): after a run, bv_dir holds
+    exactly the artifacts our wrapper produces — anything else means we
+    leaked a legacy sidecar/cache file or accidentally created a new one.
+
+    The fixture mock for speech2srt writes only ``-o``'s target. In a real
+    speech2srt invocation, two additional sidecars appear
+    (``<wav>.speech2srt.{json,srt}``); those are speech2srt's own concern
+    and ARE allowed in production — but we don't simulate them here, so
+    the allow-list under the mocked path doesn't include them.
+    """
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    args = subtitle_cli.parse_args([str(seg_mp4)])
+    subtitle_cli.run(args)
+
+    actual = {p.name for p in bv_dir.iterdir()}
+    expected = {"speech.wav", "speech.cleaned.srt", "speech.cleaned.ass"}
+    assert actual == expected, (
+        f"unexpected files in bv_dir: extra={actual - expected}, "
+        f"missing={expected - actual}"
+    )
+
+
 def test_t5_cli_idempotent_when_speech2srt_cache_warm(tmp_path, monkeypatch):
     """T5: a second run with the (fixture-mocked) speech2srt cache warm
     produces a byte-identical speech.cleaned.srt AND speech.cleaned.ass.
