@@ -155,6 +155,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--subtitle-context-file", type=Path, default=None,
+        dest="subtitle_context_file",
+        help=(
+            "Per-project free-form cleanup context (≤ 2 KB UTF-8) handed to "
+            "Stage 3's speech2srt --cleanup via --context-file. Threaded to "
+            "video2yt-subtitle; silently ignored when --no-subtitle is set. "
+            "T2 of the speech2srt-integration plan."
+        ),
+    )
+    parser.add_argument(
         "--no-music-swap", action="store_true",
         help=(
             "Skip Stage 4 (CC0 music bed build) and use the source's "
@@ -277,11 +287,16 @@ def run(args: argparse.Namespace) -> Path:
         from video2yt import subtitle_cli  # lazy: brings in whisperx
         _log("subtitle: whisperx ASR + codex cleanup...")
         t0 = time.monotonic()
-        subtitle_args = subtitle_cli.parse_args([
+        subtitle_argv = [
             str(video_path),
             "--font-face", args.font_face,
             "--no-preview-burn",
-        ])
+        ]
+        if args.subtitle_context_file is not None:
+            subtitle_argv.extend(
+                ["--context-file", str(args.subtitle_context_file)]
+            )
+        subtitle_args = subtitle_cli.parse_args(subtitle_argv)
         subtitle_cli.run(subtitle_args)
         timings["subtitle"] = time.monotonic() - t0
         cleaned_ass_path = bv_dir / "speech.cleaned.ass"

@@ -85,6 +85,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--glossary", type=Path, default=None,
         help="Override packaged glossary YAML (default: bundled bg_glossary.yaml)",
     )
+    parser.add_argument(
+        "--context-file", type=Path, default=None, dest="context_file",
+        help=(
+            "Per-project free-form cleanup context for speech2srt --cleanup "
+            "(plain UTF-8 text, ≤ 2 KB; describes streamer, 流派, key cards, "
+            "口頭禪, known ASR errors). T2 of the speech2srt-integration plan. "
+            "No sibling fallback — pass explicitly. When --cleanup is on and "
+            "this flag is omitted, a stderr warning is emitted and "
+            "speech2srt runs without context (quality is lower)."
+        ),
+    )
 
     parser.add_argument("--force-asr", action="store_true")
     parser.add_argument("--force-cleanup", action="store_true")
@@ -128,6 +139,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     return parser.parse_args(argv)
+
+
+def _resolve_context_file(
+    context_file: Path | None, skip_cleanup: bool,
+) -> tuple[Path | None, bool]:
+    """Resolve the speech2srt --context-file path. T2 of the
+    speech2srt-integration plan.
+
+    Returns (resolved_path, emit_warning):
+    - `--skip-cleanup` is set → (None, False). No cleanup, no context, no warning.
+    - `context_file` is set → validate it exists; (path, False).
+    - `context_file` is None and cleanup is on → (None, True). speech2srt's
+      cleanup still runs (works without context), but quality is lower; the
+      caller emits the warning.
+
+    No sibling-file fallback. Codex v1 review caught that `<segment>.parent`
+    lands in `temp/<dir>/` (not the project folder) under the full-pipeline
+    orchestrator, so any sibling fallback would be useless or surprising.
+
+    Raises FileNotFoundError when an explicit path doesn't exist; main()
+    maps that to exit 2.
+    """
+    if skip_cleanup:
+        return None, False
+    if context_file is None:
+        return None, True
+    if not context_file.is_file():
+        raise FileNotFoundError(f"context file not found: {context_file}")
+    return context_file, False
 
 
 def _invalidate_subtitle_caches(bv_dir: Path) -> int:

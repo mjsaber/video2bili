@@ -6725,3 +6725,72 @@ def test_orchestrator_copies_music_credits_next_to_final_mp4(
     cli.run(args)
     out_credits = tmp_path / "out" / "Sub" / "BV1_final_music_credits.txt"
     assert out_credits.exists()
+
+
+# ---------------------------------------------------------------------------
+# T2 (speech2srt integration): orchestrator threading --subtitle-context-file.
+# Plan: docs/superpowers/plans/2026-05-27-speech2srt-integration.md
+# ---------------------------------------------------------------------------
+
+
+def test_t2_orchestrator_threads_subtitle_context_file_to_subtitle_cli(
+    tmp_path, monkeypatch,
+):
+    """T2: --subtitle-context-file ctx.txt at orchestrator level → the
+    argv handed to subtitle_cli.parse_args contains --context-file ctx.txt."""
+    _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    captured_argv: list[list[str]] = []
+    original_parse_args = __import__(
+        "video2yt.subtitle_cli", fromlist=["parse_args"]
+    ).parse_args
+    def spy_parse_args(argv):
+        captured_argv.append(list(argv))
+        return original_parse_args(argv)
+    monkeypatch.setattr("video2yt.subtitle_cli.parse_args", spy_parse_args)
+
+    ctx = tmp_path / "ctx.txt"
+    ctx.write_text("background", encoding="utf-8")
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--subtitle-context-file", str(ctx),
+    ])
+    cli.run(args)
+
+    assert len(captured_argv) == 1
+    forwarded = captured_argv[0]
+    assert "--context-file" in forwarded
+    idx = forwarded.index("--context-file")
+    assert forwarded[idx + 1] == str(ctx)
+
+
+def test_t2_orchestrator_subtitle_context_file_ignored_when_no_subtitle(
+    tmp_path, monkeypatch,
+):
+    """T2: --subtitle-context-file is silently ignored under --no-subtitle —
+    subtitle_cli is never invoked, no error, no warning."""
+    call_log, _ = _setup_orchestrator_fixture(tmp_path, monkeypatch)
+    captured_argv: list[list[str]] = []
+    original_parse_args = __import__(
+        "video2yt.subtitle_cli", fromlist=["parse_args"]
+    ).parse_args
+    def spy_parse_args(argv):
+        captured_argv.append(list(argv))
+        return original_parse_args(argv)
+    monkeypatch.setattr("video2yt.subtitle_cli.parse_args", spy_parse_args)
+
+    ctx = tmp_path / "ctx.txt"
+    ctx.write_text("background", encoding="utf-8")
+    args = cli.parse_args([
+        "https://x/video/BV1",
+        "-o", str(tmp_path / "out"),
+        "-t", str(tmp_path / "tmp"),
+        "--no-subtitle",
+        "--subtitle-context-file", str(ctx),
+    ])
+    cli.run(args)
+
+    # subtitle_cli.parse_args must not be called when --no-subtitle is set.
+    assert captured_argv == []
+    assert "subtitle" not in call_log

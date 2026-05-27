@@ -1324,3 +1324,75 @@ def test_cli_warm_cache_skips_asr_and_cleanup(tmp_path, monkeypatch):
 
     assert asr_calls == []
     assert cleanup_calls == []
+
+
+# ---------------------------------------------------------------------------
+# T2 (speech2srt integration): per-project --context-file flag + resolver.
+# Plan: docs/superpowers/plans/2026-05-27-speech2srt-integration.md
+# ---------------------------------------------------------------------------
+
+
+def test_t2_parse_args_accepts_context_file_flag(tmp_path):
+    """T2 test: subtitle_cli accepts --context-file PATH (no parsing error)."""
+    ctx = tmp_path / "ctx.txt"
+    ctx.write_text("...", encoding="utf-8")
+    args = subtitle_cli.parse_args(["seg.mp4", "--context-file", str(ctx)])
+    assert args.context_file == ctx
+
+
+def test_t2_parse_args_context_file_defaults_to_none():
+    """T2 test: when --context-file omitted, args.context_file is None."""
+    args = subtitle_cli.parse_args(["seg.mp4"])
+    assert args.context_file is None
+
+
+def test_t2_resolve_context_file_returns_explicit_path_no_warning(tmp_path):
+    """T2 test: explicit context-file present → (path, False) — no warning."""
+    ctx = tmp_path / "ctx.txt"
+    ctx.write_text("hello", encoding="utf-8")
+    resolved, warn = subtitle_cli._resolve_context_file(
+        context_file=ctx, skip_cleanup=False,
+    )
+    assert resolved == ctx
+    assert warn is False
+
+
+def test_t2_resolve_context_file_raises_when_explicit_path_missing(tmp_path):
+    """T2 test: explicit --context-file pointing at non-existent file →
+    FileNotFoundError. main() converts that to exit 2."""
+    missing = tmp_path / "does_not_exist.txt"
+    with pytest.raises(FileNotFoundError, match="context file not found"):
+        subtitle_cli._resolve_context_file(
+            context_file=missing, skip_cleanup=False,
+        )
+
+
+def test_t2_resolve_context_file_returns_none_with_warning_when_cleanup_on_and_no_path():
+    """T2 test: no --context-file + --cleanup on → (None, True) — emit warning."""
+    resolved, warn = subtitle_cli._resolve_context_file(
+        context_file=None, skip_cleanup=False,
+    )
+    assert resolved is None
+    assert warn is True
+
+
+def test_t2_resolve_context_file_returns_none_no_warning_when_skip_cleanup():
+    """T2 test: --skip-cleanup short-circuits — no resolution, no warning,
+    regardless of whether context_file was provided."""
+    resolved, warn = subtitle_cli._resolve_context_file(
+        context_file=None, skip_cleanup=True,
+    )
+    assert resolved is None
+    assert warn is False
+
+
+def test_t2_resolve_context_file_skip_cleanup_overrides_explicit_path(tmp_path):
+    """T2 test: even with explicit --context-file, --skip-cleanup wins —
+    no context goes to speech2srt because --cleanup itself is dropped."""
+    ctx = tmp_path / "ctx.txt"
+    ctx.write_text("hello", encoding="utf-8")
+    resolved, warn = subtitle_cli._resolve_context_file(
+        context_file=ctx, skip_cleanup=True,
+    )
+    assert resolved is None
+    assert warn is False
