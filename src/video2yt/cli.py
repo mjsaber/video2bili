@@ -280,8 +280,10 @@ def run(args: argparse.Namespace) -> Path:
         _log(f"stems done{cache_tag} in {timings['stems']:.1f}s -> {speech_wav}")
 
     # Stage 3 (subtitle): produces <bv>/speech.cleaned.ass for Stage 5
-    # to pick up. Uses the legacy preview burn under --no-preview-burn so
-    # the orchestrator doesn't re-encode twice (T4 added that flag).
+    # to pick up. T3 of speech2srt-integration shells out to the speech2srt
+    # CLI (火山 Seed-ASR + codex cleanup) and converts its SRT output to ASS.
+    # The legacy preview-burn was dropped in T3; --no-preview-burn is kept
+    # as a no-op for backwards CLI compat.
     cleaned_ass_path: Path | None = None
     if not args.no_subtitle:
         from video2yt import subtitle_cli  # lazy: shells out to speech2srt

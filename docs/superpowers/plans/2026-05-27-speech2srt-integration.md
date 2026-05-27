@@ -147,9 +147,9 @@ Each task lists Goal → Tests → DoD → Status. Codex review happens after ea
 7. `test_cli_propagates_speech2srt_exit_code_3_auth_error` — speech2srt exit 3 → subtitle_cli exits 3.
 8. `test_cli_propagates_speech2srt_exit_code_4_quota_error` — speech2srt exit 4 → subtitle_cli exits 4. (codex v1 review nice-to-have.)
 9. `test_cli_preflight_checks_speech2srt_on_path` — patched `shutil.which("speech2srt")` returning None → exit 1 with "speech2srt not found".
-10. `test_cli_preflight_checks_VOLCENGINE_API_KEY_env_var` — env unset → exit 1.
-11. `test_cli_no_preview_burn_skips_ffmpeg_burn` — `--no-preview-burn` set → no ffmpeg subprocess for the preview burn.
-12. `test_cli_removed_flags_are_rejected_by_argparse` — `--force-cleanup`, `--glossary`, `--pause-split-seconds` all produce argparse errors (exit 2).
+10. ~~`test_cli_preflight_checks_VOLCENGINE_API_KEY_env_var`~~ → **dropped in T3 implementation**. VOLCENGINE_API_KEY validation is intentionally delegated to speech2srt (which loads `.env` from cwd, then exits 1 with `[speech2srt] preflight error: VOLCENGINE_API_KEY not set in env or .env`). subtitle_cli propagates that exit 1 unchanged. This avoids duplicating the env-var/`.env` discovery logic and lets one place own the contract. Tests #7 + #8 exercise speech2srt-exit-code propagation; that mechanism covers the missing-key case too.
+11. `test_cli_no_preview_burn_skips_ffmpeg_burn` — `--no-preview-burn` set → no ffmpeg subprocess for the preview burn. (T3 dropped the legacy preview-burn entirely; test now asserts only the speech2srt subprocess fires.)
+12. `test_cli_removed_flags_are_rejected_by_argparse` → **relocated to `test_parse_args_no_longer_accepts_legacy_flags`** (extends the existing detection-flags test rather than adding a parallel one). Covers `--force-cleanup`, `--glossary`, `--pause-split-seconds`.
 
 **DoD:** All 12 tests pass; `subtitle_cli.run` is shorter (target ≤ 120 LOC).
 **Codex sub-gate before T4:** review the diff against this argv contract.

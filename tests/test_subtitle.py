@@ -1382,6 +1382,36 @@ def test_t3_cli_errors_when_speech2srt_writes_no_srt(tmp_path, monkeypatch):
         subtitle_cli.run(args)
 
 
+def test_t3_cli_errors_when_speech2srt_writes_malformed_srt(
+    tmp_path, monkeypatch,
+):
+    """T3 defensive: speech2srt exits 0 and writes the file, but the SRT
+    is empty / has no parseable dialogue blocks → compose.srt_to_ass raises
+    ValueError, mapped to exit 2."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    def write_empty(argv, **kwargs):
+        out_idx = argv.index("-o")
+        Path(argv[out_idx + 1]).write_text("", encoding="utf-8")
+        return subprocess.CompletedProcess(args=argv, returncode=0,
+                                           stdout="", stderr="")
+    monkeypatch.setattr("video2yt.subtitle_cli.subprocess.run", write_empty)
+
+    from video2yt import subtitle_cli
+    rc = subtitle_cli.main([str(seg_mp4)])
+    assert rc == 2  # ValueError from srt_to_ass → main() exit 2
+
+
+def test_t3_cli_explicit_missing_context_file_exits_2(tmp_path, monkeypatch):
+    """T3 wiring: a missing --context-file PATH propagates from the helper
+    through run() → main() returns exit 2 (FileNotFoundError mapping)."""
+    seg_mp4, bv_dir, speech_wav = _setup_subtitle_cli_fixture(tmp_path, monkeypatch)
+    missing_ctx = tmp_path / "nope.txt"  # NOT created
+
+    from video2yt import subtitle_cli
+    rc = subtitle_cli.main([str(seg_mp4), "--context-file", str(missing_ctx)])
+    assert rc == 2
+
+
 def test_t3_cli_emits_warning_when_no_context_file_and_cleanup_on(
     tmp_path, monkeypatch, capsys,
 ):
