@@ -23,13 +23,14 @@ uv run video2yt "<url>" --no-subtitle --no-music-swap -o ...           # legacy 
 uv run video2yt "<url>" --device cpu -o ...                            # offline source separation
 uv run video2yt "<url>" --cut 30~60 --speed 1.5 -o ...                 # cuts + speed multiplier
 uv run video2yt-fetch "<url>" -o temp/                                 # only Stage 1 (download + biliass)
+uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &                  # background serial pre-download of Step 6 sources (truncation retry + low-res quarantine + fail-fast)
 uv run video2yt-stems temp/<dir>/<bv>.mp4                              # only Stage 2 (song-remover)
 uv run video2yt-subtitle temp/<dir>/<bv>.mp4 --context-file output/<project>/subtitle_context.txt   # only Stage 3 (speech2srt)
 uv run video2yt-music-mix temp/<dir>/<bv>.mp4                          # only Stage 4 (CC0 bed)
 uv run video2yt-burn temp/<dir>/ --bv <bv> -o output/<bv>_final.mp4    # only Stage 5 (single ffmpeg)
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # intro composer
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --segment c.mp4 --label "C" --title "T"   # concat + loudnorm + chapters
-uv run pytest                                                          # run tests (569)
+uv run --extra dev pytest                                              # run tests (526; bare `uv run pytest` grabs the wrong pytest — dev extra not synced by default)
 uv add <pkg>                                                           # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
 
@@ -119,6 +120,8 @@ src/video2yt/
 ├── cli.py            # video2yt — orchestrator: chains the 5 stages, skip flags, per-stage timing
 ├── fetch.py          # Stage 1: yt-dlp + biliass; returns FetchResult dataclass
 ├── fetch_cli.py      # video2yt-fetch entry point
+├── prefetch_cli.py   # video2yt-prefetch: serial pre-download of N sources into the
+│                     #   Stage 1 cache (truncation retry + low-res quarantine + fail-fast)
 ├── download.py       # thin yt-dlp subprocess wrapper (cache check + format spec)
 ├── stems.py          # Stage 2: song-remover subprocess wrapper + .stems_source_meta.json
 ├── stems_cli.py      # video2yt-stems entry point
@@ -140,7 +143,7 @@ src/video2yt/
 └── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ```
 
-Tests live in `tests/test_smoke.py` (~530 tests covering fetch / burn / cli / compose / merge / music_library) plus `tests/test_stems.py` (23) / `tests/test_music_mix.py` (12) / `tests/test_subtitle.py` (~35 — speech2srt CLI wrapper) / `tests/test_burn_all.py` (23). All external tools (ffmpeg, ffprobe, yt-dlp, song-remover, speech2srt, codex) are mocked at the `subprocess.run` boundary — no network, no real subprocess in CI. `tests/test_burn_real_ffmpeg.py` is opt-in (skipped unless ffmpeg+libass is on PATH) and exercises the chained-subtitles + amix graph against real ffmpeg — see T10 of the step6-restructure plan.
+Tests live in `tests/test_smoke.py` (~530 tests covering fetch / burn / cli / compose / merge / music_library) plus `tests/test_stems.py` (23) / `tests/test_music_mix.py` (12) / `tests/test_subtitle.py` (~35 — speech2srt CLI wrapper) / `tests/test_burn_all.py` (23) / `tests/test_prefetch.py` (8 — video2yt-prefetch CLI). All external tools (ffmpeg, ffprobe, yt-dlp, song-remover, speech2srt, codex) are mocked at the `subprocess.run` boundary — no network, no real subprocess in CI. `tests/test_burn_real_ffmpeg.py` is opt-in (skipped unless ffmpeg+libass is on PATH) and exercises the chained-subtitles + amix graph against real ffmpeg — see T10 of the step6-restructure plan.
 
 `cli.run()` flow (the orchestrator, T7 of step6-restructure):
 

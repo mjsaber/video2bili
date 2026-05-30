@@ -5,6 +5,15 @@ import subprocess
 from pathlib import Path
 
 
+class TruncatedDownloadError(RuntimeError):
+    """yt-dlp merger hiccup: a fresh download's video/audio stream
+    durations disagree (BV1UodgBJEXj-style). Subclass of RuntimeError so
+    existing `except RuntimeError` callers are unaffected; a dedicated type
+    lets video2yt-prefetch distinguish retryable truncation from other
+    failures.
+    """
+
+
 def get_metadata(url: str, browser: str) -> dict:
     """Fetch video metadata via `yt-dlp --dump-json --skip-download`.
 
@@ -164,7 +173,7 @@ def fetch(
 
     if not _is_av_duration_consistent(video_path):
         v_dur, a_dur = _stream_durations(video_path)
-        raise RuntimeError(
+        raise TruncatedDownloadError(
             f"yt-dlp produced {video_path.name} with truncated audio "
             f"(video {v_dur:.1f}s vs audio {a_dur:.1f}s). This is the "
             f"BV1UodgBJEXj-style merger hiccup — re-run to download again, "

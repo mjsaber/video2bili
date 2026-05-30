@@ -478,6 +478,13 @@ def test_fetch_raises_when_fresh_download_has_truncated_audio(tmp_path, monkeypa
         )
 
 
+def test_truncated_download_error_is_runtime_error():
+    """TruncatedDownloadError must subclass RuntimeError so existing
+    `except RuntimeError` callers (fetch_cli.main) keep working unchanged."""
+    from video2yt.download import TruncatedDownloadError
+    assert issubclass(TruncatedDownloadError, RuntimeError)
+
+
 def test_stream_durations_parses_ffprobe_json(tmp_path, monkeypatch):
     """_stream_durations returns (video_dur, audio_dur) from ffprobe streams."""
     fake_file = tmp_path / "test.mp4"

@@ -72,6 +72,8 @@ output/back2back/
 **Input**: brief outline (sentence or two), target length (~30s).
 **Output**: `output/<project>/intro_script.txt` (UTF-8 plain text, ~110 chars for 30s at 1.0x speed).
 
+**Tip — prefetch Step 6 sources in the background now**: kick off `uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &` at the START of Step 1. The slow yt-dlp source downloads for Step 6's burnt segments then run in the background while you do the bandwidth-free intro work (Steps 1–5), so the Stage 1 cache is warm by the time you reach Step 6. **Note the `-o temp/`**: prefetch's `-o` is the *temp* dir (it mirrors `video2yt-fetch`), and it MUST match the dir Step 6 fetches into. Step 6 (`video2yt`) reads its Stage 1 cache from `--temp-dir` (default `./temp`) — NOT from the `-o output/<project>/` you pass for the final MP4. Pointing prefetch at `output/<project>/` writes the cache where Step 6 never looks, so it would re-download from scratch (cache miss).
+
 Hand-write or LLM-draft the script. Length rule of thumb: **3.7 chars/sec at speech_rate=0** (1.0x). For a 30s intro, aim for 100–120 Chinese chars.
 
 **Before drafting (HARD RULE — added after `ringnaga` mistake)**: when the topic involves a Hearthstone Battlegrounds 流派/阵容/卡牌, FIRST verify the terminology before writing any script. Steps:
