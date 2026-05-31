@@ -5173,7 +5173,7 @@ def test_upload_get_credentials_returns_cached_when_valid(tmp_path, monkeypatch)
     token.write_text("{}")
     monkeypatch.setattr(
         "video2yt.upload.Credentials.from_authorized_user_file",
-        lambda path, scopes: _FakeCreds(),
+        lambda *a, **k: _FakeCreds(),
     )
 
     def boom(*a, **kw):
@@ -5210,7 +5210,7 @@ def test_upload_get_credentials_recovers_from_refresh_error(tmp_path, monkeypatc
 
     monkeypatch.setattr(
         "video2yt.upload.Credentials.from_authorized_user_file",
-        lambda path, scopes: _ExpiredCreds(),
+        lambda *a, **k: _ExpiredCreds(),
     )
 
     class _FakeFlow:
@@ -6801,3 +6801,93 @@ def test_t2_orchestrator_subtitle_context_file_ignored_when_no_subtitle(
     # subtitle_cli.parse_args must not be called when --no-subtitle is set.
     assert captured_argv == []
     assert "subtitle" not in call_log
+
+
+def _write_token_file(path, scopes):
+    """Write a realistic authorized-user token JSON with the given scopes."""
+    path.write_text(json.dumps({
+        "token": "at",
+        "refresh_token": "rt",
+        "client_id": "cid",
+        "client_secret": "cs",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "scopes": list(scopes),
+    }))
+
+def test_covers_scopes_logic():
+    import video2yt.upload as up
+
+    class _Unknown:
+        scopes = None
+    assert up._covers_scopes(_Unknown()) is True  # unknown -> don't force re-auth
+
+    class _Full:
+        scopes = list(up.SCOPES)
+    assert up._covers_scopes(_Full()) is True
+
+    class _Partial:
+        scopes = up.SCOPES[:1]
+    assert up._covers_scopes(_Partial()) is False
+
+
+def test_get_credentials_reauths_when_cached_token_missing_scope(tmp_path, monkeypatch):
+    """A REAL cached token file missing a newer SCOPES entry must trigger re-auth.
+
+    Regression for the force-ssl scope migration. Deliberately does NOT mock
+    Credentials.from_authorized_user_file: the original bug was that passing
+    SCOPES into that loader overwrote creds.scopes and masked the missing grant.
+    We load a real on-disk token whose scopes are a strict subset of up.SCOPES.
+    """
+    from video2yt import upload as up
+
+    assert len(up.SCOPES) >= 2
+    token = tmp_path / "youtube_token.json"
+    _write_token_file(token, up.SCOPES[:1])
+
+    minted = {}
+
+    class _FreshCreds:
+        valid = True
+
+        def to_json(self):
+            return '{"refresh_token": "new"}'
+
+    class _FakeFlow:
+        def run_local_server(self, port=0, prompt=None):
+            minted["ran"] = True
+            return _FreshCreds()
+
+    monkeypatch.setattr(
+        "video2yt.upload.InstalledAppFlow.from_client_secrets_file",
+        lambda *a, **k: _FakeFlow(),
+    )
+
+    creds = up.get_credentials(tmp_path / "secret.json", token)
+    assert minted.get("ran") is True, "stale-scope token should force a fresh OAuth flow"
+    assert isinstance(creds, _FreshCreds)
+
+
+def test_get_credentials_keeps_stale_token_when_reauth_fails(tmp_path, monkeypatch):
+    """A scope-insufficient cached token must NOT be deleted if the replacement
+    OAuth flow fails — otherwise a transient auth failure loses working creds."""
+    from video2yt import upload as up
+
+    token = tmp_path / "youtube_token.json"
+    _write_token_file(token, up.SCOPES[:1])  # missing a scope -> triggers re-auth
+    original = token.read_text()
+
+    class _BoomFlow:
+        def run_local_server(self, **kw):
+            raise OSError("[Errno 48] Address already in use")
+
+    monkeypatch.setattr(
+        "video2yt.upload.InstalledAppFlow.from_client_secrets_file",
+        lambda *a, **k: _BoomFlow(),
+    )
+
+    with pytest.raises(RuntimeError, match="OAuth flow failed"):
+        up.get_credentials(tmp_path / "secret.json", token)
+
+    # the still-usable token survives the failed re-auth
+    assert token.exists()
+    assert token.read_text() == original

@@ -23,6 +23,7 @@ from googleapiclient.http import MediaFileUpload
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
 REQUIRED_META_FIELDS = (
@@ -45,17 +46,49 @@ def validate_meta(meta: dict) -> None:
         raise ValueError(f"metadata missing required keys: {missing}")
 
 
+def _covers_scopes(creds: Credentials) -> bool:
+    """True unless the creds positively lack one of the required ``SCOPES``.
+
+    A token minted before a scope was added to ``SCOPES`` (e.g. ``force-ssl``)
+    stays ``valid`` but is missing the new grant, so later API calls 403. Loaded
+    tokens carry their granted scopes in ``creds.scopes``; when that is present we
+    require it to cover ``SCOPES``. If it is absent/unknown we don't force a
+    re-auth (avoids false positives on minimal credential objects).
+    """
+    granted = getattr(creds, "scopes", None)
+    if not granted:
+        return True
+    return set(SCOPES).issubset(set(granted))
+
+
 def get_credentials(secret_path: Path, token_path: Path) -> Credentials:
     """Load (or mint) OAuth credentials. Auto-recovers from expired/revoked refresh tokens.
 
     OAuth apps in "Testing" status have refresh tokens that expire after 7 days. The old
     behavior crashed with `RefreshError: invalid_grant: Token has been expired or revoked.`
     and required `rm youtube_token.json` by hand. We now catch that and fall through to
-    a fresh OAuth flow.
+    a fresh OAuth flow. We also re-auth when a cached token is missing a scope that was
+    added to SCOPES since it was minted (otherwise it stays valid but 403s on the new API).
     """
     creds: Credentials | None = None
     if token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+        # NOTE: do NOT pass SCOPES here. from_authorized_user_file overwrites
+        # creds.scopes with whatever is passed in, masking the token's real
+        # granted scopes and defeating the _covers_scopes migration check.
+        # Loading without scopes preserves the "scopes" recorded in the file.
+        creds = Credentials.from_authorized_user_file(str(token_path))
+
+    if creds and not _covers_scopes(creds):
+        # Don't delete the cached token here: it is still usable (just missing a
+        # newer scope), so discarding it before a *successful* re-auth would lose
+        # working credentials if the OAuth flow fails. Drop the in-memory creds
+        # only; the success path overwrites the file via write_text below.
+        print(
+            "[yt] cached token is missing a required scope (SCOPES changed since it "
+            "was minted). Re-running OAuth flow; existing token kept until it succeeds.",
+            file=sys.stderr,
+        )
+        creds = None
 
     if creds and creds.valid:
         return creds
