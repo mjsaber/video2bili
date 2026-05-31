@@ -514,6 +514,7 @@ we hit it. Address them in a batch after the video ships.
 ## Step status
 
 - [ ] Step 1 — write intro script (term-research first if BG topic; see spec Step 1)
+- [ ] Step 1 (parallel) — kick off `uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &` NOW so Step 6 sources download in the background while you do Steps 1–5 (see spec Step 1 tip; `-o` MUST be the `temp/` dir, not `output/<project>/`)
 - [ ] Step 2 — TTS via `tts_quick.py`
 - [ ] Step 3 — bg image via `image_quick.py` (Codex backend default)
 - [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
