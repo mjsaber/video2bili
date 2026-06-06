@@ -29,6 +29,7 @@ uv run video2yt-subtitle temp/<dir>/<bv>.mp4 --context-file output/<project>/sub
 uv run video2yt-music-mix temp/<dir>/<bv>.mp4                          # only Stage 4 (CC0 bed)
 uv run video2yt-burn temp/<dir>/ --bv <bv> -o output/<bv>_final.mp4    # only Stage 5 (single ffmpeg)
 uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # intro composer
+scripts/append_cta.sh output/<project>/<battle1>_final.mp4             # append subscribe CTA to battle 1 (mid-roll) → <battle1>_final_cta.mp4
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --segment c.mp4 --label "C" --title "T"   # concat + loudnorm + chapters
 uv run --extra dev pytest                                              # run tests (526; bare `uv run pytest` grabs the wrong pytest — dev extra not synced by default)
 uv add <pkg>                                                           # add a dep (NEVER edit pyproject.toml deps by hand)
@@ -111,6 +112,7 @@ For Hearthstone Battlegrounds video projects, **never draft the intro script bef
 
 - **compose SRT path escaping**: `compose.render` uses `cwd=<srt.parent>` and references the SRT by basename in the `subtitles` filter (same trick as `burn.py`). Absolute paths for `-i` inputs are fine because `-i` doesn't go through filter_complex.
 - **merge strict mode**: all `--segment` inputs must be 1920x1080 30fps h264 AND ≥10s long, and there must be ≥3 segments. The 10s/3-segment rules mirror YouTube's chapter requirements — fewer/shorter chapters means YouTube discards the chapter list. No auto-normalization. Fail fast with all violations listed.
+- **Subscribe CTA is concatenated, NOT a merge segment**: the ~6.3s mascot CTA clip (`assets/cta/subscribe_cta.mp4`) is appended to the **first battle segment** via `scripts/append_cta.sh <battle1>_final.mp4` BEFORE merge (Step 6.5 of the workflow spec), so it plays mid-roll between battles 1 and 2 *inside* battle 1's chapter. Never pass it to merge as its own `--segment` — at <10s it would nuke the whole chapter list. Editable sources + regen instructions live in `assets/cta/` (README + `src/`).
 - **merge chapters**: there is no burned-in progress bar — segmentation is delivered as chapter markers. The **only officially-supported** YouTube chapter source is timestamps in the video description (≥3 ascending, first at 00:00, each ≥10s, exactly one block). merge produces two outputs: `<title>_chapters.txt` is the description paste (this is the supported path); `<title>_ffmeta.txt` is embedded into the MP4 via `-map_metadata`/`-map_chapters` as a best-effort extra — YouTube does NOT officially document reading embedded chapter atoms, so do NOT treat the embed as a safety net. Common breakage: a description with two timestamp blocks (繁體 + 简体) is not strictly ascending and YouTube discards the whole list — keep the block to exactly one occurrence.
 
 ## Architecture

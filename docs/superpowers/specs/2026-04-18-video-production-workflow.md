@@ -65,7 +65,7 @@ output/back2back/
 
 `.env` and all secrets live in repo root, gitignored via `.gitignore` (`.env`, `client_secret*.json`, `youtube_token.json`).
 
-## 4. The 9-step pipeline
+## 4. The 10-step pipeline
 
 ### Step 1 — Write a 30-second script
 
@@ -254,20 +254,43 @@ Modal cost: ~$0.10 per 17-min segment, within Modal's $30/mo free tier for perso
 
 **Migration note (2026-05-24)**: The old three-step pipeline (`video2yt` → `video2yt-music-swap` → `video2yt-subtitle`) was collapsed into this five-stage pipeline by the step6-restructure plan. The legacy `_with_danmaku.mp4`, `_clean.mp4`, `_subbed.mp4` intermediates are gone — the only segment output is `<bv>_final.mp4`. `video2yt-music-swap` was deleted; its bed-build logic moved into `video2yt-music-mix`, its Demucs separation was replaced by song-remover, and its mix step moved into Stage 5's `-filter_complex`.
 
+### Step 6.5 — Append the subscribe CTA to the first battle segment
+
+**Input**: the first **battle** segment from Step 6 (the first gameplay segment, NOT the intro).
+**Output**: `<battle1>_final_cta.mp4` — battle 1 with the ~6.3s subscribe CTA appended.
+**Tool**: `scripts/append_cta.sh` + the shared asset `assets/cta/subscribe_cta.mp4`.
+
+```bash
+scripts/append_cta.sh output/<project>/<uploader1>：.../<bv1>_final.mp4
+# -> output/<project>/<uploader1>：.../<bv1>_final_cta.mp4
+```
+
+The CTA is a faceless mascot clip (二次元 tavern-keeper girl + project BigTTS
+voice "訂閱馬哥！" + animated arrow → 訂閱 button). It is stream-copy concatenated
+onto the end of battle 1, so it plays **mid-roll between battle 1 and battle 2**
+(mid-roll converts better than a pre-roll ask). Because it rides **inside** battle
+1's chapter, each chapter still satisfies YouTube's ≥10s rule and no stray
+chapter is created — do NOT pass the CTA to merge as its own `--segment`.
+The clip + its editable sources live in `assets/cta/` (see that folder's README
+to restyle the mascot, change the slogan, or swap the voice).
+
 ### Step 7 — Merge into final video
 
-**Input**: ordered list of `--segment` + `--label` pairs (intro first), plus a working title.
+**Input**: ordered list of `--segment` + `--label` pairs (intro first; battle 1 is the `_cta` clip from Step 6.5), plus a working title.
 **Output**: `output/<project>/<title>.mp4` + `<title>_chapters.txt` + `<title>_ffmeta.txt`.
 **Tool**: existing `video2yt-merge`.
 
 ```bash
 uv run video2yt-merge \
   --segment output/<project>/intro.mp4                            --label "intro" \
-  --segment output/<project>/<uploader1>：.../<bv1>_final_cut.mp4 --label "教程" \
+  --segment output/<project>/<uploader1>：.../<bv1>_final_cta.mp4 --label "教程" \
   --segment output/<project>/<uploader2>：.../<bv2>_final_1.25x.mp4 --label "郭楓荷實戰" \
   --title   "<working_title>" \
   -o        output/<project>/<project>_final.mp4
 ```
+
+Note the battle-1 `--segment` is the `_cta` clip from Step 6.5 (battle 1 + the
+subscribe CTA), so the CTA plays between battles 1 and 2 inside battle 1's chapter.
 
 All `--segment` inputs MUST be 1920x1080 30fps h264 (strict) AND ≥10s long, with at least 3 segments total (those rules mirror YouTube's chapter requirements; see Step 8). Output: concat + per-segment loudnorm to -14 LUFS. There is no burned-in progress bar — segmentation must be delivered through the description chapter block written in Step 8. merge writes `<title>_chapters.txt` for that paste, and also embeds the same chapters into the MP4 via `<title>_ffmeta.txt` + `-map_metadata`/`-map_chapters` as a best-effort extra (YouTube does not officially document reading embedded chapter atoms, so this is NOT a safety net for a missing description block).
 
@@ -455,6 +478,30 @@ OAuth gotchas:
 - Test-mode refresh tokens expire after 7 days. **`get_credentials` auto-recovers**: if `creds.refresh()` raises `RefreshError`, the cached `youtube_token.json` is deleted and `run_local_server` is invoked to mint a fresh token. The browser will pop again on day 8+.
 - Brand channels require signing in to that brand account during the OAuth consent flow.
 
+### Step 10 — Post a subscribe call-to-action comment
+
+**MANDATORY after every upload.** Once Step 9 returns the `video_id`, post one top-level comment from the channel that (a) recaps the comp/核心卡 in one line so it reads as genuine content, and (b) asks viewers to 按讚 / 訂閱 / 開小鈴鐺. Keep it 繁體 to match the video.
+
+**Input**: the uploaded `video_id`, a per-project comment text.
+**Output**: posted comment id.
+**Script**: `scripts/post_comment.py` (uses the same cached `youtube_token.json`; the `youtube.force-ssl` scope authorizes `commentThreads.insert`).
+
+```bash
+# Write the comment text per project (recap the comp + subscribe CTA)
+#   output/<project>/subscribe_comment.txt
+uv run python scripts/post_comment.py \
+  --video-id <ID> \
+  --text-file output/<project>/subscribe_comment.txt
+```
+
+Template (adapt the first line to the actual comp each time):
+
+```
+<一句話點出核心卡/combo，例：雙重縫針配巴琳達‧石爐，加倍法術放兩次，身材指數爆炸>！這套<流派>新賽季高端局真的猛！
+如果這集對你上分有幫助，幫我按個讚 👍、訂閱頻道 🔔 開個小鈴鐺，之後每隻新流派教學都不錯過～
+有想看的流派也歡迎在留言區許願！
+```
+
 ## 5. Scripts added by this workflow
 
 All under `scripts/` (untracked by default — they're project-specific tooling, but useful enough to be reused; promote to `src/video2yt/` if formalizing into proper CLIs).
@@ -526,6 +573,7 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Bonus — thumbnail (`video2yt-research-card` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`
 - [ ] Step 9 — upload via `youtube_upload.py`
+- [ ] Step 10 — post subscribe-CTA comment via `scripts/post_comment.py` (MANDATORY after every upload; recap the comp + 按讚/訂閱/小鈴鐺)
 
 ## Issues to fix later
 
