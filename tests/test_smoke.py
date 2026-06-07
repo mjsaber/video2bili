@@ -5484,6 +5484,8 @@ def _topic_summary(
     core_card="戒指龙",
     summary="戒指龙滚雪球",
     highlights="新饰品加速",
+    hero="",
+    trinket="",
 ):
     from video2yt.topic import VideoSummary
     return VideoSummary(
@@ -5492,6 +5494,8 @@ def _topic_summary(
         core_card=core_card,
         summary=summary,
         highlights=highlights,
+        hero=hero,
+        trinket=trinket,
     )
 
 
@@ -5713,6 +5717,48 @@ def test_topic_summarize_with_codex_writes_input_reads_output(tmp_path, monkeypa
     assert captured["input"]["videos"][0]["danmaku"] == ["d1", "d2"]
 
 
+def test_topic_summarize_with_codex_parses_hero_and_trinket(tmp_path, monkeypatch):
+    from video2yt import topic
+
+    cands = [_topic_candidate(bvid="BV1aa")]
+
+    def fake_run(cmd, **kw):
+        cd_idx = cmd.index("--cd") + 1
+        tmpdir = Path(cmd[cd_idx])
+        out = [
+            {"bvid": "BV1aa", "strategy": "戒指龙流", "core_card": "戒指龙",
+             "hero": "玛维", "trinket": "废品回收",
+             "summary": "s", "highlights": "h"},
+        ]
+        (tmpdir / "output.json").write_text(json.dumps(out), encoding="utf-8")
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.topic.subprocess.run", fake_run)
+    summaries = topic.summarize_with_codex(cands, {"BV1aa": []}, timeout=60)
+    assert summaries[0].hero == "玛维"
+    assert summaries[0].trinket == "废品回收"
+
+
+def test_topic_summarize_with_codex_missing_hero_trinket_defaults_blank(tmp_path, monkeypatch):
+    """Old-shape Codex output (no hero/trinket keys) must still parse."""
+    from video2yt import topic
+
+    cands = [_topic_candidate(bvid="BV1aa")]
+
+    def fake_run(cmd, **kw):
+        cd_idx = cmd.index("--cd") + 1
+        tmpdir = Path(cmd[cd_idx])
+        out = [{"bvid": "BV1aa", "strategy": "戒指龙流", "core_card": "戒指龙",
+                "summary": "s", "highlights": "h"}]
+        (tmpdir / "output.json").write_text(json.dumps(out), encoding="utf-8")
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("video2yt.topic.subprocess.run", fake_run)
+    summaries = topic.summarize_with_codex(cands, {"BV1aa": []}, timeout=60)
+    assert summaries[0].hero == ""
+    assert summaries[0].trinket == ""
+
+
 def test_topic_summarize_with_codex_no_candidates_skips(monkeypatch):
     from video2yt import topic
     called: list = []
@@ -5795,6 +5841,101 @@ def test_topic_group_pairs_skips_blank_core_card():
     s1 = _topic_summary(candidate=_topic_candidate(streamer="郭枫"), core_card="")
     s2 = _topic_summary(candidate=_topic_candidate(streamer="景清"), core_card="")
     assert topic.group_pairs([s1, s2]) == []
+
+
+def test_topic_group_hero_pairs_same_hero_distinct_comps():
+    """Two streamers on the same hero but DIFFERENT comps → a 英雄 pair labeled
+    by the hero name."""
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫", play=100000),
+        strategy="戒指龙流", core_card="戒指龙", hero="玛维",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清", play=80000),
+        strategy="背靠背流", core_card="背靠背", hero="玛维",
+    )
+    pairs = topic.group_hero_pairs([s1, s2])
+    assert len(pairs) == 1
+    assert pairs[0].axis == "英雄"
+    assert pairs[0].strategy == "玛维"
+    assert {s.candidate.streamer for s in pairs[0].summaries} == {"郭枫", "景清"}
+
+
+def test_topic_group_hero_pairs_skips_same_core_card():
+    """Same hero AND same core_card is already a 流派 pair — don't duplicate it
+    under the 英雄 axis."""
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫"),
+        core_card="戒指龙", hero="玛维",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清"),
+        core_card="戒指龙", hero="玛维",
+    )
+    assert topic.group_hero_pairs([s1, s2]) == []
+
+
+def test_topic_group_hero_pairs_finds_pair_when_top_video_cannot_anchor():
+    """Regression: the highest-play 玛维 video shares its streamer with one entry
+    and its core_card with the other, so it can't anchor a valid distinct
+    pair — but a valid different-comp pair (B+C) exists among the rest and must
+    NOT be silently dropped."""
+    from video2yt import topic
+    a = _topic_summary(  # top play, but...
+        candidate=_topic_candidate(bvid="BVa", streamer="郭枫", play=100000),
+        core_card="戒指龙", hero="玛维",
+    )
+    b = _topic_summary(  # ...same streamer as A (郭枫)
+        candidate=_topic_candidate(bvid="BVb", streamer="郭枫", play=95000),
+        core_card="背靠背", hero="玛维",
+    )
+    c = _topic_summary(  # ...same core_card as A (戒指龙)
+        candidate=_topic_candidate(bvid="BVc", streamer="瓦莉拉", play=90000),
+        core_card="戒指龙", hero="玛维",
+    )
+    pairs = topic.group_hero_pairs([a, b, c])
+    assert len(pairs) == 1
+    assert {s.candidate.bvid for s in pairs[0].summaries} == {"BVb", "BVc"}
+    # higher-played pick (B, 95k) leads
+    assert pairs[0].summaries[0].candidate.bvid == "BVb"
+
+
+def test_topic_group_hero_pairs_skips_blank_hero():
+    from video2yt import topic
+    s1 = _topic_summary(candidate=_topic_candidate(streamer="郭枫"), hero="")
+    s2 = _topic_summary(candidate=_topic_candidate(streamer="景清"), hero="")
+    assert topic.group_hero_pairs([s1, s2]) == []
+
+
+def test_topic_group_trinket_pairs_same_trinket_distinct_comps():
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫", play=100000),
+        core_card="合唱鱼", trinket="废品回收",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清", play=80000),
+        core_card="碎地者", trinket="废品回收",
+    )
+    pairs = topic.group_trinket_pairs([s1, s2])
+    assert len(pairs) == 1
+    assert pairs[0].axis == "饰品"
+    assert pairs[0].strategy == "废品回收"
+
+
+def test_topic_group_trinket_pairs_skips_same_core_card():
+    from video2yt import topic
+    s1 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV1", streamer="郭枫"),
+        core_card="合唱鱼", trinket="废品回收",
+    )
+    s2 = _topic_summary(
+        candidate=_topic_candidate(bvid="BV2", streamer="景清"),
+        core_card="合唱鱼", trinket="废品回收",
+    )
+    assert topic.group_trinket_pairs([s1, s2]) == []
 
 
 def test_topic_annotate_already_done_via_corpus_substring():
@@ -5889,6 +6030,69 @@ def test_topic_annotate_traditional_simplified_bridged_via_done_topics():
     topic.annotate_already_done([pair], trad_corpus, {"戒指龙"})
     assert pair.is_already_done is True
     assert "戒指龙" in pair.done_marker
+
+
+def test_topic_annotate_hero_axis_ignores_core_card(tmp_path):
+    """A 英雄 pair must NOT be marked done just because one of its two
+    contrasting comps was covered before — only the hero name counts."""
+    from video2yt import topic
+    s1 = _topic_summary(strategy="x", core_card="戒指龙", hero="玛维")
+    s2 = _topic_summary(strategy="x", core_card="背靠背", hero="玛维")
+    pair = topic.TopicPair(
+        strategy="玛维", summaries=[s1, s2],
+        is_already_done=False, done_marker=None, axis="英雄",
+    )
+    # corpus contains a done comp (戒指龙) but NOT the hero name
+    topic.annotate_already_done([pair], {"output/ring": "ring\n核心是戒指龙"}, set())
+    assert pair.is_already_done is False
+
+
+def test_topic_annotate_hero_axis_matches_hero_name(tmp_path):
+    from video2yt import topic
+    s1 = _topic_summary(core_card="戒指龙", hero="玛维")
+    s2 = _topic_summary(core_card="背靠背", hero="玛维")
+    pair = topic.TopicPair(
+        strategy="玛维", summaries=[s1, s2],
+        is_already_done=False, done_marker=None, axis="英雄",
+    )
+    topic.annotate_already_done([pair], {}, {"玛维"})
+    assert pair.is_already_done is True
+
+
+def test_topic_render_markdown_sections_by_axis():
+    from video2yt import topic
+    comp = topic.TopicPair(
+        strategy="戒指龙流",
+        summaries=[_topic_summary(candidate=_topic_candidate(bvid="BV1", streamer="郭枫")),
+                   _topic_summary(candidate=_topic_candidate(bvid="BV2", streamer="景清"))],
+        is_already_done=False, done_marker=None, axis="流派", score=9.0,
+    )
+    hero = topic.TopicPair(
+        strategy="玛维",
+        summaries=[_topic_summary(candidate=_topic_candidate(bvid="BV3", streamer="郭枫"),
+                                  core_card="戒指龙", hero="玛维"),
+                   _topic_summary(candidate=_topic_candidate(bvid="BV4", streamer="瓦莉拉"),
+                                  core_card="背靠背", hero="玛维")],
+        is_already_done=False, done_marker=None, axis="英雄", score=8.0,
+    )
+    trinket = topic.TopicPair(
+        strategy="废品回收",
+        summaries=[_topic_summary(candidate=_topic_candidate(bvid="BV5", streamer="郭枫"),
+                                  core_card="合唱鱼", trinket="废品回收"),
+                   _topic_summary(candidate=_topic_candidate(bvid="BV6", streamer="景清"),
+                                  core_card="碎地者", trinket="废品回收")],
+        is_already_done=False, done_marker=None, axis="饰品", score=7.0,
+    )
+    md = topic.render_markdown([comp, hero, trinket], window_days=7, generated_at="2026-06-07")
+    assert "## 流派配对" in md
+    assert "## 英雄配对" in md
+    assert "## 饰品配对" in md
+    assert "[新英雄 ✨]" in md
+    assert "[新饰品 ✨]" in md
+    assert "英雄：玛维" in md
+    assert "饰品：废品回收" in md
+    # 流派 section comes before 英雄 section comes before 饰品 section
+    assert md.index("## 流派配对") < md.index("## 英雄配对") < md.index("## 饰品配对")
 
 
 def test_topic_score_pair_novel_gets_bonus():

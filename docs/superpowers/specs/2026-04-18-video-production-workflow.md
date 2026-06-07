@@ -68,6 +68,16 @@ output/back2back/
 
 ## 4. The 10-step pipeline
 
+### Step 0 — 选题 (topic discovery)
+
+**Tool**: `uv run video2yt-topic --days 10` → writes `output/topics/<YYYY-MM-DD>.md`.
+
+It pairs two whitelisted streamers along **three axes** — same 核心卡 (流派), same 英雄, same 饰品 — and marks each pair 新 / 已做过. The 英雄 / 饰品 axes (added 2026-06-07) mean a topic can be a **hero tutorial or a trinket tutorial**, not only a comp: two streamers on the same hero (or same 饰品) with *different* builds is a valid 选题.
+
+**HARD RULE — every candidate surfaced in chat MUST carry BOTH streamers' Bilibili links.** Present each 选题 as `<名称>（新/已做过）— <streamer1 标题+链接> × <streamer2 标题+链接>`, for **ALL** candidates you mention, not just the recommended ones. **Never list a candidate by name only.** The report already contains every link, one per streamer line — relay those lines verbatim; do not drop links "to save space." Also surface the report file itself (`SendUserFile output/topics/<date>.md`) so the user always has the complete link-bearing list. (Added 2026-06-07 after links were repeatedly dropped for non-recommended picks — see memory `feedback_topic_summary_include_links`.)
+
+**Auto-annotation is a hint, not ground truth.** It matches on core-card substrings, so it misses cross-script names and same-comp/different-core-card cases (e.g. `合唱鱼` ≈ already-done `鱼人合唱团`; `宰割者` = already-done `zaige`). Eyeball every 新-marked pick against `assets/topic/done_topics.txt` before recommending, and flag suspected-already-done ones explicitly.
+
 ### Step 1 — Write a 30-second script
 
 **Input**: brief outline (sentence or two), target length (~30s).
@@ -599,6 +609,7 @@ we hit it. Address them in a batch after the video ships.
 
 ## Step status
 
+- [ ] Step 0 — 选题 via `video2yt-topic` (流派/英雄/饰品 三维度); when reporting candidates in chat, EVERY pick carries both Bilibili links + `SendUserFile` the report (HARD RULE, see spec Step 0)
 - [ ] Step 1 — write intro script (term-research first if BG topic; see spec Step 1)
 - [ ] Step 1 (parallel) — kick off `uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &` NOW so Step 6 sources download in the background while you do Steps 1–5 (see spec Step 1 tip; `-o` MUST be the `temp/` dir, not `output/<project>/`)
 - [ ] Step 2 — TTS via `tts_quick.py`

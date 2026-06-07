@@ -18,8 +18,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description=(
             "Search Bilibili for recent battle-style videos from a whitelist of "
             "Hearthstone Battlegrounds streamers, summarize each via Codex, and "
-            "report 流派 pairs (two streamers playing the same comp) as topic "
-            "candidates. Writes a Markdown report under output/topics/."
+            "report topic candidates where two streamers overlap on the same "
+            "comp (流派), hero (英雄), or trinket (饰品). Writes a Markdown report "
+            "under output/topics/."
         ),
     )
     parser.add_argument(

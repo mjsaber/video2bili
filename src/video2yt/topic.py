@@ -5,12 +5,15 @@ Pipeline:
   2. For each streamer, fetch recent uploads via bilibili-api-python.
   3. Filter to last N days, duration ≥ min, exclude tutorial/intro titles.
   4. Sample danmaku from each surviving video.
-  5. Ask Codex to extract {strategy, core_card, summary, highlights}
-     from title + description + danmaku samples.
-  6. Group summaries by normalized strategy; keep groups of size ≥2.
-  7. Mark groups whose strategy already appears in output/<project>/
+  5. Ask Codex to extract {strategy, core_card, hero, trinket, summary,
+     highlights} from title + description + danmaku samples.
+  6. Group summaries into pairs (≥2 distinct streamers) along THREE axes:
+     same core_card (流派), same hero (英雄), same trinket (饰品). The 英雄/饰品
+     axes require the two picks to run *different* core_cards so they never
+     just re-list a 流派 pair.
+  7. Mark pairs whose subject already appears in output/<project>/
      intro_script.txt or done_topics.txt.
-  8. Render to Markdown.
+  8. Render to Markdown, one section per axis.
 
 bilibili-api-python is async. The public functions in this module are sync
 wrappers (asyncio.run) so callers and tests don't have to touch the event loop.
@@ -82,6 +85,8 @@ class VideoSummary:
     core_card: str
     summary: str
     highlights: str
+    hero: str = ""      # the BG 英雄 played this game ("" if unclear)
+    trinket: str = ""   # the signature 饰品 that defined the run ("" if none)
 
 
 @dataclass
@@ -91,6 +96,7 @@ class TopicPair:
     is_already_done: bool
     done_marker: str | None  # path or done_topics entry that matched
     score: float = 0.0
+    axis: str = "流派"  # 流派 | 英雄 | 饰品 — which dimension paired these two
 
 
 def parse_streamers(path: Path) -> list[Streamer]:
@@ -351,6 +357,11 @@ produce one summary with these exact string fields:
 (e.g. "戒指龙流", "九鸡野兽", "背靠背流", "火车头流"). Pick ONE; pick the most \
 specific name shared across title + danmaku.
   - core_card: ONE core card name (Chinese).
+  - hero: the Battlegrounds HERO the streamer played this game (英雄), in \
+Chinese (e.g. "玛维", "克罗米", "提克特斯", "苔丝·格雷迈恩"). Use "" if the hero \
+is not clearly identifiable from the title + danmaku.
+  - trinket: the ONE signature 饰品 (大/小饰品 / trinket) that defined this run, \
+in Chinese (e.g. "废品回收", "复生", "透镜"). Use "" if no single 饰品 stands out.
   - summary: ONE sentence ≤40 Chinese characters describing what the streamer did.
   - highlights: ONE sentence ≤40 Chinese characters describing what NEW idea \
 or twist this video shows for that strategy (different饰品/英雄/build path).
@@ -433,6 +444,77 @@ def summarize_with_codex(
             core_card=str(entry.get("core_card", "")).strip(),
             summary=str(entry.get("summary", "")).strip(),
             highlights=str(entry.get("highlights", "")).strip(),
+            hero=str(entry.get("hero", "")).strip(),
+            trinket=str(entry.get("trinket", "")).strip(),
+        ))
+    return out
+
+
+def _best_distinct_pair(
+    group: list[VideoSummary], *, require_distinct_core_card: bool
+) -> list[VideoSummary] | None:
+    """Pick a high-traction pair of summaries from DISTINCT streamers.
+
+    With ``require_distinct_core_card`` the two picks must also run *different*
+    core_cards — used for the 英雄/饰品 axes so a pair surfaced there is
+    genuinely "same hero/trinket, two *different* builds" and never re-lists a
+    流派 (same-core_card) pair.
+
+    Scans every (anchor, partner) candidate in play-count order (highest first)
+    and returns the first that satisfies the constraints, so the higher-played
+    summary leads the pair. Crucially it does NOT anchor only on the single
+    highest-play summary: when that top video can pair only with same-streamer
+    or (for the distinct-core_card axes) same-core_card entries, a valid pair
+    built from lower-play summaries still exists and must not be silently
+    dropped. Returns None only when no pair satisfies the constraints.
+    """
+    ordered = sorted(group, key=lambda x: x.candidate.play_count, reverse=True)
+    for i, anchor in enumerate(ordered):
+        for partner in ordered[i + 1:]:
+            if partner.candidate.streamer == anchor.candidate.streamer:
+                continue
+            if require_distinct_core_card and \
+                    partner.core_card.strip() == anchor.core_card.strip():
+                continue
+            return [anchor, partner]
+    return None
+
+
+def _group_by_key(
+    summaries: list[VideoSummary],
+    key_fn,
+    axis: str,
+    *,
+    label_from_strategy: bool,
+    require_distinct_core_card: bool = False,
+) -> list[TopicPair]:
+    """Bucket summaries by ``key_fn`` and emit one TopicPair per bucket that
+    has a valid distinct-streamer pair. Blank keys are skipped.
+
+    ``label_from_strategy`` controls the displayed name: the 流派 axis uses the
+    higher-played pick's strategy (Codex returns the comp name there); the
+    英雄/饰品 axes use the bucket key (the hero/trinket name) directly.
+    """
+    buckets: dict[str, list[VideoSummary]] = {}
+    for s in summaries:
+        key = key_fn(s).strip()
+        if not key:
+            continue
+        buckets.setdefault(key, []).append(s)
+    out: list[TopicPair] = []
+    for key, group in buckets.items():
+        picked = _best_distinct_pair(
+            group, require_distinct_core_card=require_distinct_core_card
+        )
+        if picked is None:
+            continue
+        label = (picked[0].strategy or key) if label_from_strategy else key
+        out.append(TopicPair(
+            strategy=label,
+            summaries=picked,
+            is_already_done=False,
+            done_marker=None,
+            axis=axis,
         ))
     return out
 
@@ -447,31 +529,34 @@ def group_pairs(summaries: list[VideoSummary]) -> list[TopicPair]:
     from distinct streamers; the displayed `strategy` field for the pair is
     that of the higher-played pick.
     """
-    by_card: dict[str, list[VideoSummary]] = {}
-    for s in summaries:
-        key = s.core_card.strip()
-        if not key:
-            continue
-        by_card.setdefault(key, []).append(s)
-    out: list[TopicPair] = []
-    for card, group in by_card.items():
-        seen_streamers: set[str] = set()
-        picked: list[VideoSummary] = []
-        for s in sorted(group, key=lambda x: x.candidate.play_count, reverse=True):
-            if s.candidate.streamer in seen_streamers:
-                continue
-            seen_streamers.add(s.candidate.streamer)
-            picked.append(s)
-            if len(picked) == 2:
-                break
-        if len(picked) == 2:
-            out.append(TopicPair(
-                strategy=picked[0].strategy or card,
-                summaries=picked,
-                is_already_done=False,
-                done_marker=None,
-            ))
-    return out
+    return _group_by_key(
+        summaries, lambda s: s.core_card, "流派", label_from_strategy=True,
+    )
+
+
+def group_hero_pairs(summaries: list[VideoSummary]) -> list[TopicPair]:
+    """Pair two streamers who played the same HERO with *different* comps.
+
+    Same hero + same core_card is already a 流派 pair, so we require distinct
+    core_cards here — the value of a 英雄 topic is contrasting two builds on one
+    hero, not re-surfacing a comp the 流派 axis already caught.
+    """
+    return _group_by_key(
+        summaries, lambda s: s.hero, "英雄",
+        label_from_strategy=False, require_distinct_core_card=True,
+    )
+
+
+def group_trinket_pairs(summaries: list[VideoSummary]) -> list[TopicPair]:
+    """Pair two streamers who built around the same 饰品 with *different* comps.
+
+    Distinct-core_card requirement is the same as `group_hero_pairs`: a 饰品
+    topic is worthwhile when it shows two different ways to abuse one trinket.
+    """
+    return _group_by_key(
+        summaries, lambda s: s.trinket, "饰品",
+        label_from_strategy=False, require_distinct_core_card=True,
+    )
 
 
 def _norm_strategy(s: str) -> str:
@@ -479,28 +564,47 @@ def _norm_strategy(s: str) -> str:
     return s.replace("流", "").replace("派", "").strip()
 
 
+def _pair_needles(pair: TopicPair) -> list[str]:
+    """Normalized substrings used to decide whether a pair is already done.
+
+    流派 axis: the comp name + both core cards (the comp is the subject).
+    英雄/饰品 axis: only the hero/trinket name — the subject is that hero or
+    trinket, so we must NOT mark it done just because one of the two contrasting
+    comps was covered before.
+
+    Min-length 2 drops one-character needles like '流' that would match
+    everywhere.
+    """
+    if pair.axis == "流派":
+        raws = (
+            pair.strategy,
+            pair.summaries[0].core_card,
+            pair.summaries[1].core_card,
+        )
+    else:
+        raws = (pair.strategy,)
+    needles: list[str] = []
+    for raw in raws:
+        n = _norm_strategy(raw)
+        if len(n) >= 2:
+            needles.append(n)
+    return needles
+
+
 def annotate_already_done(
     pairs: list[TopicPair],
     done_corpus: dict[str, str],
     done_from_file: set[str],
 ) -> None:
-    """In-place: mark each pair as already-done if its strategy/core_card
-    appears in any past project's corpus blob, or in the manual done list.
+    """In-place: mark each pair as already-done if its subject (see
+    `_pair_needles`) appears in any past project's corpus blob, or in the
+    manual done list.
 
-    Matching: a pair is "done" iff the normalized strategy OR either core card
-    appears as a substring in any corpus blob (case-sensitive, no T↔S
-    conversion). For cross-script cases, list the strategy explicitly in
-    `done_topics.txt`.
-
-    Min-length 2 prevents one-character false positives like '流' matching
-    everywhere. Pair.summaries is always size-2 by `group_pairs` invariant.
+    Matching is substring (case-sensitive, no T↔S conversion). For cross-script
+    cases, list the strategy explicitly in `done_topics.txt`.
     """
     for pair in pairs:
-        needles: list[str] = []
-        for raw in (pair.strategy, pair.summaries[0].core_card, pair.summaries[1].core_card):
-            n = _norm_strategy(raw)
-            if len(n) >= 2:
-                needles.append(n)
+        needles = _pair_needles(pair)
         if not needles:
             continue
         for project, blob in done_corpus.items():
@@ -536,33 +640,65 @@ def score_pair(pair: TopicPair) -> float:
     return score
 
 
+_AXIS_ORDER = ["流派", "英雄", "饰品"]
+_AXIS_SECTION_TITLE = {
+    "流派": "## 流派配对（同核心卡）",
+    "英雄": "## 英雄配对（同英雄 · 不同打法）",
+    "饰品": "## 饰品配对（同饰品 · 不同打法）",
+}
+
+
+def _render_pair(lines: list[str], i: int, pair: TopicPair) -> None:
+    marker = f" [新{pair.axis} ✨]" if not pair.is_already_done \
+        else f" [已做过 → {pair.done_marker}]"
+    lines.append(f"### #{i} {pair.axis}：{pair.strategy}{marker}  · 分数 {pair.score:.2f}")
+    lines.append("")
+    for s in pair.summaries:
+        c = s.candidate
+        mins = c.duration_seconds // 60
+        secs = c.duration_seconds % 60
+        plays = f"{c.play_count/10000:.1f}万" if c.play_count >= 10000 \
+            else str(c.play_count)
+        extra = []
+        if s.hero:
+            extra.append(f"英雄：{s.hero}")
+        if s.trinket:
+            extra.append(f"饰品：{s.trinket}")
+        extra_str = (" · " + " · ".join(extra)) if extra else ""
+        lines.append(f"- **{c.streamer}**: [{c.title}]({c.url})")
+        lines.append(
+            f"  - 播放 {plays} · 时长 {mins}:{secs:02d} · 核心卡：{s.core_card}{extra_str}"
+        )
+        lines.append(f"  - 概要：{s.summary}")
+        lines.append(f"  - 亮点：{s.highlights}")
+    lines.append("")
+
+
 def render_markdown(pairs: list[TopicPair], window_days: int, generated_at: str) -> str:
-    """Format the final report as Markdown."""
+    """Format the final report as Markdown, one section per axis (流派/英雄/饰品)."""
     lines: list[str] = []
     lines.append(f"# 选题候选 · {generated_at} (近 {window_days} 天)")
     lines.append("")
     if not pairs:
         lines.append("_本期没有任何流派被两位主播同时打过。可放宽时间窗口或扩充白名单。_")
         return "\n".join(lines) + "\n"
-    lines.append(f"共 {len(pairs)} 对配对（按热度+新颖度排序）")
+    lines.append(
+        f"共 {len(pairs)} 对配对（流派 / 英雄 / 饰品三维度，各维度内按热度+新颖度排序）"
+    )
     lines.append("")
-    sorted_pairs = sorted(pairs, key=lambda p: p.score, reverse=True)
-    for i, pair in enumerate(sorted_pairs, 1):
-        marker = " [新流派 ✨]" if not pair.is_already_done \
-            else f" [已做过 → {pair.done_marker}]"
-        lines.append(f"## #{i} 流派：{pair.strategy}{marker}  · 分数 {pair.score:.2f}")
+    by_axis: dict[str, list[TopicPair]] = {a: [] for a in _AXIS_ORDER}
+    for p in pairs:
+        by_axis.setdefault(p.axis, []).append(p)
+    for axis in _AXIS_ORDER:
+        axis_pairs = by_axis.get(axis) or []
+        if not axis_pairs:
+            continue
+        lines.append(_AXIS_SECTION_TITLE.get(axis, f"## {axis}配对"))
         lines.append("")
-        for s in pair.summaries:
-            c = s.candidate
-            mins = c.duration_seconds // 60
-            secs = c.duration_seconds % 60
-            plays = f"{c.play_count/10000:.1f}万" if c.play_count >= 10000 \
-                else str(c.play_count)
-            lines.append(f"- **{c.streamer}**: [{c.title}]({c.url})")
-            lines.append(f"  - 播放 {plays} · 时长 {mins}:{secs:02d} · 核心卡：{s.core_card}")
-            lines.append(f"  - 概要：{s.summary}")
-            lines.append(f"  - 亮点：{s.highlights}")
-        lines.append("")
+        for i, pair in enumerate(
+            sorted(axis_pairs, key=lambda p: p.score, reverse=True), 1
+        ):
+            _render_pair(lines, i, pair)
     return "\n".join(lines) + "\n"
 
 
@@ -638,8 +774,15 @@ def run_topic(
     summaries = summarize_with_codex(candidates, danmaku_by_bvid, timeout=codex_timeout)
     print(f"[topic]   {len(summaries)} summary record(s)", file=sys.stderr)
 
-    pairs = group_pairs(summaries)
-    print(f"[topic] grouped into {len(pairs)} pair(s) before annotation", file=sys.stderr)
+    comp_pairs = group_pairs(summaries)
+    hero_pairs = group_hero_pairs(summaries)
+    trinket_pairs = group_trinket_pairs(summaries)
+    pairs = comp_pairs + hero_pairs + trinket_pairs
+    print(
+        f"[topic] grouped: {len(comp_pairs)} 流派 / {len(hero_pairs)} 英雄 / "
+        f"{len(trinket_pairs)} 饰品 pair(s) before annotation",
+        file=sys.stderr,
+    )
 
     done_corpus = scan_done_corpus_from_output(output_root)
     done_from_file = parse_done_topics(done_topics_file) if done_topics_file else set()
