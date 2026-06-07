@@ -29,13 +29,14 @@ Final layout for `back2back/`:
 output/back2back/
 ├── intro_script.txt              # Step 1 source
 ├── intro_script_prompt.txt       # (optional, if generated)
-├── intro_image_prompt.txt        # Step 3 source
+├── intro_image_prompt.txt        # Step 3 source (subjectless, cool/dark — see Step 3)
+├── intro_cards.txt               # Step 5 source (<png> | <中文卡名> [| start end])
 ├── thumbnail_bg_prompt.txt       # Bonus step source
 ├── intro.mp3                     # Step 2 output
 ├── intro.srt                     # Step 4 output
 ├── intro_bg.png                  # Step 3 output (1920x1080, fitted)
-├── intro_bg_raw.png              # Step 3 raw (1024x1024 from Gemini)
-├── intro.mp4                     # Step 5 output (intro video)
+├── intro_bg_raw.png              # Step 3 raw (1536x1024 from Codex image_gen)
+├── intro.mp4                     # Step 5 output (dynamic intro: mascot + card spotlight)
 ├── thumbnail_bg.png              # Bonus step bg
 ├── thumbnail.png                 # Bonus step composed thumbnail (1280x720)
 ├── <uploader>：<title>/          # Step 6 burnt segment 1
@@ -119,22 +120,42 @@ Speech rate range: `[-50, 100]`; `0` = 1.0x, `100` = 2.0x, `-50` = 0.5x.
 
 **Input**: detailed art-direction prompt, target size.
 **Output**: `output/<project>/intro_bg.png` (1920x1080, center-cropped).
-**Script**: `scripts/image_quick.py`.
+**Tool**: `video2yt-image` (`-o`, `--prompt-file`, `--save-raw`, `--target-size`, `--fit`).
 
 ```bash
 # Default: Codex backend (ChatGPT auth, no separate API key, no billing).
-uv run python scripts/image_quick.py \
+uv run video2yt-image \
   --prompt-file output/<project>/intro_image_prompt.txt \
-  --output      output/<project>/intro_bg.png \
+  -o            output/<project>/intro_bg.png \
   --save-raw    output/<project>/intro_bg_raw.png \
   --target-size 1920x1080 \
   --fit cover
 
 # Fallback: Gemini (requires GEMINI_API_KEY with billing enabled).
-uv run python scripts/image_quick.py --backend gemini ...
+uv run video2yt-image --backend gemini ...
 ```
 
-Codex backend (default) calls `codex exec` with the `image_gen` tool; native output is 1536x1024 (3:2). Gemini backend always returns 1024x1024 (1:1). In both cases the script center-crops or letterboxes to the target. Prompts should explicitly say "no text, no logos, no watermarks" — both models hallucinate text/logos otherwise.
+Codex backend (default) calls `codex exec` with the `image_gen` tool; native output is 1536x1024 (3:2). Gemini backend always returns 1024x1024 (1:1). In both cases the CLI center-crops or letterboxes to the target. Prompts should explicitly say "no text, no logos, no watermarks" — both models hallucinate text/logos otherwise.
+
+**Art direction for the DYNAMIC intro (Step 5).** The intro background is no
+longer a hero-subject splash — the 女老板 mascot is now the on-screen figure, so a
+big creature/character in the bg fights her. Author `intro_image_prompt.txt` as a
+**subjectless environment** with a **cool, dark palette** (so the warm-gold mascot +
+white subtitles pop). Fixed scaffold + one per-theme slot:
+
+> Cinematic 16:9 atmospheric ENVIRONMENT backdrop for a HS Battlegrounds tutorial —
+> NO main character/creature/figure (the host mascot is overlaid separately). Cozy
+> fantasy tavern + moonlit harbor night, soft glow, shallow depth of field, muted
+> **COOL and DARK** palette dominated by deep navy/indigo/teal (kept LOW in value
+> across the lower-left subtitle area and the entire right mascot area); warm gold
+> only as small accents; the comp's signature colour only as a small CONTAINED glow,
+> never a warm/bright full-field wash. {theme motif}. Darker on the right half +
+> bottom-right + upper-center-left + a top strip; soft focal glow low-center;
+> gentle vignette. No text, letters, numbers, logos, watermarks, UI, faces.
+
+`{theme motif}` examples: 手牌魚 → "light teal murloc/aquatic ambiance, faint
+bubbles (no large fish)"; 龍 → "faint dragon-scale texture + distant ember glow (no
+dragon figure)"; 惡魔 → "faint arcane sigils + soft purple ember haze (no demon)".
 
 Codex invocation gotchas (validated on `ringnaga`):
 - Do NOT pass `writable_roots`. The default `--sandbox workspace-write` already allows writing inside cwd; adding `writable_roots` once caused an 11+ minute hang.
@@ -157,24 +178,47 @@ uv run video2yt-transcribe \
 
 Text comes from the script (preserves correct terms / punctuation); whisperx provides only timestamps. Splits by Chinese sentence punctuation (`。`, `！`, `？`). Pass `--max-block-chars N` to additionally split sentences longer than N chars at semicolons/commas (`；，、;,`) — useful when the script uses commas/semicolons instead of periods in long sentences (the `ringnaga` script had a 60-char block that ran 12 seconds before this flag existed).
 
-### Step 5 — Compose the intro MP4
+### Step 5 — Compose the dynamic intro MP4
 
-**Input**: `intro.mp3` + `intro_bg.png` + `intro.srt`.
-**Output**: `output/<project>/<title>/<title>.mp4` (1080p, 30fps, h264 + aac).
-**Tool**: existing `video2yt-compose`.
+**Input**: `intro.mp3` + `intro_bg.png` + `intro.srt` + `intro_cards.txt` + the
+女老板 mascot (`assets/cta/src/mascot_raw.png`).
+**Output**: `output/<project>/intro.mp4` (1920×1080, 30fps, h264 + aac).
+**Tool**: `video2yt-intro` (the dynamic composer — Option A: single big card spotlight).
 
-```bash
-uv run video2yt-compose \
-  --audio  output/<project>/intro.mp3 \
-  --image  output/<project>/intro_bg.png \
-  --srt    output/<project>/intro.srt \
-  --title  back2back_intro \
-  -o       output/<project>/
+The 女老板 mascot dances as the on-screen narrator while the currently-introduced
+card is shown large, top-center, and swapped in time with the narration; the
+subtitle is burned bottom-left (bold W6). A reusable dark scrim
+(`assets/intro/intro_scrim.png`) is auto-overlaid on the background so white
+subtitles stay legible and the mascot/cards pop regardless of the generated bg.
+
+Author a per-project `intro_cards.txt`, one card per line in display order:
+
+```
+# <png in assets/cards> | <中文卡名 matched in intro.srt> [| <start> <end>]
+double_stitch_needle_zhTW_bgs_512.png | 雙重縫針
+balinda_stonehearth_zhTW_bgs_512.png  | 巴琳達‧石爐
 ```
 
-Then move/rename the result to `output/<project>/intro.mp4` so Step 7 can reference it cleanly.
+Each card shows from the SRT block where its 中文卡名 first appears (forward cursor,
+so a teaser mention can't steal a later card's slot) until the next card; an
+explicit `| <start> <end>` overrides. A name that matches no block fails fast.
 
-`compose.render` was patched in this session to probe the audio and pass `-t <audio_duration>` to ffmpeg, working around `-shortest` not stopping the looped image stream when AAC flushes. Output now matches the audio within ~80ms.
+```bash
+uv run video2yt-intro \
+  --audio  output/<project>/intro.mp3 \
+  --bg     output/<project>/intro_bg.png \
+  --srt    output/<project>/intro.srt \
+  --cards  output/<project>/intro_cards.txt \
+  -o       output/<project>/intro.mp4
+```
+
+No `--title` (the card art already carries the card name; the channel title lives
+in the YouTube title/thumbnail). Output is merge-ready (1920×1080/30fps/h264/AAC48k).
+
+> The legacy static composer (`video2yt-compose`: one still image + SRT, no mascot)
+> still exists for non-BG/simple intros. `compose.render` probes the audio and
+> passes `-t <audio_duration>` to work around `-shortest` not stopping a looped
+> still when AAC flushes.
 
 ### Step 6 — Burn N Bilibili segments (five-stage pipeline)
 
@@ -564,9 +608,9 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 1 — write intro script (term-research first if BG topic; see spec Step 1)
 - [ ] Step 1 (parallel) — kick off `uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &` NOW so Step 6 sources download in the background while you do Steps 1–5 (see spec Step 1 tip; `-o` MUST be the `temp/` dir, not `output/<project>/`)
 - [ ] Step 2 — TTS via `tts_quick.py`
-- [ ] Step 3 — bg image via `image_quick.py` (Codex backend default)
+- [ ] Step 3 — bg image via `video2yt-image` (Codex backend default; subjectless cool/dark bg — see Step 3)
 - [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
-- [ ] Step 5 — compose intro via `video2yt-compose`
+- [ ] Step 5 — compose dynamic intro via `video2yt-intro` (author `intro_cards.txt`)
 - [ ] Step 6 — burn N Bilibili segments via `video2yt`
 - [ ] Step 6 covers the full per-segment pipeline (fetch → stems → subtitle → music-mix → burn) in one `video2yt` invocation. Per-segment skip flags `--no-subtitle` / `--no-music-swap` replace the old Step 6.5 / 6.6 sub-steps. See the table in §"Step 6 — Burn N Bilibili segments (five-stage pipeline)" above.
 - [ ] Step 7 — merge via `video2yt-merge`

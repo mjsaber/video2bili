@@ -1,5 +1,6 @@
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -181,6 +182,10 @@ def srt_to_ass(
     outline_px: int = 2,
     shadow_px: int = 0,
     margin_v: int = 80,
+    margin_l: int = 80,
+    margin_r: int = 80,
+    max_lines: int | None = None,
+    bold: bool = False,
 ) -> str:
     """Convert SRT text to ASS text with pixel-accurate script resolution.
 
@@ -191,6 +196,16 @@ def srt_to_ass(
     no shadow by default (``shadow_px`` configurable), and ``MarginV``
     configurable (default 80; lower values move bottom-aligned subtitles
     closer to the frame edge).
+
+    ``margin_l`` / ``margin_r`` (default 80/80) set the horizontal margins;
+    they shrink the usable width for line-wrapping and are written into the
+    ASS style. The dynamic-intro composer raises ``margin_r`` so a
+    bottom-left subtitle clears the right-side mascot.
+
+    ``max_lines`` (default ``None`` = unbounded) caps the rendered lines per
+    block: when a block wraps to more than ``max_lines``, the overflow lines
+    are merged into the last kept line (a stderr warning is emitted), so the
+    subtitle never grows tall enough to collide with overlays above it.
 
     ``position`` maps to an ASS ``Alignment`` value: ``"bottom"`` -> 2
     (bottom centre), ``"center"`` -> 5 (middle centre), ``"top"`` -> 8 (top
@@ -205,8 +220,6 @@ def srt_to_ass(
             f"invalid position {position!r}, expected one of "
             f"{sorted(_POSITION_TO_ALIGNMENT)}"
         )
-    margin_l = 80
-    margin_r = 80
     max_chars_per_line = _effective_chars_per_line(
         font_size=font_size,
         video_width=video_width,
@@ -247,6 +260,18 @@ def srt_to_ass(
                 wrapped_all.extend(wrapped)
         if not wrapped_all:
             continue
+        if max_lines is not None and len(wrapped_all) > max_lines:
+            # Merge the overflow lines into the last kept line so the block
+            # never renders more than max_lines tall. Mild horizontal overflow
+            # is accepted; we warn so the author can shorten the clause.
+            head = wrapped_all[: max_lines - 1]
+            tail = "".join(wrapped_all[max_lines - 1:])
+            wrapped_all = head + [tail]
+            print(
+                f"[compose] warning: subtitle block wrapped past {max_lines} "
+                f"lines, merged overflow: {tail[:30]!r}…",
+                file=sys.stderr,
+            )
         text = "\\N".join(_ass_escape_text(line) for line in wrapped_all)
         dialogue_lines.append(
             f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text}"
@@ -269,7 +294,7 @@ def srt_to_ass(
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_face},{font_size},"
         "&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
-        f"0,0,0,0,100,100,0,0,1,{outline_px},{shadow_px},{alignment},"
+        f"{-1 if bold else 0},0,0,0,100,100,0,0,1,{outline_px},{shadow_px},{alignment},"
         f"{margin_l},{margin_r},{margin_v},1\n"
         "\n"
         "[Events]\n"

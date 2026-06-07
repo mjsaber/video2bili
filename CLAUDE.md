@@ -28,10 +28,11 @@ uv run video2yt-stems temp/<dir>/<bv>.mp4                              # only St
 uv run video2yt-subtitle temp/<dir>/<bv>.mp4 --context-file output/<project>/subtitle_context.txt   # only Stage 3 (speech2srt)
 uv run video2yt-music-mix temp/<dir>/<bv>.mp4                          # only Stage 4 (CC0 bed)
 uv run video2yt-burn temp/<dir>/ --bv <bv> -o output/<bv>_final.mp4    # only Stage 5 (single ffmpeg)
-uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # intro composer
+uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T"   # legacy static intro composer (still image)
+uv run video2yt-intro --audio intro.mp3 --bg intro_bg.png --srt intro.srt --cards intro_cards.txt -o output/<project>/intro.mp4   # dynamic intro: 女老板 narrator + per-card spotlight + scrim
 scripts/append_cta.sh output/<project>/<battle1>_final.mp4             # append subscribe CTA to battle 1 (mid-roll) → <battle1>_final_cta.mp4
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --segment c.mp4 --label "C" --title "T"   # concat + loudnorm + chapters
-uv run --extra dev pytest                                              # run tests (526; bare `uv run pytest` grabs the wrong pytest — dev extra not synced by default)
+uv run --extra dev pytest                                              # run tests (552; bare `uv run pytest` grabs the wrong pytest — dev extra not synced by default)
 uv add <pkg>                                                           # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
 
@@ -108,6 +109,19 @@ For Hearthstone Battlegrounds video projects, **never draft the intro script bef
 - **Output filename**: `<bv>_final[_cut][_<speed>x][_preview].mp4`. The legacy `_with_danmaku` / `_clean` / `_subbed` pipeline-stage suffixes are gone (T7 of step6-restructure) since one ffmpeg pass does all three.
 - **Agent E2E test rule**: DO NOT run `rm -rf output/` or `rm -rf temp/` during E2E tests — that wipes every cached raw download and the outputs of unrelated videos. Clean only the specific `temp/<subfolder>/` under test, or just let the cache hit on the next run. This is a workflow rule, not a code invariant.
 
+### Dynamic intro (video2yt-intro)
+
+The `video2yt-intro` composer (`intro_compose.py`) builds the intro in ONE ffmpeg pass: dimmed looped bg → scrim overlay → SRT-timed card spotlights → animated 女老板 mascot → burned subtitle. These were all caught by codex review of the design (do not regress them):
+
+- **drawtext fontfile must be an ABSOLUTE `.ttc` path**: `fontfile='Hiragino Sans GB.ttc'` (basename) silently falls back to Verdana → CJK tofu. `resolve_font()` returns the first existing of `/System/Library/Fonts/Hiragino Sans GB.ttc` / `STHeiti Medium.ttc`.
+- **Dynamic text via `textfile=` + `expansion=none`**: never interpolate user/card text into the filtergraph (`: ' % \ ,` newline break it). The optional title is written to `_title.txt` and referenced by basename (cwd trick).
+- **`-framerate 30` before EVERY `-loop 1` image input**: looped stills default to 25 fps, so animation/gates would run at 25 and `-r 30` would duplicate frames.
+- **Half-open card gates** `enable='gte(t,Sk)*lt(t,Ek)'` (plain commas inside the `'…'` quotes), Sk/Ek quantized to 1/30 s, so adjacent cards never double-show a seam frame. The last card runs to the exact audio duration (unquantized, else it overshoots).
+- **First card has NO fade** (visible from t=0 lead-in); cards 2..N fade in. **Mascot rotate is bounded** `ow=rotw(0.045):oh=roth(0.045)` so the sway never clips.
+- **Card timing** is resolved from the SRT with a forward cursor (a card's 中文卡名 is matched only in blocks at/after the previous card's match); no match → fail fast (or use an explicit `| start end` override). Display starts must be strictly increasing.
+- **Subtitle legibility is decoupled from the bg**: a reusable dark scrim (`assets/intro/intro_scrim.png`, vignette + bottom gradient) is overlaid on the background, and the subtitle is bold W6 (ASS Bold=-1) at 54px, MarginL 80 / MarginR 680 (clears the mascot ~x1319) / MarginV 120, capped to 2 lines. Don't rely on the generated bg being dark enough.
+- **Card-name captions were removed** (the card art already shows the name); the top title defaults OFF (`--title` optional).
+
 ### Compose / merge
 
 - **compose SRT path escaping**: `compose.render` uses `cwd=<srt.parent>` and references the SRT by basename in the `subtitles` filter (same trick as `burn.py`). Absolute paths for `-i` inputs are fine because `-i` doesn't go through filter_complex.
@@ -137,15 +151,17 @@ src/video2yt/
 │                     #   + ephemeral cut-rewrite + pre-flight cleaned-ASS symlink
 ├── burn_cli.py       # video2yt-burn entry point
 ├── meta.py           # shared sidecar helpers: atomic JSON, first-1MB sha256, meta_matches
-├── compose.py        # ffmpeg wrapper for audio+image+SRT -> 1080p MP4 (intro flow, untouched)
+├── compose.py        # ffmpeg wrapper for audio+image+SRT -> 1080p MP4 (legacy static intro); srt_to_ass shared by intro_compose
 ├── compose_cli.py    # video2yt-compose entry point
+├── intro_compose.py  # dynamic intro: 女老板 narrator + SRT-timed card spotlight + scrim, single ffmpeg pass
+├── intro_cli.py      # video2yt-intro entry point
 ├── merge.py          # strict segment validation, concat + per-seg loudnorm, chapters embed
 ├── merge_cli.py      # video2yt-merge entry point
 ├── validate.py       # ffprobe + source/ASS/output validators
 └── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ```
 
-Tests live in `tests/test_smoke.py` (~530 tests covering fetch / burn / cli / compose / merge / music_library) plus `tests/test_stems.py` (23) / `tests/test_music_mix.py` (12) / `tests/test_subtitle.py` (~35 — speech2srt CLI wrapper) / `tests/test_burn_all.py` (23) / `tests/test_prefetch.py` (8 — video2yt-prefetch CLI). All external tools (ffmpeg, ffprobe, yt-dlp, song-remover, speech2srt, codex) are mocked at the `subprocess.run` boundary — no network, no real subprocess in CI. `tests/test_burn_real_ffmpeg.py` is opt-in (skipped unless ffmpeg+libass is on PATH) and exercises the chained-subtitles + amix graph against real ffmpeg — see T10 of the step6-restructure plan.
+Tests live in `tests/test_smoke.py` (~530 tests covering fetch / burn / cli / compose / merge / music_library) plus `tests/test_stems.py` (23) / `tests/test_music_mix.py` (12) / `tests/test_subtitle.py` (~35 — speech2srt CLI wrapper) / `tests/test_burn_all.py` (23) / `tests/test_prefetch.py` (8 — video2yt-prefetch CLI) / `tests/test_intro.py` (23 — video2yt-intro card-timeline + filtergraph). All external tools (ffmpeg, ffprobe, yt-dlp, song-remover, speech2srt, codex) are mocked at the `subprocess.run` boundary — no network, no real subprocess in CI. `tests/test_burn_real_ffmpeg.py` is opt-in (skipped unless ffmpeg+libass is on PATH) and exercises the chained-subtitles + amix graph against real ffmpeg — see T10 of the step6-restructure plan.
 
 `cli.run()` flow (the orchestrator, T7 of step6-restructure):
 
