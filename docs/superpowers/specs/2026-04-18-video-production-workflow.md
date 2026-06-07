@@ -29,7 +29,7 @@ Final layout for `back2back/`:
 output/back2back/
 ├── intro_script.txt              # Step 1 source
 ├── intro_script_prompt.txt       # (optional, if generated)
-├── intro_image_prompt.txt        # Step 3 source (subjectless, cool/dark — see Step 3)
+├── intro_image_prompt.txt        # Step 3 source (subjectless, warm mid-key — see Step 3)
 ├── intro_cards.txt               # Step 5 source (<png> | <中文卡名> [| start end])
 ├── thumbnail_bg_prompt.txt       # Bonus step source
 ├── intro.mp3                     # Step 2 output
@@ -140,18 +140,22 @@ Codex backend (default) calls `codex exec` with the `image_gen` tool; native out
 **Art direction for the DYNAMIC intro (Step 5).** The intro background is no
 longer a hero-subject splash — the 女老板 mascot is now the on-screen figure, so a
 big creature/character in the bg fights her. Author `intro_image_prompt.txt` as a
-**subjectless environment** with a **cool, dark palette** (so the warm-gold mascot +
-white subtitles pop). Fixed scaffold + one per-theme slot:
+**subjectless environment** with a **warm, mid-key palette** (amber / honey-gold /
+candle-orange firelight, cozy and inviting — matches the warm cover + mascot, kills
+the gloom), but **keep the right half + lower-left locally dimmer** so the warm-gold
+mascot + white subtitles still read. Fixed scaffold + one per-theme slot:
 
 > Cinematic 16:9 atmospheric ENVIRONMENT backdrop for a HS Battlegrounds tutorial —
 > NO main character/creature/figure (the host mascot is overlaid separately). Cozy
-> fantasy tavern + moonlit harbor night, soft glow, shallow depth of field, muted
-> **COOL and DARK** palette dominated by deep navy/indigo/teal (kept LOW in value
-> across the lower-left subtitle area and the entire right mascot area); warm gold
-> only as small accents; the comp's signature colour only as a small CONTAINED glow,
-> never a warm/bright full-field wash. {theme motif}. Darker on the right half +
-> bottom-right + upper-center-left + a top strip; soft focal glow low-center;
-> gentle vignette. No text, letters, numbers, logos, watermarks, UI, faces.
+> fantasy tavern + moonlit harbor night, soft glow, shallow depth of field,
+> **WARM and MID-KEY** palette dominated by amber/honey-gold/candle-orange firelight
+> (brightened, golden, welcoming, NOT gloomy); deep teal/indigo only as cool
+> counter-accents, never the dominant field. IMPORTANT: even though warm overall,
+> keep the value noticeably LOWER and calmer across the **lower-left subtitle area**
+> and the **entire right mascot area** so overlaid white subtitles + the warm-gold
+> host stay readable. {theme motif}. Darker on the right half + bottom-right +
+> upper-center-left + a top strip; brightest warm focal glow low-center / center
+> background; gentle vignette. No text, letters, numbers, logos, watermarks, UI, faces.
 
 `{theme motif}` examples: 手牌魚 → "light teal murloc/aquatic ambiance, faint
 bubbles (no large fish)"; 龍 → "faint dragon-scale texture + distant ember glow (no
@@ -405,16 +409,19 @@ A duplicated block (e.g. one under 繁體, another under 简体) makes the seque
 
 **Input**: bg image (Step 3 style), logo PNG, **zhTW BGS** card art PNG, 8-char two-tier title.
 **Output**: `output/<project>/thumbnail.png` (1280x720).
-**Tools**: `video2yt-research-card` (download card art), `video2yt-thumbnail` (base render), `scripts/thumbnail_polish.py` (committed polish pass — vignette + 8-char two-tier title).
+**Tools**: `video2yt-research-card` (download card art), `scripts/thumbnail_polish.py` (committed all-in-one **warm-tavern compositor** — bg lift + edge vignette + card + left scrim + 女老板 mascot + 8-char two-tier title).
 
-**Locked layout (2026-05-10, supersedes earlier `ringnaga` vertical-4-char recipe):**
+**Locked layout (2026-06-07 warm-tavern redesign, supersedes the 2026-05-10 dark layout):**
+
+The earlier recipe ran `video2yt-thumbnail` (base render) then a vignette+title-only polish, and read uniformly dark/cool in the feed. The redesign warms it and adds the brand mascot; `thumbnail_polish.py` is now a single self-contained pass over the raw pieces (bg + card + logo + mascot). All visual params are **locked constants in the script** — do NOT tweak per-project (consistent thumbnail brand is the point).
 
 - Canvas: **1280x720**.
-- **Top-left**: HSBG logo (`assets/hsbg_logo.png`), `--logo-target-w 180`, `--logo-margin 16`.
-- **Left half (below logo)**: **8-char two-tier title** (formula below).
-- **No season text** (S13 etc) — removed because it competed with the card.
-- **Right side**: card art bleeds off right + top + bottom. `--card-target-h 1100`, `--card-right-inset -180`, `--card-tilt-deg -18`, `--card-glow-expand 50`. Card supports the title; title is the primary message.
-- **Vignette**: radial darken corners ~30% in the polish pass.
+- **Background**: lifted (brightness ×1.12, saturation ×1.18) + faint warm tint — kills the near-black gloom. Radial vignette darkens the **EDGES** (center stays bright; the old polish had this inverted).
+- **Top-left**: HSBG logo (`assets/hsbg_logo.png`), 180px wide, 16px margin.
+- **Left half**: **8-char two-tier title** (formula below) over a **warm-charcoal LEFT gradient scrim** — a legible white-text anchor, not a pure-black slab.
+- **Center-right**: card art (zhTW BGS), tilted −8°, ~668px tall with a warm glow — the credibility hero; big = impact.
+- **Bottom-right**: **女老板 mascot** (`assets/cta/src/mascot_raw.png`) with a warm rim + halo — the bright brand focal point. Kept small so the card stays dominant. `--no-mascot` is a rare escape hatch.
+- **No season text** (S13 etc).
 
 **Title formula — 8-char two-tier:**
 
@@ -448,12 +455,12 @@ row 2 (secondary):  text=<4 字 payoff>
 
 **Card art**: use the **zhTW BGS art** for any BG card (繁體 card name matches the Taiwan audience). `video2yt-research-card` currently downloads enUS only — manually `curl https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<id>.png` into `assets/cards/<slug>_zhTW_bgs_512.png` until the CLI grows a `--locale` flag.
 
-**Background**: Codex `image_gen` via `video2yt-image --backend codex` (default), 16:9 atmospheric tavern/scene matched to topic. **No figures, characters, text, or logos** in the prompt. Keep top-left, top-right, far-left, and far-right bands darker so logo + title + card overlay cleanly.
+**Background**: Codex `image_gen` via `video2yt-image --backend codex` (default), 16:9 atmospheric tavern/scene matched to topic. **No figures, characters, text, or logos** in the prompt. The polish pass lifts + warms the bg, so it need not be bright — but keep the **left third darker** (title scrim) and the **bottom-right calmer** (mascot zone) so both overlay cleanly.
 
-**Invocation pattern:**
+**Invocation pattern (3 steps — `thumbnail_polish.py` now does the whole composite):**
 
 ```bash
-# 1. Background
+# 1. Background (1280x720)
 uv run video2yt-image --backend codex \
   --prompt-file output/<project>/thumbnail_bg_prompt.txt \
   --output      output/<project>/thumbnail_bg.png \
@@ -464,30 +471,17 @@ uv run video2yt-image --backend codex \
 curl -o assets/cards/<slug>_zhTW_bgs_512.png \
   https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<id>.png
 
-# 3. Base render — title pushed offscreen so CLI's vertical-title rendering doesn't paint
-uv run video2yt-thumbnail \
-  --bg     output/<project>/thumbnail_bg.png \
-  --logo   assets/hsbg_logo.png \
-  --card   assets/cards/<slug>_zhTW_bgs_512.png \
-  --title  "X" --season "" \
-  --orientation card-tilt-right \
-  --logo-target-w 180 --logo-margin 16 \
-  --font-size 1 --stroke-width 0 \
-  --title-anchor-x-abs 9000 \
-  --shared-top-y 30 \
-  --card-target-h 1100 --card-right-inset -180 \
-  --card-glow-expand 50 --card-tilt-deg -18 \
-  --output output/<project>/thumbnail_pre_polish.png
-
-# 4. Polish pass (vignette + 8-char two-tier title)
+# 3. Warm-tavern compositor (bg lift + vignette + card + scrim + mascot + title)
 uv run python scripts/thumbnail_polish.py \
-  --input     output/<project>/thumbnail_pre_polish.png \
+  --bg        output/<project>/thumbnail_bg.png \
+  --card      assets/cards/<slug>_zhTW_bgs_512.png \
   --output    output/<project>/thumbnail.png \
   --primary   "<4 字流派>" \
   --secondary "<4 字 payoff>"
+# --logo / --mascot default to assets/hsbg_logo.png and assets/cta/src/mascot_raw.png
 ```
 
-`thumbnail_compose.py` still supports three orientations (`card-tilt-right` default, plus `vertical-left` and `horizontal-bottom` legacy), but **all new projects MUST use `card-tilt-right` + the 2-tier polish-pass title**. Do not invent a new layout per project.
+The old `video2yt-thumbnail` base render is no longer used in this recipe (the script composites the card + logo itself). `src/video2yt/thumbnail.py` and its CLI remain in the tree for legacy/other uses, but **all new projects MUST use `thumbnail_polish.py`** — do not invent a new layout per project.
 
 `video2yt-research-card` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL). `--style auto` picks `bgs` for BATTLEGROUND-set cards, `render` for constructed.
 
@@ -608,13 +602,13 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 1 — write intro script (term-research first if BG topic; see spec Step 1)
 - [ ] Step 1 (parallel) — kick off `uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &` NOW so Step 6 sources download in the background while you do Steps 1–5 (see spec Step 1 tip; `-o` MUST be the `temp/` dir, not `output/<project>/`)
 - [ ] Step 2 — TTS via `tts_quick.py`
-- [ ] Step 3 — bg image via `video2yt-image` (Codex backend default; subjectless cool/dark bg — see Step 3)
+- [ ] Step 3 — bg image via `video2yt-image` (Codex backend default; subjectless warm mid-key bg — see Step 3)
 - [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
 - [ ] Step 5 — compose dynamic intro via `video2yt-intro` (author `intro_cards.txt`)
 - [ ] Step 6 — burn N Bilibili segments via `video2yt`
 - [ ] Step 6 covers the full per-segment pipeline (fetch → stems → subtitle → music-mix → burn) in one `video2yt` invocation. Per-segment skip flags `--no-subtitle` / `--no-music-swap` replace the old Step 6.5 / 6.6 sub-steps. See the table in §"Step 6 — Burn N Bilibili segments (five-stage pipeline)" above.
 - [ ] Step 7 — merge via `video2yt-merge`
-- [ ] Bonus — thumbnail (`video2yt-research-card` → `image_quick.py` for bg → `thumbnail_compose.py --orientation card-tilt-right`)
+- [ ] Bonus — thumbnail (`video2yt-research-card` + `video2yt-image` for bg → `scripts/thumbnail_polish.py` warm-tavern compositor)
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`
 - [ ] Step 9 — upload via `youtube_upload.py`
 - [ ] Step 10 — post subscribe-CTA comment via `scripts/post_comment.py` (MANDATORY after every upload; recap the comp + 按讚/訂閱/小鈴鐺)
