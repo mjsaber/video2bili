@@ -455,27 +455,32 @@ def _best_distinct_pair(
 ) -> list[VideoSummary] | None:
     """Pick a high-traction pair of summaries from DISTINCT streamers.
 
-    With ``require_distinct_core_card`` the two picks must also run *different*
-    core_cards — used for the 英雄/饰品 axes so a pair surfaced there is
-    genuinely "same hero/trinket, two *different* builds" and never re-lists a
-    流派 (same-core_card) pair.
+    With ``require_distinct_core_card`` the two picks must also run two KNOWN,
+    *different* core_cards — used for the 英雄/饰品 axes so a pair surfaced there
+    is genuinely "same hero/trinket, two *different* builds" and never re-lists a
+    流派 (same-core_card) pair. A blank core_card is "unknown", NOT "different":
+    a pair where either side's comp is unidentified can't support the "不同打法"
+    claim, so it is rejected (and never emitted with an unknown core card).
 
     Scans every (anchor, partner) candidate in play-count order (highest first)
     and returns the first that satisfies the constraints, so the higher-played
     summary leads the pair. Crucially it does NOT anchor only on the single
     highest-play summary: when that top video can pair only with same-streamer
-    or (for the distinct-core_card axes) same-core_card entries, a valid pair
-    built from lower-play summaries still exists and must not be silently
+    or (for the distinct-core_card axes) same/blank-core_card entries, a valid
+    pair built from lower-play summaries still exists and must not be silently
     dropped. Returns None only when no pair satisfies the constraints.
     """
     ordered = sorted(group, key=lambda x: x.candidate.play_count, reverse=True)
     for i, anchor in enumerate(ordered):
+        anchor_card = anchor.core_card.strip()
         for partner in ordered[i + 1:]:
             if partner.candidate.streamer == anchor.candidate.streamer:
                 continue
-            if require_distinct_core_card and \
-                    partner.core_card.strip() == anchor.core_card.strip():
-                continue
+            if require_distinct_core_card:
+                partner_card = partner.core_card.strip()
+                if not anchor_card or not partner_card or \
+                        anchor_card == partner_card:
+                    continue
             return [anchor, partner]
     return None
 

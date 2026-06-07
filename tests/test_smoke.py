@@ -5902,6 +5902,57 @@ def test_topic_group_hero_pairs_finds_pair_when_top_video_cannot_anchor():
     assert pairs[0].summaries[0].candidate.bvid == "BVb"
 
 
+def test_topic_group_hero_pairs_rejects_blank_core_card():
+    """A blank core_card is 'unknown', not 'different' — a 英雄 pair must never be
+    emitted when either side's comp is unidentified (can't claim 不同打法)."""
+    from video2yt import topic
+    a = _topic_summary(
+        candidate=_topic_candidate(bvid="BVa", streamer="郭枫", play=100000),
+        core_card="戒指龙", hero="玛维",
+    )
+    b = _topic_summary(  # core_card unknown
+        candidate=_topic_candidate(bvid="BVb", streamer="瓦莉拉", play=90000),
+        core_card="", hero="玛维",
+    )
+    assert topic.group_hero_pairs([a, b]) == []
+
+
+def test_topic_group_hero_pairs_skips_blank_card_but_keeps_known_pair():
+    """The highest-play 玛维 video has an unknown comp, so it can't pair — but two
+    lower videos with KNOWN distinct comps still form a valid pair (no silent
+    drop, and no unknown core card emitted)."""
+    from video2yt import topic
+    a = _topic_summary(  # top play, unknown comp
+        candidate=_topic_candidate(bvid="BVa", streamer="郭枫", play=100000),
+        core_card="", hero="玛维",
+    )
+    b = _topic_summary(
+        candidate=_topic_candidate(bvid="BVb", streamer="瓦莉拉", play=90000),
+        core_card="戒指龙", hero="玛维",
+    )
+    c = _topic_summary(
+        candidate=_topic_candidate(bvid="BVc", streamer="景清", play=80000),
+        core_card="背靠背", hero="玛维",
+    )
+    pairs = topic.group_hero_pairs([a, b, c])
+    assert len(pairs) == 1
+    assert {s.candidate.bvid for s in pairs[0].summaries} == {"BVb", "BVc"}
+    assert all(s.core_card.strip() for s in pairs[0].summaries)
+
+
+def test_topic_group_trinket_pairs_rejects_blank_core_card():
+    from video2yt import topic
+    a = _topic_summary(
+        candidate=_topic_candidate(bvid="BVa", streamer="郭枫", play=100000),
+        core_card="合唱鱼", trinket="废品回收",
+    )
+    b = _topic_summary(
+        candidate=_topic_candidate(bvid="BVb", streamer="景清", play=90000),
+        core_card="", trinket="废品回收",
+    )
+    assert topic.group_trinket_pairs([a, b]) == []
+
+
 def test_topic_group_hero_pairs_skips_blank_hero():
     from video2yt import topic
     s1 = _topic_summary(candidate=_topic_candidate(streamer="郭枫"), hero="")
