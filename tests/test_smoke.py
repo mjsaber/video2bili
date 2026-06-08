@@ -239,11 +239,10 @@ def good_av_durations(monkeypatch):
 
 
 def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch, good_av_durations):
-    captured = {}
+    cmds = []
 
     def fake_run(cmd, **kwargs):
-        captured["cmd"] = cmd
-        captured["kwargs"] = kwargs
+        cmds.append(cmd)
         # Simulate yt-dlp producing the raw video + danmaku XML
         (tmp_path / "BV191DpBmE2t.mp4").write_bytes(b"fake video")
         (tmp_path / "BV191DpBmE2t.danmaku.xml").write_bytes(
@@ -254,83 +253,86 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch, good_av_dura
 
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
 
+    url = "https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x"
     video, xml, from_cache = download.fetch(
-        url="https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x",
-        temp_dir=tmp_path,
-        quality=1080,
-        browser="chrome",
+        url=url, temp_dir=tmp_path, quality=1080, browser="chrome",
         bv_id="BV191DpBmE2t",
     )
     assert from_cache is False
 
-    cmd = captured["cmd"]
-    assert cmd[0] == "yt-dlp"
-    # cookies
-    assert "--cookies-from-browser" in cmd
-    assert "chrome" in cmd
-    # format with quality — h264 is the default codec
-    fmt_idx = cmd.index("-f")
-    assert "height<=1080" in cmd[fmt_idx + 1]
-    assert "[vcodec^=avc1]" in cmd[fmt_idx + 1]
-    assert cmd[fmt_idx + 1].endswith("/b")  # fallback sentinel
-    # raw danmaku XML via --write-subs + --sub-langs
-    assert "--write-subs" in cmd
-    assert "--sub-langs" in cmd
-    sl_idx = cmd.index("--sub-langs")
-    assert cmd[sl_idx + 1] == "danmaku"
-    # postprocessor is NOT used anymore — biliass is called from Python
-    assert "--use-postprocessor" not in cmd
-    # output template contains BV id and %(ext)s
-    out_idx = cmd.index("--output")
-    assert "BV191DpBmE2t" in cmd[out_idx + 1]
-    assert "%(ext)s" in cmd[out_idx + 1]
-    # URL at end
-    assert cmd[-1] == "https://www.bilibili.com/video/BV191DpBmE2t/?spm_id_from=x"
+    # TWO calls: danmaku XML (native downloader) then video (+ optional aria2c).
+    assert len(cmds) == 2
+    danmaku_cmd = next(c for c in cmds if "--write-subs" in c)
+    video_cmd = next(c for c in cmds if "-f" in c)
+
+    # danmaku call: skip the video, native downloader (NEVER aria2c — it chokes
+    # on Bilibili's deflate danmaku XML), no -f
+    assert "--skip-download" in danmaku_cmd
+    assert danmaku_cmd[danmaku_cmd.index("--sub-langs") + 1] == "danmaku"
+    assert "--downloader" not in danmaku_cmd
+    assert "-f" not in danmaku_cmd
+    # video call: format with quality (h264 default), no subs
+    assert "--write-subs" not in video_cmd
+    fmt = video_cmd[video_cmd.index("-f") + 1]
+    assert "height<=1080" in fmt
+    assert "[vcodec^=avc1]" in fmt
+    assert fmt.endswith("/b")  # fallback sentinel
+    # both calls: yt-dlp, cookies, output template, url last, no postprocessor
+    for c in cmds:
+        assert c[0] == "yt-dlp"
+        assert "--cookies-from-browser" in c and "chrome" in c
+        assert "--use-postprocessor" not in c
+        out_idx = c.index("--output")
+        assert "BV191DpBmE2t" in c[out_idx + 1] and "%(ext)s" in c[out_idx + 1]
+        assert c[-1] == url
 
     assert video == tmp_path / "BV191DpBmE2t.mp4"
-    assert xml.suffix == ".xml"
     assert xml == tmp_path / "BV191DpBmE2t.danmaku.xml"
 
 
-def test_fetch_uses_aria2c_when_available(tmp_path, monkeypatch, good_av_durations):
+def test_fetch_uses_aria2c_for_video_not_danmaku(tmp_path, monkeypatch, good_av_durations):
+    """aria2c speeds up the video download but MUST NOT touch the danmaku XML
+    (it fails on Bilibili's deflate-encoded subs with libz::inflate())."""
     monkeypatch.setattr(
         "video2yt.download.shutil.which",
         lambda name: "/opt/homebrew/bin/aria2c" if name == "aria2c" else None,
     )
-    captured = {}
+    cmds = []
     def fake_run(cmd, **kw):
-        captured["cmd"] = cmd
+        cmds.append(cmd)
         (tmp_path / "BV.mp4").write_bytes(b"v")
         (tmp_path / "BV.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>x</d></i>")
         return MagicMock(returncode=0)
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
     download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
-    cmd = captured["cmd"]
-    assert "--downloader" in cmd
-    assert cmd[cmd.index("--downloader") + 1] == "aria2c"
-    assert "--downloader-args" in cmd
-    assert cmd[-1] == "https://x/video/BV"  # url still last
+    danmaku_cmd = next(c for c in cmds if "--write-subs" in c)
+    video_cmd = next(c for c in cmds if "-f" in c)
+    assert "--downloader" in video_cmd
+    assert video_cmd[video_cmd.index("--downloader") + 1] == "aria2c"
+    assert "--downloader-args" in video_cmd
+    assert "--downloader" not in danmaku_cmd  # critical: native subs download
+    assert video_cmd[-1] == "https://x/video/BV"
 
 
 def test_fetch_skips_aria2c_when_unavailable(tmp_path, monkeypatch, good_av_durations):
     monkeypatch.setattr("video2yt.download.shutil.which", lambda name: None)
-    captured = {}
+    cmds = []
     def fake_run(cmd, **kw):
-        captured["cmd"] = cmd
+        cmds.append(cmd)
         (tmp_path / "BV.mp4").write_bytes(b"v")
         (tmp_path / "BV.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>x</d></i>")
         return MagicMock(returncode=0)
     monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
     download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
-    assert "--downloader" not in captured["cmd"]
+    assert all("--downloader" not in c for c in cmds)
 
 
 def test_fetch_uses_quality_720(tmp_path, monkeypatch, good_av_durations):
     def fake_run(cmd, **kwargs):
-        fmt_idx = cmd.index("-f")
-        assert "height<=720" in cmd[fmt_idx + 1]
+        if "-f" in cmd:  # only the video call carries -f (danmaku call doesn't)
+            assert "height<=720" in cmd[cmd.index("-f") + 1]
         (tmp_path / "BV.mp4").write_bytes(b"v")
         (tmp_path / "BV.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>x</d></i>"
@@ -347,8 +349,8 @@ def test_fetch_uses_quality_720(tmp_path, monkeypatch, good_av_durations):
 ])
 def test_fetch_format_spec_uses_codec(tmp_path, monkeypatch, codec, expected_tag, good_av_durations):
     def fake_run(cmd, **kwargs):
-        fmt_idx = cmd.index("-f")
-        assert expected_tag in cmd[fmt_idx + 1]
+        if "-f" in cmd:
+            assert expected_tag in cmd[cmd.index("-f") + 1]
         (tmp_path / "BV.mp4").write_bytes(b"v")
         (tmp_path / "BV.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
@@ -360,8 +362,8 @@ def test_fetch_format_spec_uses_codec(tmp_path, monkeypatch, codec, expected_tag
 
 def test_fetch_format_spec_auto_has_no_codec_filter(tmp_path, monkeypatch, good_av_durations):
     def fake_run(cmd, **kwargs):
-        fmt_idx = cmd.index("-f")
-        assert "[vcodec^=" not in cmd[fmt_idx + 1]
+        if "-f" in cmd:
+            assert "[vcodec^=" not in cmd[cmd.index("-f") + 1]
         (tmp_path / "BV.mp4").write_bytes(b"v")
         (tmp_path / "BV.danmaku.xml").write_bytes(
             b"<i><d p='1,1,25,16777215,1,0,0,0'>hi</d></i>"
@@ -427,7 +429,7 @@ def test_fetch_downloads_when_no_cache(tmp_path, monkeypatch, good_av_durations)
     video, xml, from_cache = download.fetch(
         "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
     )
-    assert call_count["n"] == 1
+    assert call_count["n"] == 2
     assert from_cache is False
 
 
@@ -447,7 +449,7 @@ def test_fetch_downloads_when_xml_missing_from_cache(tmp_path, monkeypatch, good
     video, xml, from_cache = download.fetch(
         "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
     )
-    assert call_count["n"] == 1
+    assert call_count["n"] == 2
     assert from_cache is False
 
 
@@ -465,7 +467,7 @@ def test_fetch_downloads_when_video_missing_from_cache(tmp_path, monkeypatch, go
     video, xml, from_cache = download.fetch(
         "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
     )
-    assert call_count["n"] == 1
+    assert call_count["n"] == 2
     assert from_cache is False
 
 
@@ -495,7 +497,7 @@ def test_fetch_quarantines_truncated_audio_cache_and_redownloads(tmp_path, monke
     video, xml, from_cache = download.fetch(
         "https://x/video/BV123", tmp_path, 1080, "chrome", "BV123"
     )
-    assert call_count["n"] == 1  # yt-dlp invoked despite cache presence
+    assert call_count["n"] == 2  # yt-dlp invoked despite cache presence
     assert from_cache is False
     assert (tmp_path / "BV123.mp4.broken").exists()
     assert (tmp_path / "BV123.danmaku.xml.broken").exists()

@@ -5,11 +5,17 @@ import shutil
 import subprocess
 from pathlib import Path
 
-# aria2c flags: 16 parallel connections per file, 1 MiB chunks, unlimited
-# retries (-m0/--max-tries=0) with a short timeout — survives Bilibili's flaky
-# CDN mirrors (upos-*-mirror* read-timeouts) that make yt-dlp's single-stream
+# aria2c flags: 16 parallel connections per file, 1 MiB chunks, BOUNDED retries
+# (--max-tries=10, NOT unlimited — a genuinely dead mirror must fail fast, not
+# hang the pipeline) with a 20s stall timeout. Survives Bilibili's flaky CDN
+# mirrors (upos-*-mirror* read-timeouts) that make yt-dlp's single-stream
 # downloader give up. A no-op when aria2c isn't installed.
-_ARIA2C_ARGS = "aria2c:-x16 -s16 -k1M -m0 --retry-wait=2 --timeout=20"
+#
+# IMPORTANT: aria2c is applied ONLY to the video/audio download, NEVER to the
+# danmaku XML — aria2c chokes on Bilibili's deflate-encoded danmaku XML with
+# `libz::inflate() failed` (see project_bilibili_download_robustness), so the
+# danmaku is fetched in a separate native-downloader yt-dlp call.
+_ARIA2C_ARGS = "aria2c:-x16 -s16 -k1M --max-tries=10 --retry-wait=2 --timeout=20"
 
 
 def _maybe_aria2c_flags() -> list[str]:
@@ -154,17 +160,26 @@ def fetch(
     output_template = str(temp_dir / f"{bv_id}.%(ext)s")
     format_spec = _build_format_spec(quality, codec)
 
-    cmd = [
+    # Two yt-dlp calls. The danmaku XML MUST use yt-dlp's native downloader —
+    # aria2c chokes on Bilibili's deflate-encoded danmaku XML (`libz::inflate()
+    # failed`), and yt-dlp fetches subs BEFORE the video, so a bare
+    # `--downloader aria2c` on a combined call aborts Stage 1 before the video
+    # ever downloads. So aria2c is scoped to the video/audio call only.
+    base = [
         "yt-dlp",
         "--cookies-from-browser", browser,
-        "-f", format_spec,
-        "--write-subs",
-        "--sub-langs", "danmaku",
         "--output", output_template,
-        *_maybe_aria2c_flags(),
-        url,
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    # 1. Danmaku XML only, native downloader.
+    subprocess.run(
+        [*base, "--skip-download", "--write-subs", "--sub-langs", "danmaku", url],
+        check=True, capture_output=True, text=True,
+    )
+    # 2. Video (+ audio merge), aria2c when available for flaky-mirror resilience.
+    subprocess.run(
+        [*base, "-f", format_spec, *_maybe_aria2c_flags(), url],
+        check=True, capture_output=True, text=True,
+    )
 
     # Find the actual video file (yt-dlp may choose mp4 or mkv)
     video_candidates = (
