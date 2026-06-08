@@ -173,6 +173,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--no-danmaku", action="store_true",
+        help=(
+            "Tolerate a source with no danmaku (e.g. a low-traffic re-upload / "
+            "切片 account) instead of failing Stage 1's empty-ASS guard. The "
+            "danmaku layer is simply empty (invisible); subtitle + music-swap "
+            "still apply. WITHOUT this flag, zero danmaku stays a hard error so "
+            "a failed danmaku download is still caught."
+        ),
+    )
+    parser.add_argument(
         "--device", default="remote", choices=["cpu", "mps", "auto", "remote"],
         help=(
             "Stage 2 (song-remover) separation device. Default: 'remote' "
@@ -231,6 +241,7 @@ def run(args: argparse.Namespace) -> Path:
         browser=args.browser,
         font_face=args.font_face,
         font_size=args.font_size,
+        require_danmaku=not args.no_danmaku,
     )
     timings["fetch"] = time.monotonic() - t0
 
@@ -241,6 +252,11 @@ def run(args: argparse.Namespace) -> Path:
     video_path = fetch_result.raw_video
     ass_path = fetch_result.danmaku_ass
     n_danmaku = fetch_result.n_danmaku
+    if args.no_danmaku and n_danmaku == 0:
+        _log(
+            "WARNING: source has no danmaku (--no-danmaku) — burning without "
+            "a danmaku layer (subtitle + music-swap still apply)"
+        )
 
     # Per-segment output subdir mirrors the temp subdir name.
     output_subdir = args.output_dir / temp_subdir.name

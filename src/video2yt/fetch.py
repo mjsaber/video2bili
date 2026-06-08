@@ -117,6 +117,7 @@ def fetch_and_build(
     browser: str = "chrome",
     font_face: str = "Hiragino Sans GB",
     font_size: int | None = None,
+    require_danmaku: bool = True,
 ) -> FetchResult:
     """Stage 1: download raw mp4 + danmaku XML, generate the un-cut danmaku ASS.
 
@@ -170,7 +171,7 @@ def fetch_and_build(
         font_size=resolved_font_size,
     )
 
-    n_danmaku = validate.check_ass(danmaku_ass)
+    n_danmaku = validate.check_ass(danmaku_ass, require_dialogue=require_danmaku)
     elapsed = time.monotonic() - t_start
 
     return FetchResult(

@@ -1,8 +1,22 @@
 """Thin yt-dlp subprocess wrapper. The biliass invocation lives in fetch.py."""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
+
+# aria2c flags: 16 parallel connections per file, 1 MiB chunks, unlimited
+# retries (-m0/--max-tries=0) with a short timeout — survives Bilibili's flaky
+# CDN mirrors (upos-*-mirror* read-timeouts) that make yt-dlp's single-stream
+# downloader give up. A no-op when aria2c isn't installed.
+_ARIA2C_ARGS = "aria2c:-x16 -s16 -k1M -m0 --retry-wait=2 --timeout=20"
+
+
+def _maybe_aria2c_flags() -> list[str]:
+    """`--downloader aria2c …` if aria2c is on PATH, else empty."""
+    if shutil.which("aria2c"):
+        return ["--downloader", "aria2c", "--downloader-args", _ARIA2C_ARGS]
+    return []
 
 
 class TruncatedDownloadError(RuntimeError):
@@ -147,6 +161,7 @@ def fetch(
         "--write-subs",
         "--sub-langs", "danmaku",
         "--output", output_template,
+        *_maybe_aria2c_flags(),
         url,
     ]
     subprocess.run(cmd, check=True, capture_output=True, text=True)

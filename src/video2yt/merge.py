@@ -159,14 +159,24 @@ def _build_filter_complex(segments: list[Segment]) -> str:
     n = len(segments)
     parts: list[str] = []
 
+    # Per-segment VIDEO: force CFR 30fps + rebase PTS to 0 BEFORE concat.
+    # The concat filter silently drops frames from any input with PTS
+    # discontinuities (e.g. a stream-copy-concatenated `_cta` segment whose
+    # internal join leaves a timestamp gap) — that cost ~23s on needle_duel.
+    # `fps=30` resamples each input to a continuous CFR stream (a no-op on
+    # already-clean 30fps CFR segments) and `setpts=PTS-STARTPTS` zeroes the
+    # start, so concat sees gap-free inputs and keeps every frame.
+    for i in range(n):
+        parts.append(f"[{i}:v]fps=30,setpts=PTS-STARTPTS[v{i}n]")
+
     # Per-segment audio: resample to 48k, loudnorm to -14 LUFS
     for i in range(n):
         parts.append(
             f"[{i}:a]aresample=48000,loudnorm=I=-14:TP=-1:LRA=11[a{i}n]"
         )
 
-    # Concat: interleave video + audio streams
-    concat_inputs = "".join(f"[{i}:v][a{i}n]" for i in range(n))
+    # Concat: interleave the normalized video + loudnorm'd audio streams
+    concat_inputs = "".join(f"[v{i}n][a{i}n]" for i in range(n))
     parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[outv][outa]")
 
     return ";".join(parts)

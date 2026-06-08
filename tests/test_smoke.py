@@ -131,6 +131,20 @@ def test_check_ass_returns_dialogue_count(tmp_path):
     assert validate.check_ass(f) == 3
 
 
+def test_check_ass_returns_zero_when_dialogue_not_required(tmp_path):
+    """--no-danmaku path: an empty danmaku ASS is accepted (returns 0) instead
+    of raising, so a legitimately danmaku-less source can still burn."""
+    f = tmp_path / "empty.ass"
+    f.write_text(
+        "[Script Info]\n\n[Events]\nFormat: Layer, Start, End, Style, Text\n",
+        encoding="utf-8",
+    )
+    assert validate.check_ass(f, require_dialogue=False) == 0
+    # default still guards (catches a failed danmaku download)
+    with pytest.raises(ValueError, match="Dialogue|danmaku"):
+        validate.check_ass(f)
+
+
 def test_check_output_raises_on_empty_file():
     source = _mk_info()
     output = _mk_info(size_bytes=0)
@@ -276,6 +290,41 @@ def test_fetch_builds_correct_yt_dlp_command(tmp_path, monkeypatch, good_av_dura
     assert video == tmp_path / "BV191DpBmE2t.mp4"
     assert xml.suffix == ".xml"
     assert xml == tmp_path / "BV191DpBmE2t.danmaku.xml"
+
+
+def test_fetch_uses_aria2c_when_available(tmp_path, monkeypatch, good_av_durations):
+    monkeypatch.setattr(
+        "video2yt.download.shutil.which",
+        lambda name: "/opt/homebrew/bin/aria2c" if name == "aria2c" else None,
+    )
+    captured = {}
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        (tmp_path / "BV.mp4").write_bytes(b"v")
+        (tmp_path / "BV.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>x</d></i>")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
+    cmd = captured["cmd"]
+    assert "--downloader" in cmd
+    assert cmd[cmd.index("--downloader") + 1] == "aria2c"
+    assert "--downloader-args" in cmd
+    assert cmd[-1] == "https://x/video/BV"  # url still last
+
+
+def test_fetch_skips_aria2c_when_unavailable(tmp_path, monkeypatch, good_av_durations):
+    monkeypatch.setattr("video2yt.download.shutil.which", lambda name: None)
+    captured = {}
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        (tmp_path / "BV.mp4").write_bytes(b"v")
+        (tmp_path / "BV.danmaku.xml").write_bytes(
+            b"<i><d p='1,1,25,16777215,1,0,0,0'>x</d></i>")
+        return MagicMock(returncode=0)
+    monkeypatch.setattr("video2yt.download.subprocess.run", fake_run)
+    download.fetch("https://x/video/BV", tmp_path, 1080, "chrome", "BV")
+    assert "--downloader" not in captured["cmd"]
 
 
 def test_fetch_uses_quality_720(tmp_path, monkeypatch, good_av_durations):
@@ -3718,6 +3767,12 @@ def test_build_filter_complex_has_concat_and_loudnorm():
     fc = _build_filter_complex(segs)
     # loudnorm applied to each audio input
     assert fc.count("loudnorm=I=-14:TP=-1:LRA=11") == 2
+    # each VIDEO input normalized to CFR 30fps + zeroed PTS before concat, so a
+    # segment with timestamp discontinuities (e.g. a stream-copy CTA clip) can't
+    # make the concat filter drop frames
+    assert fc.count("fps=30,setpts=PTS-STARTPTS") == 2
+    # the normalized video labels (not the raw [i:v]) feed concat
+    assert "[v0n][a0n][v1n][a1n]concat=n=2:v=1:a=1[outv][outa]" in fc
     # concat of 2 inputs straight to the final output labels
     assert "concat=n=2:v=1:a=1[outv][outa]" in fc
     # no burned-in progress bar overlay / highlight anymore
@@ -6745,6 +6800,44 @@ def test_fetch_invalid_url_raises(tmp_path, monkeypatch):
             url="https://www.youtube.com/watch?v=abc",
             temp_dir=tmp_path / "temp",
         )
+
+
+def test_fetch_tolerates_empty_danmaku_when_not_required(tmp_path, monkeypatch):
+    """--no-danmaku: a source whose biliass output has 0 Dialogue lines (a
+    low-traffic re-upload / 切片) must NOT fail Stage 1 when require_danmaku=False."""
+    _stub_fetch_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "video2yt.fetch.biliass.convert_to_ass",
+        lambda *a, **k: "[Events]\nFormat: Layer, Start, End, Style, Text\n",
+    )
+    result = _fetch_mod.fetch_and_build(
+        url="https://www.bilibili.com/video/BV191DpBmE2t/",
+        temp_dir=tmp_path / "temp",
+        require_danmaku=False,
+    )
+    assert result.n_danmaku == 0
+    assert result.danmaku_ass.exists()
+
+
+def test_fetch_raises_on_empty_danmaku_by_default(tmp_path, monkeypatch):
+    """Default (no --no-danmaku): zero danmaku stays a hard error so a failed
+    danmaku download is still caught."""
+    _stub_fetch_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "video2yt.fetch.biliass.convert_to_ass",
+        lambda *a, **k: "[Events]\nFormat: Layer, Start, End, Style, Text\n",
+    )
+    with pytest.raises(ValueError, match="Dialogue|danmaku"):
+        _fetch_mod.fetch_and_build(
+            url="https://www.bilibili.com/video/BV191DpBmE2t/",
+            temp_dir=tmp_path / "temp",
+        )
+
+
+def test_cli_parse_no_danmaku_flag():
+    from video2yt import cli
+    assert cli.parse_args(["https://x/video/BV"]).no_danmaku is False
+    assert cli.parse_args(["https://x/video/BV", "--no-danmaku"]).no_danmaku is True
 
 
 # ---------- T7: orchestrator five-stage chain ----------

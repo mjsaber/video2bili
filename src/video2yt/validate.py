@@ -69,8 +69,15 @@ def check_source(info: MediaInfo, requested_quality: int) -> list[str]:
     return warnings
 
 
-def check_ass(path: Path) -> int:
-    """Validate an ASS subtitle file. Returns Dialogue line count."""
+def check_ass(path: Path, require_dialogue: bool = True) -> int:
+    """Validate an ASS subtitle file. Returns Dialogue line count.
+
+    ``require_dialogue=True`` (default) raises if the file has zero Dialogue
+    lines — the guard that catches a download where danmaku failed to fetch.
+    Pass ``require_dialogue=False`` for an intentionally danmaku-less source
+    (e.g. a low-traffic re-upload, via ``--no-danmaku``): the empty ASS is
+    accepted and burns to an empty (invisible) danmaku layer.
+    """
     if not path.exists():
         raise ValueError(f"ASS file not found: {path}")
     try:
@@ -82,7 +89,7 @@ def check_ass(path: Path) -> int:
     dialogue_count = sum(
         1 for line in text.splitlines() if line.startswith("Dialogue:")
     )
-    if dialogue_count == 0:
+    if dialogue_count == 0 and require_dialogue:
         raise ValueError(
             f"ASS file has no Dialogue lines (no danmaku available): {path}"
         )

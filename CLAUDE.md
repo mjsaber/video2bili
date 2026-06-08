@@ -80,6 +80,7 @@ For Hearthstone Battlegrounds video projects, **never draft the intro script bef
 ### yt-dlp / Bilibili
 
 - **yt-dlp release cadence**: yt-dlp updates frequently because Bilibili's extractor rules shift. If downloads suddenly break, first try `uv lock --upgrade-package yt-dlp`.
+- **aria2c auto-used when on PATH**: `download.fetch` adds `--downloader aria2c --downloader-args "aria2c:-x16 -s16 -k1M -m0 …"` whenever `aria2c` is installed (16-connection, unlimited-retry) — survives Bilibili's flaky CDN mirrors (`upos-*-mirror*` read-timeouts) that make yt-dlp's single-stream downloader give up. No-op if aria2c isn't installed (`brew install aria2`). Separate from the merger-hiccup guard (`TruncatedDownloadError` quarantines a video whose muxed audio got truncated and re-downloads).
 - **Chrome cookie DB lock**: `--cookies-from-browser chrome` requires Chrome to not be holding the cookie database lock. If it fails, close Chrome first.
 - **Bilibili VIP-locked 1080p**: some BV sources only expose 480p/360p without a premium account (yt-dlp `-F` confirms with `1080P ... you have to become a premium member`). `video2yt-merge` enforces strict 1920x1080 30fps h264, so a 480p burnt segment will fail merge late. **Pre-flight**: after `video2yt-fetch`, eyeball the "probing source video" log — if it warns about lower-than-requested resolution, either upscale via `ffmpeg -i in.mp4 -vf "scale=1920:1080:flags=lanczos" -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -c:a copy out.mp4` or swap source.
 
@@ -125,7 +126,8 @@ The `video2yt-intro` composer (`intro_compose.py`) builds the intro in ONE ffmpe
 ### Compose / merge
 
 - **compose SRT path escaping**: `compose.render` uses `cwd=<srt.parent>` and references the SRT by basename in the `subtitles` filter (same trick as `burn.py`). Absolute paths for `-i` inputs are fine because `-i` doesn't go through filter_complex.
-- **merge strict mode**: all `--segment` inputs must be 1920x1080 30fps h264 AND ≥10s long, and there must be ≥3 segments. The 10s/3-segment rules mirror YouTube's chapter requirements — fewer/shorter chapters means YouTube discards the chapter list. No auto-normalization. Fail fast with all violations listed.
+- **merge strict mode**: all `--segment` inputs must be 1920x1080 30fps h264 AND ≥10s long, and there must be ≥3 segments. The 10s/3-segment rules mirror YouTube's chapter requirements — fewer/shorter chapters means YouTube discards the chapter list. No auto-normalization of *dimensions/codec* (those fail fast); but see the next bullet for timestamp normalization.
+- **merge CFR-normalizes each video input before concat**: `_build_filter_complex` runs `[i:v]fps=30,setpts=PTS-STARTPTS` on every segment before the concat filter. Without it, a segment with internal PTS discontinuities — notably a `scripts/append_cta.sh` stream-copy `_cta.mp4` whose internal CTA join leaves a timestamp gap — makes the concat **filter** silently drop frames (cost ~23s on needle_duel; merge's own output-duration check catches it as a >1s mismatch). `fps=30` is a no-op on already-clean CFR segments, so this is safe + general.
 - **Subscribe CTA is concatenated, NOT a merge segment**: the ~6.3s mascot CTA clip (`assets/cta/subscribe_cta.mp4`) is appended to the **first battle segment** via `scripts/append_cta.sh <battle1>_final.mp4` BEFORE merge (Step 6.5 of the workflow spec), so it plays mid-roll between battles 1 and 2 *inside* battle 1's chapter. Never pass it to merge as its own `--segment` — at <10s it would nuke the whole chapter list. Editable sources + regen instructions live in `assets/cta/` (README + `src/`).
 - **merge chapters**: there is no burned-in progress bar — segmentation is delivered as chapter markers. The **only officially-supported** YouTube chapter source is timestamps in the video description (≥3 ascending, first at 00:00, each ≥10s, exactly one block). merge produces two outputs: `<title>_chapters.txt` is the description paste (this is the supported path); `<title>_ffmeta.txt` is embedded into the MP4 via `-map_metadata`/`-map_chapters` as a best-effort extra — YouTube does NOT officially document reading embedded chapter atoms, so do NOT treat the embed as a safety net. Common breakage: a description with two timestamp blocks (繁體 + 简体) is not strictly ascending and YouTube discards the whole list — keep the block to exactly one occurrence.
 
@@ -188,6 +190,7 @@ Each stage logs its wall-clock to the per-run timings summary.
 --no-subtitle:           skip Stage 3 (STT subtitle)
 --subtitle-context-file: per-project free-form cleanup context for speech2srt (Stage 3)
 --no-music-swap:         skip Stage 4 (CC0 bed); Stage 5 maps source audio
+--no-danmaku:            tolerate a source with no danmaku (低播放搬运/切片) instead of failing Stage 1's empty-ASS guard; danmaku layer is just empty. WITHOUT it, zero danmaku stays a hard error (catches a failed danmaku download)
 --device {cpu,mps,auto,remote}: Stage 2 song-remover device (default remote = Modal GPU)
 --chunk-min N:           Stage 2 chunk length for --device remote (default 5)
 --keep-temp:             no-op (everything kept by default since T7)
