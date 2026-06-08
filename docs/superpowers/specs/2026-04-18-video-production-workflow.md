@@ -618,6 +618,7 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 5 — compose dynamic intro via `video2yt-intro` (author `intro_cards.txt`)
 - [ ] Step 6 — burn N Bilibili segments via `video2yt`
 - [ ] Step 6 covers the full per-segment pipeline (fetch → stems → subtitle → music-mix → burn) in one `video2yt` invocation. Per-segment skip flags `--no-subtitle` / `--no-music-swap` replace the old Step 6.5 / 6.6 sub-steps. See the table in §"Step 6 — Burn N Bilibili segments (five-stage pipeline)" above.
+- [ ] Step 6.5 — append the subscribe CTA to **battle 1** via `scripts/append_cta.sh <battle1>_final.mp4` → `<battle1>_final_cta.mp4` (plays mid-roll between battles, inside battle 1's chapter). Merge MUST use the `_cta` clip as battle 1's `--segment`; never pass the CTA as its own `--segment` (<10s nukes the chapter list). See spec Step 6.5.
 - [ ] Step 7 — merge via `video2yt-merge`
 - [ ] Bonus — thumbnail (`video2yt-research-card` + `video2yt-image` for bg → `scripts/thumbnail_polish.py` warm-tavern compositor)
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`
