@@ -177,7 +177,8 @@ def render_title_row(canvas, text, font_size, x, y, color, stroke_color,
 
 
 def build(bg_path: Path, card_path: Path, logo_path: Path,
-          mascot_path: Path | None, primary: str, secondary: str) -> Image.Image:
+          mascot_path: Path | None, primary: str, secondary: str,
+          tertiary: str | None = None) -> Image.Image:
     bg = Image.open(bg_path).convert("RGBA").resize((W, H), Image.LANCZOS)
     canvas = lift_warm(bg)
     canvas = apply_vignette(canvas, VIGNETTE)
@@ -198,8 +199,15 @@ def build(bg_path: Path, card_path: Path, logo_path: Path,
 
     render_title_row(canvas, primary, 180, 20, 140, (255, 255, 255, 255),
                      (0, 0, 0, 255), 16, -10, (10, 14), 12, 235)
-    render_title_row(canvas, secondary, 130, 30, 380, (245, 195, 75, 255),
-                     (70, 25, 0, 255), 12, -6, (7, 10), 10, 220)
+    if tertiary is None:
+        render_title_row(canvas, secondary, 130, 30, 380, (245, 195, 75, 255),
+                         (70, 25, 0, 255), 12, -6, (7, 10), 10, 220)
+    else:
+        # compact 3-row variant: secondary+tertiary share the gold payoff style
+        render_title_row(canvas, secondary, 130, 30, 355, (245, 195, 75, 255),
+                         (70, 25, 0, 255), 12, -6, (7, 10), 10, 220)
+        render_title_row(canvas, tertiary, 130, 30, 545, (245, 195, 75, 255),
+                         (70, 25, 0, 255), 12, -6, (7, 10), 10, 220)
     return canvas.convert("RGB")
 
 
@@ -213,6 +221,8 @@ def main() -> int:
     ap.add_argument("--output", required=True, type=Path, help="final thumbnail.png")
     ap.add_argument("--primary", required=True, help="4-char primary row (流派 name)")
     ap.add_argument("--secondary", required=True, help="4-char secondary payoff row")
+    ap.add_argument("--tertiary", default=None,
+                    help="optional 4-char third row (compact 3-row variant)")
     ap.add_argument("--logo", type=Path, default=DEFAULT_LOGO,
                     help=f"channel logo (default: {DEFAULT_LOGO})")
     ap.add_argument("--mascot", type=Path, default=DEFAULT_MASCOT,
@@ -225,9 +235,12 @@ def main() -> int:
         raise ValueError(
             f"primary and secondary must each be 4 CJK chars (got "
             f"{len(args.primary)}+{len(args.secondary)})")
+    if args.tertiary is not None and len(args.tertiary) != 4:
+        raise ValueError(f"tertiary must be 4 CJK chars (got {len(args.tertiary)})")
 
     mascot = None if args.no_mascot else args.mascot
-    img = build(args.bg, args.card, args.logo, mascot, args.primary, args.secondary)
+    img = build(args.bg, args.card, args.logo, mascot, args.primary, args.secondary,
+                args.tertiary)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     img.save(args.output)
     print(f"[polish] wrote {args.output} "
