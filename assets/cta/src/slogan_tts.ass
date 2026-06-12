@@ -12,5 +12,5 @@ Style: CTA,Hiragino Sans GB,128,&H0000D7FF,&H000000FF,&H00201004,&H64000000,1,0,
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:00.40,0:00:03.94,Hook,,0,0,0,,{\fad(180,150)}想了解最新最熱流派、猛猛上分嗎？
-Dialogue: 0,0:00:04.29,0:00:06.30,CTA,,0,0,0,,{\fad(150,0)\fscx70\fscy70\t(0,260,\fscx116\fscy116)}訂閱馬哥！
+Dialogue: 0,0:00:00.35,0:00:01.66,CTA,,0,0,0,,{\fad(120,0)\fscx70\fscy70\t(0,260,\fscx116\fscy116)}訂閱馬哥！
+Dialogue: 0,0:00:01.76,0:00:04.93,Hook,,0,0,0,,{\fad(150,120)}想看什麼陣容？留言告訴我！

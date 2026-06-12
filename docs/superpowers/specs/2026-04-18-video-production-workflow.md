@@ -315,7 +315,7 @@ Modal cost: ~$0.10 per 17-min segment, within Modal's $30/mo free tier for perso
 ### Step 6.5 — Append the subscribe CTA to the first battle segment
 
 **Input**: the first **battle** segment from Step 6 (the first gameplay segment, NOT the intro).
-**Output**: `<battle1>_final_cta.mp4` — battle 1 with the ~6.3s subscribe CTA appended.
+**Output**: `<battle1>_final_cta.mp4` — battle 1 with the ~5s subscribe+comment CTA appended.
 **Tool**: `scripts/append_cta.sh` + the shared asset `assets/cta/subscribe_cta.mp4`.
 
 ```bash
@@ -324,9 +324,15 @@ scripts/append_cta.sh output/<project>/<uploader1>：.../<bv1>_final.mp4
 ```
 
 The CTA is a faceless mascot clip (二次元 tavern-keeper girl + project BigTTS
-voice "訂閱馬哥！" + animated arrow → 訂閱 button). It is stream-copy concatenated
-onto the end of battle 1, so it plays **mid-roll between battle 1 and battle 2**
-(mid-roll converts better than a pre-roll ask). Because it rides **inside** battle
+voice), compact 2-beat (~5s, redesigned 2026-06-11 after CTA best-practice
+research): beat A 「訂閱馬哥！」 with the canonical click sequence (arrow clicks
+red 訂閱 → grey 已訂閱 → bell pops/shakes + the single Mixkit bell ding); beat B
+the spoken PRIMARY ask 「想看什麼陣容？留言告訴我！」 with a blue comment bubble
+(repeat the same question as the Step 10 pinned comment's opener). It is
+re-encode concatenated (filter-level concat — stream copy once produced a
+backward-pts join that made merge drop the tail) onto the end of battle 1, so it
+plays **mid-roll between battle 1 and battle 2** (mid-roll converts better than
+a pre-roll ask). Because it rides **inside** battle
 1's chapter, each chapter still satisfies YouTube's ≥10s rule and no stray
 chapter is created — do NOT pass the CTA to merge as its own `--segment`.
 The clip + its editable sources live in `assets/cta/` (see that folder's README

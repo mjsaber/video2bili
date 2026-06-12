@@ -9,9 +9,16 @@
 #   CTA_CLIP=/path/to/other_cta.mp4 scripts/append_cta.sh seg.mp4   # override clip
 #
 # Default output: <segment_stem>_cta.mp4 next to the input.
-# Stream-copy concat (no re-encode of the long battle) — both inputs already
-# share the burn output spec (1920x1080 30fps h264 yuv420p + AAC 48k), so the
-# join is lossless. A duration check catches any silent concat failure.
+#
+# Re-encode concat (filter-level), NOT stream copy. The old `-f concat -c copy`
+# join left the output's post-demux timestamps at the mercy of both files'
+# container metadata: on flyflag (2026-06-10) the join produced a BACKWARD pts
+# reset (dts 1433.87s -> 6.23s), which merge's fps=30 normalization cannot heal
+# (it only fills forward gaps) — concat then silently dropped the segment tail
+# + the whole CTA. Filter-level concat rebuilds timestamps from zero, so the
+# output is monotonic by construction. Costs a full re-encode (~5min for a
+# 24-min segment); output matches the burn spec (1920x1080 30fps h264 yuv420p
+# + AAC 48k) so merge strict mode passes. A duration check still guards the end.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,16 +38,17 @@ sv="$(vparams "$seg")"; sa="$(aparams "$seg")"
 cv="$(vparams "$CTA")"; ca="$(aparams "$CTA")"
 echo "[append_cta] segment : V[$sv] A[$sa]"
 echo "[append_cta] cta     : V[$cv] A[$ca]"
-if [ "$sv" != "$cv" ] || [ "$sa" != "$ca" ]; then
-  echo "[append_cta] WARNING: stream params differ — stream-copy concat may glitch at the join." >&2
-  echo "[append_cta]          If the output desyncs, re-encode the segment to the burn spec first." >&2
-fi
 
-list="$(mktemp)"
-seg_abs="$(cd "$(dirname "$seg")" && pwd)/$(basename "$seg")"
-printf "file '%s'\nfile '%s'\n" "$seg_abs" "$CTA" > "$list"
-ffmpeg -y -v error -f concat -safe 0 -i "$list" -c copy "$out"
-rm -f "$list"
+ffmpeg -y -v error -i "$seg" -i "$CTA" -filter_complex "
+ [0:v]fps=30,setpts=PTS-STARTPTS[v0];
+ [1:v]fps=30,setpts=PTS-STARTPTS[v1];
+ [0:a]aresample=48000,asetpts=PTS-STARTPTS[a0];
+ [1:a]aresample=48000,asetpts=PTS-STARTPTS[a1];
+ [v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]
+" -map "[v]" -map "[a]" \
+  -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 \
+  -c:a aac -b:a 192k -ar 48000 \
+  "$out"
 
 ds="$(fdur "$seg")"; dc="$(fdur "$CTA")"; do_="$(fdur "$out")"
 python3 - "$ds" "$dc" "$do_" "$out" <<'PY'
