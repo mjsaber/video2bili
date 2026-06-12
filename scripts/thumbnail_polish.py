@@ -231,12 +231,15 @@ def main() -> int:
                     help="omit the mascot (rare; brand consistency wants her in)")
     args = ap.parse_args()
 
-    # Brand default is 4 chars per row; 2-6 render fine (rows are laid out
-    # per-char), so allow the range — >6 overflows the left scrim.
-    for name, row in (("primary", args.primary), ("secondary", args.secondary),
-                      ("tertiary", args.tertiary)):
-        if row is not None and not 2 <= len(row) <= 6:
-            raise ValueError(f"{name} must be 2-6 CJK chars (got {len(row)})")
+    # Brand default is 4 chars per row. Rows are laid out per-char, so short
+    # rows render fine, but the max depends on font size: the 180px primary
+    # reaches ~700px at 4 chars (5 chars = ~870px, under the card art); the
+    # 130px secondary/tertiary stay clear of the card up to 5 chars.
+    for name, row, max_len in (("primary", args.primary, 4),
+                               ("secondary", args.secondary, 5),
+                               ("tertiary", args.tertiary, 5)):
+        if row is not None and not 2 <= len(row) <= max_len:
+            raise ValueError(f"{name} must be 2-{max_len} CJK chars (got {len(row)})")
 
     mascot = None if args.no_mascot else args.mascot
     img = build(args.bg, args.card, args.logo, mascot, args.primary, args.secondary,
