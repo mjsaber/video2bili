@@ -6279,6 +6279,38 @@ def test_topic_run_topic_orchestrator_writes_report(tmp_path, monkeypatch):
     assert "[新流派" in text  # nothing under output_root
 
 
+def test_topic_run_topic_prints_chat_ready_report_to_stdout(tmp_path, monkeypatch, capsys):
+    from video2yt import topic
+
+    streamers = [topic.Streamer(name="郭枫", uid=1), topic.Streamer(name="景清", uid=2)]
+    monkeypatch.setattr(
+        topic,
+        "fetch_recent_videos",
+        lambda s, **kw: [_topic_candidate(bvid=f"BV{s.uid}", streamer=s.name, play=90000)],
+    )
+    monkeypatch.setattr(topic, "fetch_danmaku_sample", lambda b, *a, **kw: ["d"])
+    monkeypatch.setattr(
+        topic,
+        "summarize_with_codex",
+        lambda cs, dm, **kw: [_topic_summary(candidate=c, strategy="戒指龙流") for c in cs],
+    )
+
+    topic.run_topic(
+        streamers=streamers,
+        days=7,
+        output_root=tmp_path / "no_output",
+        done_topics_file=None,
+        report_path=tmp_path / "out" / "report.md",
+        now_ts=1_700_000_000,
+    )
+    out = capsys.readouterr().out
+    # The full link-bearing report reaches stdout (not just the stderr log lines),
+    # so the agent always has the source URLs in context to relay verbatim.
+    assert "CHAT-READY REPORT" in out
+    assert "戒指龙流" in out
+    assert "bilibili.com/video/BV1" in out
+
+
 def test_topic_run_topic_applies_include_filter_only_to_mixed_streamers(tmp_path, monkeypatch):
     """BG-only streamers fetch with no include filter; mixed streamers get the
     战棋|战旗 filter so constructed-mode uploads are dropped before Codex."""
@@ -6306,7 +6338,7 @@ def test_topic_run_topic_applies_include_filter_only_to_mixed_streamers(tmp_path
     assert seen["瓦莉拉"] is topic.DEFAULT_INCLUDE_TITLE_RE
 
 
-def test_topic_run_topic_no_candidates_writes_empty_report(tmp_path, monkeypatch):
+def test_topic_run_topic_no_candidates_writes_empty_report(tmp_path, monkeypatch, capsys):
     from video2yt import topic
     monkeypatch.setattr(topic, "fetch_recent_videos", lambda s, **kw: [])
     summary_called: list = []
@@ -6326,6 +6358,8 @@ def test_topic_run_topic_no_candidates_writes_empty_report(tmp_path, monkeypatch
     assert report.exists()
     assert "没有任何流派" in report.read_text(encoding="utf-8")
     assert summary_called == [], "should not call codex when there are no candidates"
+    # The empty-candidate path must ALSO print the chat-ready block to stdout.
+    assert "CHAT-READY REPORT" in capsys.readouterr().out
 
 
 def test_topic_run_topic_swallows_per_streamer_fetch_failure(tmp_path, monkeypatch):

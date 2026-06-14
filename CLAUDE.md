@@ -49,6 +49,16 @@ uv add <pkg>                                                           # add a d
 
 When working on a multi-step video project (intro + multiple burnt segments + final merge), pass `-o output/<project>/` to every `video2yt` / `video2yt-compose` / `video2yt-merge` invocation so all artifacts land under one folder. Example: `output/back2back/` contains `intro.mp4`, segment subfolders, the final merged MP4, the YouTube thumbnail, and any scratch files. This keeps unrelated projects isolated and makes cleanup easy.
 
+## Topic selection rule (video2yt-topic output)
+
+`video2yt-topic` prints the **full link-bearing report to stdout** between
+`===== CHAT-READY REPORT … =====` markers (logs go to stderr; the same markdown
+is also written to `output/topics/<date>.md`). When presenting candidates:
+
+1. **Relay that stdout block verbatim** + `SendUserFile output/topics/<date>.md`. Do NOT hand-author a condensed candidate table — that is how source URLs get dropped.
+2. **EVERY candidate carries both streamers' `https://www.bilibili.com/video/<BVID>` URLs in the visible chat text** — including ones you are NOT recommending. Never name-drop a candidate without its links.
+3. Layer your `done_topics` / 补丁 annotations ON TOP of the verbatim block; don't replace it. (The report already flags `[已做过 → …]`, but cross-check label mismatches, e.g. 飞纳流 = 飞龙娜迦.)
+
 ## Battlegrounds workflow rule (intro-script drafting)
 
 For Hearthstone Battlegrounds video projects, **never draft the intro script before verifying the topic's terminology**. After the `ringnaga` mistake (drafted assuming "護戒" was a Spellcraft buff when it actually meant the card 戒指龍 / Ring Bearer), this is hard rule:

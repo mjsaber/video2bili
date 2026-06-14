@@ -707,6 +707,23 @@ def render_markdown(pairs: list[TopicPair], window_days: int, generated_at: str)
     return "\n".join(lines) + "\n"
 
 
+def _write_and_print_report(report_path: Path, markdown: str) -> None:
+    """Write the report to disk AND echo it to stdout.
+
+    The full link-bearing report (every candidate with both bilibili URLs) must
+    reach the chat verbatim; the agent relays this block and only LAYERS
+    done/patch annotations on top. It must never hand-author a condensed
+    candidate list (that is how source URLs get dropped — see the
+    topic-summary link rule). Logs elsewhere go to stderr; this goes to stdout.
+    """
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(markdown, encoding="utf-8")
+    print(f"[topic] wrote {report_path}", file=sys.stderr)
+    print("\n===== CHAT-READY REPORT (relay verbatim; do not retype candidates) =====")
+    print(markdown)
+    print("===== END CHAT-READY REPORT =====")
+
+
 def run_topic(
     *,
     streamers: list[Streamer],
@@ -753,14 +770,13 @@ def run_topic(
 
     if not candidates:
         print("[topic] no candidates; writing empty report", file=sys.stderr)
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
+        _write_and_print_report(
+            report_path,
             render_markdown(
                 [],
                 window_days=days,
                 generated_at=time.strftime("%Y-%m-%d", time.localtime(now_ts)),
             ),
-            encoding="utf-8",
         )
         return report_path
 
@@ -795,14 +811,12 @@ def run_topic(
     for pair in pairs:
         pair.score = score_pair(pair)
 
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
+    _write_and_print_report(
+        report_path,
         render_markdown(
             pairs,
             window_days=days,
             generated_at=time.strftime("%Y-%m-%d", time.localtime(now_ts)),
         ),
-        encoding="utf-8",
     )
-    print(f"[topic] wrote {report_path}", file=sys.stderr)
     return report_path
