@@ -176,6 +176,70 @@
       "duration": 228.4,
       "license": "CC BY 3.0",
       "attribution": "\"Backed Vibes Clean\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "8bit_dungeon_boss",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/8bit%20Dungeon%20Boss.mp3",
+      "sha256": "5f46f0195e2b166c9f9c672b9334515ff17e9d00cb4bf44edc085148fc5d6555",
+      "duration": 172.01,
+      "license": "CC BY 3.0",
+      "attribution": "\"8bit Dungeon Boss\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "bit_quest",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Bit%20Quest.mp3",
+      "sha256": "6467ae09a7ed2e95e021031d230cfc71175b9081845d2778c2c0240feb8f3c94",
+      "duration": 192.05,
+      "license": "CC BY 3.0",
+      "attribution": "\"Bit Quest\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "blipstream",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/BlipStream.mp3",
+      "sha256": "55f176312181c8711f146ec3faf7240c2b228c68fdbf8111370b9dcc829ae03a",
+      "duration": 284.87,
+      "license": "CC BY 3.0",
+      "attribution": "\"BlipStream\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "aces_high",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Aces%20High.mp3",
+      "sha256": "5448082a286a99c24b114cd751d0db2e0b99dc747a3d3d7f97e7e4f75f646acf",
+      "duration": 193.02,
+      "license": "CC BY 3.0",
+      "attribution": "\"Aces High\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "action",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Action.mp3",
+      "sha256": "193a6b08afeb085f669d43512f4648a779b10b230524653e3e33f8db8ff32d27",
+      "duration": 195.21,
+      "license": "CC BY 3.0",
+      "attribution": "\"Action\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "basic_implosion",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Basic%20Implosion.mp3",
+      "sha256": "72f3a5b2086e0452f5f6f3b10c97e4b267f222ed4b9fc777de340efbcfc8f523",
+      "duration": 189.54,
+      "license": "CC BY 3.0",
+      "attribution": "\"Basic Implosion\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "big_rock",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Big%20Rock.mp3",
+      "sha256": "1faf8048f3c772667a6f9d56a10a3803a0385efe09531c91fe72c4cf66c0a15e",
+      "duration": 230.95,
+      "license": "CC BY 3.0",
+      "attribution": "\"Big Rock\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
+    },
+    {
+      "name": "bass_walker",
+      "url": "https://archive.org/download/Incompetech/mp3-royaltyfree/Bass%20Walker.mp3",
+      "sha256": "094332b56f4bdd5446b17cbc87a40610518c3aec787c7e289ac6ef4e3eb3e817",
+      "duration": 161.54,
+      "license": "CC BY 3.0",
+      "attribution": "\"Bass Walker\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)"
     }
   ]
 }
