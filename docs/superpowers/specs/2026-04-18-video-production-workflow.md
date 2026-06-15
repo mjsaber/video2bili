@@ -582,9 +582,9 @@ All under `scripts/` (untracked by default — they're project-specific tooling,
 | Area | Status | Notes |
 |---|---|---|
 | `compose -shortest` bug | **Fixed** in this session | `compose.render` now probes audio duration and adds `-t <audio_duration>` as an output-side clamp. |
-| Promote `scripts/*.py` to CLIs | Pending | User originally chose option (A) — formalize as `video2yt-tts`, `video2yt-image`, `video2yt-thumbnail`, `video2yt-upload` with TDD. Current scripts are working but lack tests and are not installed as console scripts. |
+| Promote `scripts/*.py` to CLIs | Pending | User originally chose option (A) — formalize as `video2yt-tts`, `video2yt-image`, `video2yt-upload` with TDD. Current scripts are working but lack tests and are not installed as console scripts. (`video2yt-thumbnail` was the exception — deleted 2026-06-15; thumbnails use `scripts/thumbnail_polish.py` only.) |
 | Image fit aspect ratio | Improved (Codex 3:2) | Gemini outputs 1024x1024 (44% vertical loss to 16:9). Codex `image_gen` outputs 1536x1024 (3:2 — only ~16% loss). The `image_quick.py --backend codex` default benefits from this; can switch back via `--backend gemini`. |
-| Thumbnail font auto-fit | **Fixed** | Both `vertical-left` and `card-tilt-right` orientations now auto-shrink the title font in 4-pt steps when the stacked rows would overflow the available height. Logged to stderr when shrink fires. |
+| Thumbnail font auto-fit | Obsolete (tooling removed) | Historical: the `vertical-left` / `card-tilt-right` orientations auto-shrank the title font on overflow. Moot since `video2yt-thumbnail` was deleted 2026-06-15 — `scripts/thumbnail_polish.py` is the only thumbnail path now. |
 | OAuth app publishing | Pending (user-side) | While in Testing status, tokens expire in 7 days. To upload reliably long-term, publish the OAuth consent screen (or rotate tokens). |
 
 ## 7. Verification log — projects that have shipped through this pipeline
