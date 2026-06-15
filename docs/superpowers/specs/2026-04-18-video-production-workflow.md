@@ -497,7 +497,7 @@ uv run python scripts/thumbnail_polish.py \
 # --logo / --mascot default to assets/hsbg_logo.png and assets/cta/src/mascot_raw.png
 ```
 
-The old `video2yt-thumbnail` base render is no longer used in this recipe (the script composites the card + logo itself). `src/video2yt/thumbnail.py` and its CLI remain in the tree for legacy/other uses, but **all new projects MUST use `thumbnail_polish.py`** — do not invent a new layout per project.
+The old `video2yt-thumbnail` base render has been **removed** (deleted 2026-06-15 — `src/video2yt/thumbnail.py`, `thumbnail_cli.py`, and the `video2yt-thumbnail` console script are gone, so the wrong default layout can't be picked by mistake). **All thumbnails MUST use `scripts/thumbnail_polish.py`** — it composites bg + card + logo + mascot + two-tier title itself; do not invent a new layout per project.
 
 `video2yt-research-card` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL). `--style auto` picks `bgs` for BATTLEGROUND-set cards, `render` for constructed.
 
