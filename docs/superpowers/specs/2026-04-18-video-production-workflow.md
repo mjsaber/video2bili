@@ -564,7 +564,7 @@ All under `scripts/` (untracked by default — they're project-specific tooling,
 |---|---|---|
 | `scripts/tts_quick.py` | Volcengine BigTTS HTTP Chunked client | `requests`, `python-dotenv` |
 | `scripts/image_quick.py` | Image-gen via Codex (default) or Gemini, then crop/letterbox to target | `google-genai`, `Pillow`, `python-dotenv`, `codex` CLI |
-| `scripts/thumbnail_compose.py` | Pillow composite: bg + logo + (season + tilted card +) vertical/horizontal title with auto-shrink | `Pillow` |
+| `scripts/thumbnail_polish.py` | Warm-tavern composite (the ONLY thumbnail tool): bg lift + vignette + tilted card on the right + scrim + mascot + two-tier title (`--primary`/`--secondary`[/`--tertiary`]); all params locked constants | `numpy`, `Pillow` |
 | `video2yt-research-card` (`src/video2yt/research_card{,_cli}.py`) | Look up Hearthstone card on hearthstonejson.com and download 512px art | `requests` |
 | `scripts/youtube_upload.py` | YouTube Data API v3 OAuth + resumable upload + thumbnail set | `google-api-python-client`, `google-auth-oauthlib`, `google-auth-httplib2` |
 
