@@ -1,9 +1,23 @@
 """Thin yt-dlp subprocess wrapper. The biliass invocation lives in fetch.py."""
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
+
+
+def _cookie_flags(browser: str) -> list[str]:
+    """Cookie flags for yt-dlp. Prefer a Netscape cookies file when
+    ``VIDEO2YT_COOKIES_FILE`` is set and exists (workaround for yt-dlp's
+    ``--cookies-from-browser`` picking the wrong Chrome cookie partition —
+    e.g. an extension's `Storage/ext/.../Cookies` with no Bilibili SESSDATA,
+    which makes Bilibili return HTTP 412). Otherwise read from the browser.
+    """
+    cookies_file = os.environ.get("VIDEO2YT_COOKIES_FILE")
+    if cookies_file and Path(cookies_file).is_file():
+        return ["--cookies", cookies_file]
+    return ["--cookies-from-browser", browser]
 
 # aria2c flags: 16 parallel connections per file, 1 MiB chunks, BOUNDED retries
 # (--max-tries=10, NOT unlimited — a genuinely dead mirror must fail fast, not
@@ -42,7 +56,7 @@ def get_metadata(url: str, browser: str) -> dict:
     """
     cmd = [
         "yt-dlp",
-        "--cookies-from-browser", browser,
+        *_cookie_flags(browser),
         "--dump-json",
         "--skip-download",
         url,
@@ -167,7 +181,7 @@ def fetch(
     # ever downloads. So aria2c is scoped to the video/audio call only.
     base = [
         "yt-dlp",
-        "--cookies-from-browser", browser,
+        *_cookie_flags(browser),
         "--output", output_template,
     ]
     # 1. Danmaku XML only, native downloader.
