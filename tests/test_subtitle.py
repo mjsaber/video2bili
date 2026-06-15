@@ -177,6 +177,7 @@ def test_t3_cli_invokes_speech2srt_with_expected_argv(tmp_path, monkeypatch):
     assert "--max-line-chars" in argv
     assert "--force" in argv
     assert "--cleanup" in argv
+    assert "--cleanup-timeout" in argv  # raised above speech2srt's 1200s default
     assert "--context-file" in argv
     cf_idx = argv.index("--context-file")
     assert argv[cf_idx + 1] == str(ctx)

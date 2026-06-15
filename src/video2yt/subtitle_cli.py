@@ -42,11 +42,13 @@ from pathlib import Path
 from video2yt import compose, validate
 from video2yt.compose import _effective_chars_per_line
 
-# Hard wall-clock cap for the speech2srt subprocess. speech2srt has its own
-# --cleanup-timeout (default 1200s = 20 min) for the codex step; we set a
-# wider outer bound to also cover ASR upload + Volcengine polling. 30 min
-# is comfortable for the worst-case 17-min segment seen in production.
-SPEECH2SRT_TIMEOUT_SECONDS = 1800
+# Codex cleanup cap passed explicitly to speech2srt (its own default is only
+# 1200s = 20 min, which times out on long 17-28 min transcripts → raw 简体 subs
+# with uncorrected terms). 40 min gives codex headroom on the longest segments.
+CLEANUP_TIMEOUT_SECONDS = 2400
+# Hard wall-clock cap for the whole speech2srt subprocess (ASR upload +
+# Volcengine polling + the codex cleanup above). Must exceed CLEANUP_TIMEOUT.
+SPEECH2SRT_TIMEOUT_SECONDS = 3000
 
 
 def _log(msg: str) -> None:
@@ -197,6 +199,7 @@ def _build_speech2srt_argv(
     ]
     if not skip_cleanup:
         argv.append("--cleanup")
+        argv.extend(["--cleanup-timeout", str(CLEANUP_TIMEOUT_SECONDS)])
         if context_path is not None:
             argv.extend(["--context-file", str(context_path)])
     return argv
