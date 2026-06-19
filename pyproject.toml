@@ -30,6 +30,7 @@ subtitle = [
 [project.scripts]
 video2yt = "video2yt.cli:main"
 video2yt-burn = "video2yt.burn_cli:main"
+video2yt-cleanup = "video2yt.cleanup_cli:main"
 video2yt-compose = "video2yt.compose_cli:main"
 video2yt-fetch = "video2yt.fetch_cli:main"
 video2yt-image = "video2yt.image_gen_cli:main"

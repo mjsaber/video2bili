@@ -556,6 +556,19 @@ Template (adapt the first line to the actual comp each time):
 有想看的流派也歡迎在留言區許願！
 ```
 
+### Step 11 — Reclaim disk (`video2yt-cleanup`)
+
+**Run after Step 10, once the upload is confirmed.** Storage is limited, so each shipped video cleans up after itself and after the one before it.
+
+**Policy:** the CURRENT project's `temp/<source>/` caches are deleted (raw mp4 + stems + sidecars are all regenerable), but `output/<project>/` is KEPT as a one-period buffer; the PREVIOUS shipped project's entire `output/<project>/` folder is deleted (the video already lives on YouTube).
+
+```bash
+uv run video2yt-cleanup --project <project>          # DRY-RUN: prints the plan + reclaimable bytes
+uv run video2yt-cleanup --project <project> --yes     # actually delete
+```
+
+A "shipped project" = an `output/` subfolder carrying `youtube_metadata.json`; infra folders (`topics/`, `avatar/`, scratch) lack it and are never touched. Every delete passes `cleanup.assert_within` (refuses anything not strictly inside `./temp` or `./output`, and refuses the roots + the current project). NEVER hand-roll an `rm -rf temp/*<glob>*` — that is exactly what this CLI exists to replace. Flags: `--all-previous` (sweep every older project, not just the latest), `--no-prev` (purge current temp only), `--no-temp` (delete previous output only).
+
 ## 5. Scripts added by this workflow
 
 All under `scripts/` (untracked by default — they're project-specific tooling, but useful enough to be reused; promote to `src/video2yt/` if formalizing into proper CLIs).
@@ -630,6 +643,7 @@ we hit it. Address them in a batch after the video ships.
 - [ ] Step 8 — write `youtube_metadata.{txt,json}`
 - [ ] Step 9 — upload via `youtube_upload.py`
 - [ ] Step 10 — post subscribe-CTA comment via `scripts/post_comment.py` (MANDATORY after every upload; recap the comp + 按讚/訂閱/小鈴鐺)
+- [ ] Step 11 — reclaim disk via `video2yt-cleanup --project <project> --yes` (delete current project's temp/ caches + previous shipped project's output/ folder; dry-run first)
 
 ## Issues to fix later
 

@@ -32,7 +32,9 @@ uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T" 
 uv run video2yt-intro --audio intro.mp3 --bg intro_bg.png --srt intro.srt --cards intro_cards.txt -o output/<project>/intro.mp4   # dynamic intro: 女老板 narrator + per-card spotlight + scrim
 scripts/append_cta.sh output/<project>/<battle1>_final.mp4             # append subscribe CTA to battle 1 (mid-roll) → <battle1>_final_cta.mp4
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --segment c.mp4 --label "C" --title "T"   # concat + loudnorm + chapters
-uv run --extra dev pytest                                              # run tests (552; bare `uv run pytest` grabs the wrong pytest — dev extra not synced by default)
+uv run video2yt-cleanup --project <project>                            # LAST step after upload: DRY-RUN plan — purge current project's temp/ + delete previous shipped project's whole output/ folder
+uv run video2yt-cleanup --project <project> --yes                      # actually delete (reclaim disk; current output/<project>/ kept as a one-period buffer)
+uv run --extra dev pytest                                              # run tests (579; bare `uv run pytest` grabs the wrong pytest — dev extra not synced by default)
 uv add <pkg>                                                           # add a dep (NEVER edit pyproject.toml deps by hand)
 ```
 
@@ -119,6 +121,7 @@ For Hearthstone Battlegrounds video projects, **never draft the intro script bef
 - **`--keep-temp` is a no-op**: T7 of step6-restructure made the orchestrator preserve all per-stage caches by default (raw mp4 + xml + danmaku.ass + 4 stems + speech2srt sidecars + speech.cleaned.{srt,ass} + music_bed.wav). Flag kept for backwards CLI compat. To force a fresh run of a single stage, delete its meta sidecar (Stage 2 = `.stems_source_meta.json`; Stage 3 = both speech2srt sidecars OR use `video2yt-subtitle --force-asr`; Stage 4 = `<bv>.music_bed_meta.json`); to nuke a whole segment, delete the `temp/<dir>/` subfolder.
 - **Output filename**: `<bv>_final[_cut][_<speed>x][_preview].mp4`. The legacy `_with_danmaku` / `_clean` / `_subbed` pipeline-stage suffixes are gone (T7 of step6-restructure) since one ffmpeg pass does all three.
 - **Agent E2E test rule**: DO NOT run `rm -rf output/` or `rm -rf temp/` during E2E tests — that wipes every cached raw download and the outputs of unrelated videos. Clean only the specific `temp/<subfolder>/` under test, or just let the cache hit on the next run. This is a workflow rule, not a code invariant.
+- **`video2yt-cleanup` is the ONLY blessed way to reclaim disk after shipping — never hand-roll an `rm -rf temp/*<glob>*`** (a past glob once wiped 5 unrelated caches). Policy (user has limited storage): after a video is uploaded, the CURRENT project's `temp/<source>/` caches are deleted (regenerable) while `output/<project>/` is KEPT as a one-period buffer; the PREVIOUS shipped project's whole `output/<project>/` is deleted. A "shipped project" = a folder under `output/` carrying `youtube_metadata.json` — infra folders (`topics/`, `avatar/`, scratch) lack it and are never touched. The `--project` you name (or the inferred newest) MUST itself be a shipped project living inside `output/`; a non-shipped/infra folder or a path outside `output/` is refused (otherwise the real latest video would be mis-classified as "previous" and deleted). Current project's temp dirs are linked by two signals (matching `output/<project>/<segment>/` subfolder name **or** a `temp/<dir>/<bv>.mp4` for a BV referenced in the project). Every delete passes `cleanup.assert_within`, which refuses anything not strictly inside `./temp` or `./output` (and refuses the roots themselves + the current project). DRY-RUN is the default; `--yes` deletes; `--all-previous` sweeps every older project (default deletes only the single latest previous); `--no-prev` purges temp only. Run it as the final workflow step (after the subscribe comment).
 
 ### Dynamic intro (video2yt-intro)
 
@@ -169,11 +172,14 @@ src/video2yt/
 ├── intro_cli.py      # video2yt-intro entry point
 ├── merge.py          # strict segment validation, concat + per-seg loudnorm, chapters embed
 ├── merge_cli.py      # video2yt-merge entry point
+├── cleanup.py        # post-ship disk reclaim: find current project's temp/ caches +
+│                     #   previous shipped project's output/ folder; assert_within path guard
+├── cleanup_cli.py    # video2yt-cleanup entry point (dry-run by default, --yes to delete)
 ├── validate.py       # ffprobe + source/ASS/output validators
 └── cuts.py           # cut range parsing, normalization, keep_ranges, ASS rewriter
 ```
 
-Tests live in `tests/test_smoke.py` (~530 tests covering fetch / burn / cli / compose / merge / music_library) plus `tests/test_stems.py` (23) / `tests/test_music_mix.py` (12) / `tests/test_subtitle.py` (~35 — speech2srt CLI wrapper) / `tests/test_burn_all.py` (23) / `tests/test_prefetch.py` (8 — video2yt-prefetch CLI) / `tests/test_intro.py` (23 — video2yt-intro card-timeline + filtergraph). All external tools (ffmpeg, ffprobe, yt-dlp, song-remover, speech2srt, codex) are mocked at the `subprocess.run` boundary — no network, no real subprocess in CI. `tests/test_burn_real_ffmpeg.py` is opt-in (skipped unless ffmpeg+libass is on PATH) and exercises the chained-subtitles + amix graph against real ffmpeg — see T10 of the step6-restructure plan.
+Tests live in `tests/test_smoke.py` (~530 tests covering fetch / burn / cli / compose / merge / music_library) plus `tests/test_stems.py` (23) / `tests/test_music_mix.py` (12) / `tests/test_subtitle.py` (~35 — speech2srt CLI wrapper) / `tests/test_burn_all.py` (23) / `tests/test_prefetch.py` (8 — video2yt-prefetch CLI) / `tests/test_intro.py` (23 — video2yt-intro card-timeline + filtergraph) / `tests/test_cleanup.py` (28 — video2yt-cleanup path guards, shipped/stale-project safety + project/temp discovery). All external tools (ffmpeg, ffprobe, yt-dlp, song-remover, speech2srt, codex) are mocked at the `subprocess.run` boundary — no network, no real subprocess in CI. `tests/test_burn_real_ffmpeg.py` is opt-in (skipped unless ffmpeg+libass is on PATH) and exercises the chained-subtitles + amix graph against real ffmpeg — see T10 of the step6-restructure plan.
 
 `cli.run()` flow (the orchestrator, T7 of step6-restructure):
 
