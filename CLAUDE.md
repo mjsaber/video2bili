@@ -61,13 +61,15 @@ is also written to `output/topics/<date>.md`). When presenting candidates:
 2. **EVERY candidate carries both streamers' `https://www.bilibili.com/video/<BVID>` URLs in the visible chat text** — including ones you are NOT recommending. Never name-drop a candidate without its links.
 3. Layer your `done_topics` / 补丁 annotations ON TOP of the verbatim block; don't replace it. (The report already flags `[已做过 → …]`, but cross-check label mismatches, e.g. 飞纳流 = 飞龙娜迦.)
 
-## Battlegrounds workflow rule (intro-script drafting)
+## Battlegrounds workflow rule (intro from content, then term-check)
 
-For Hearthstone Battlegrounds video projects, **never draft the intro script before verifying the topic's terminology**. After the `ringnaga` mistake (drafted assuming "護戒" was a Spellcraft buff when it actually meant the card 戒指龍 / Ring Bearer), this is hard rule:
+The intro is built from the **actual content** of the two source videos, not guessed from the topic. Order (full SOP in `docs/superpowers/specs/2026-04-18-video-production-workflow.md`, Steps 1–4):
 
-1. Run `WebFetch https://search.bilibili.com/all?keyword=<策略名>` and read the top UP-主 video titles + descriptions.
-2. Confirm the 流派 pivots on the right card / hero (typically a 6-7星核心隨從).
-3. Use BG vocabulary (阵容/隨從/酒館/餵/疊屬性/吃雞), NOT constructed-mode vocabulary (牌組/起手/過渡). Full glossary in `docs/superpowers/specs/2026-04-18-video-production-workflow.md` Step 1.
+1. **Download both sources** (`video2yt-prefetch`), then **understand the content**: `video2yt-stems` + `video2yt-subtitle --skip-cleanup` (speech2srt runs ONCE, raw) → read the raw ASR + the danmaku text → write each video's 思路 → combine into one intro angle → draft `intro_script.txt`. Show the user the understanding + script together (review #1).
+2. **Term-check (HARD RULE) before TTS.** Verify every card/hero/異變/流派 against the in-game **zhTW card art** (download via `art.hearthstonejson.com/.../zhTW/...`), not fan sites. After `ringnaga` (護戒 = the card 戒指龍 / Ring Bearer, not a Spellcraft buff) and `midas_arrow` (简中「点金箭」= 台服「黃金箭」, an 異變 not a 饰品). Danmaku+topic often name the cards already — use them to term-check early. Correct `intro_script.txt`, THEN TTS (so you don't voice a wrong term and redo it).
+3. Use BG vocabulary (阵容/隨從/酒館/跳本/餵/疊屬性/吃雞 · 異變 not 畸變), NOT constructed-mode vocabulary (牌組/起手/過渡). Full glossary in the spec, Step 2.
+
+**Subtitle cleanup is done by Claude subagents, NOT a second speech2srt call** (Step 5): speech2srt runs once at understanding-time (`--skip-cleanup`); the burnt 繁體 subtitle is cleaned by splitting the raw SRT → parallel cleanup subagents (preserve block#+timestamps) → review subagent → `compose.srt_to_ass`. This avoids re-running the flaky Volcengine upload and the codex length-drift guard that silently falls back to raw 简体 subs.
 
 ## Known gotchas
 

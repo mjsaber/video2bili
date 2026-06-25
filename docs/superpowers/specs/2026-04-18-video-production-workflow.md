@@ -1,54 +1,54 @@
 # YouTube Video Production Workflow
 
-**Date**: 2026-04-18
-**Status**: Validated end-to-end on `back2back` project (S13 炉石战棋 教程)
+**Date**: 2026-04-18 (workflow reordered 2026-06-24)
+**Status**: Validated end-to-end; current step order shipped on `midas_arrow` (黃金箭異變).
 **Target audience**: Future Claude agents and the user, when producing similar topical YouTube videos from Bilibili source material.
 
 ## 1. Goal
 
-Take a topical brief (e.g. "S13 最強輪椅 背靠背流派 教程") and produce a publish-ready YouTube video with:
+Take a topic (two streamers on the same 流派/英雄/饰品) and produce a publish-ready YouTube video with:
 
-- A short (~30s) original spoken intro
-- One or more burnt-in Bilibili source segments (with danmaku) as the body
+- A short (~30s) original spoken intro **derived from the actual content of the two source videos** (not guessed from the topic title)
+- Two burnt-in Bilibili source segments (danmaku + cleaned 繁體 subtitle) as the body
 - A concatenated final MP4 with chapter markers + loudness normalization
 - A YouTube thumbnail
 - Localized title / description / tags
 - Uploaded to YouTube via API with all metadata pre-filled
 
-The pipeline is implemented as a sequence of 9 steps, each backed by an existing CLI command (`video2yt-*`) or a one-off script in `scripts/`.
+**Key ordering principle (2026-06-24 redesign):** download and *understand the real content first*, then write the intro from the combination of the two videos' 思路; verify terminology against the in-game card art; only then finish the body. The old "write the intro script first from the topic guess" order is retired.
+
+The pipeline is a sequence of steps, each backed by an existing CLI command (`video2yt-*`) or a one-off script in `scripts/`. Only Step 5's per-segment work is partly automated (`video2yt-burn` etc.); the rest is an agent following this SOP and invoking CLIs in order.
 
 ## 2. Per-project folder convention
 
-**Every artifact for a project MUST live under `output/<project>/`.** Use a short, lowercase, ASCII project name (e.g. `back2back`).
+**Every artifact for a project MUST live under `output/<project>/`.** Use a short, lowercase, ASCII project name (e.g. `midas_arrow`).
 
-Pass `-o output/<project>/` to every `video2yt`, `video2yt-compose`, and `video2yt-merge` invocation. CLAUDE.md documents this convention in the "Project folder convention" section.
+Pass `-o output/<project>/` to every `video2yt`, `video2yt-intro`, `video2yt-merge` invocation. CLAUDE.md documents this convention in the "Project folder convention" section.
 
-Final layout for `back2back/`:
+Final layout for `<project>/`:
 
 ```
-output/back2back/
-├── intro_script.txt              # Step 1 source
-├── intro_script_prompt.txt       # (optional, if generated)
-├── intro_image_prompt.txt        # Step 3 source (subjectless, warm mid-key — see Step 3)
-├── intro_cards.txt               # Step 5 source (<png> | <中文卡名> [| start end])
-├── thumbnail_bg_prompt.txt       # Bonus step source
-├── intro.mp3                     # Step 2 output
-├── intro.srt                     # Step 4 output
-├── intro_bg.png                  # Step 3 output (1920x1080, fitted)
-├── intro_bg_raw.png              # Step 3 raw (1536x1024 from Codex image_gen)
-├── intro.mp4                     # Step 5 output (dynamic intro: mascot + card spotlight)
-├── thumbnail_bg.png              # Bonus step bg
-├── thumbnail.png                 # Bonus step composed thumbnail (1280x720)
-├── <uploader>：<title>/          # Step 6 burnt segment 1
-│   └── BV...._final*.mp4
-├── <uploader>：<title>/          # Step 6 burnt segment 2
-│   └── BV...._final*.mp4
-├── back2back_final.mp4           # Step 7 merged final video
-├── back2back_final_chapters.txt  # Step 7 YouTube chapters (description paste)
-├── back2back_final_ffmeta.txt    # Step 7 ffmetadata embedded into the MP4
-├── youtube_metadata.txt          # Step 8 human-readable
-├── youtube_metadata.json         # Step 8 machine-readable (for Step 9)
-└── (uploaded video URL)          # Step 9 stdout
+output/<project>/
+├── content_understanding.md      # Step 2 — the two videos' 思路 + combined intro angle
+├── intro_script.txt              # Step 2 output (the narration; corrected in Step 3)
+├── intro_image_prompt.txt        # Step 4 source (subjectless, warm mid-key — see Step 4)
+├── intro_cards.txt               # Step 4 source (<png> | <中文卡名> [| start end])
+├── intro.mp3                     # Step 4 output (TTS)
+├── intro.srt                     # Step 4 output (forced-aligned)
+├── intro_bg.png                  # Step 4 output (1920x1080, fitted)
+├── intro_bg_raw.png              # Step 4 raw (1536x1024 from Codex image_gen)
+├── intro.mp4                     # Step 4 output (dynamic intro: mascot + card spotlight)
+├── subtitle_context.txt          # Step 5 — term table fed to the cleanup subagents
+├── thumbnail_bg.png / thumbnail.png  # Step 8
+├── <uploader>：<title>/          # Step 5 burnt segment 1 (+ _cta in Step 6)
+│   └── BV..._final.mp4
+├── <uploader>：<title>/          # Step 5 burnt segment 2
+│   └── BV..._final.mp4
+├── <title>.mp4                   # Step 7 merged final video
+├── <title>_chapters.txt          # Step 7 YouTube chapters (description paste)
+├── <title>_ffmeta.txt            # Step 7 ffmetadata embedded into the MP4
+├── youtube_metadata.json         # Step 9 (for Step 10 upload)
+└── subscribe_comment.txt         # Step 11 source
 ```
 
 ## 3. External dependencies and credentials
@@ -56,606 +56,382 @@ output/back2back/
 | Component | Where | Setup |
 |---|---|---|
 | `ffmpeg`, `ffprobe` | system PATH | `brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg` (must include libass) |
-| Volcengine BigTTS | API key | Volcano Ark console → API Key 管理 → create. Stored as `VOLCENGINE_API_KEY` in `.env`. Only the new (single-key) auth style works; legacy v1 endpoints need separate AppID. |
-| Codex CLI (default for image gen + Stage 3 subtitle cleanup) | `codex` in PATH, logged in | `brew install codex` then `codex login`. Uses ChatGPT auth; no separate API key required. NOT used by Step 4 intro forced-alignment (whisperx only). |
-| `speech2srt` CLI (Stage 3 subtitle backbone — Volcengine 火山 Seed-ASR) | `speech2srt` in PATH | One-time: `cd ~/code/speech2srt && uv tool install . --force`. Requires `VOLCENGINE_API_KEY` (same env var as BigTTS — single key works for both Volcano services if scoped right; otherwise create a separate key under 语音技术 → 豆包录音文件识别模型2.0). Cost ~¥0.0003/char, ≈ ¥0.1 per 4-min segment. |
-| `song-remover` CLI (Stage 2 stems backbone — Bandit-v2 multilingual separator) | `song-remover` in PATH | One-time: `cd ~/code/song-remover && uv tool install '.[remote]'` (the `[remote]` extra bakes the `modal` SDK in). Default `--device remote` needs `uv run modal token new` + Modal app deploys per `song-remover` README. |
-| Google Gemini (image-gen fallback) | API key | Google AI Studio → API key. Image-generation model requires a paid/billed key (free tier limit = 0). Stored as `GEMINI_API_KEY` in `.env`. Only needed when running `image_quick.py --backend gemini`. |
-| YouTube Data API v3 | OAuth client | Google Cloud Console → enable YouTube Data API v3 → create OAuth client (desktop app). Save JSON as `client_secret.json` (gitignored). First run opens browser for consent (test users must be allow-listed during testing mode). Token cached in `youtube_token.json` (gitignored). |
-| Hearthstone Battlegrounds logo | `assets/hsbg_logo.png` | One-time download from Fandom wiki (RGBA, 4098x2146). |
+| Volcengine BigTTS (Step 4 intro voice) | API key | Volcano Ark console → API Key 管理 → create. Stored as `VOLCENGINE_API_KEY` in `.env`. `video2yt-tts` reads it. |
+| `speech2srt` CLI (Step 2 ASR — Volcengine 火山 Seed-ASR) | `speech2srt` in PATH | One-time: `cd ~/code/speech2srt && uv tool install . --force`. Requires `VOLCENGINE_API_KEY`. Cost ~¥0.0003/char, ≈ ¥0.1 per 4-min segment. **Called exactly ONCE per segment now** (Step 2, `--skip-cleanup`); the subtitle cleanup no longer goes through speech2srt's codex path (see Step 5). |
+| `song-remover` CLI (Step 2 stems — Bandit-v2 multilingual separator) | `song-remover` in PATH | One-time: `cd ~/code/song-remover && uv tool install '.[remote]'` (the `[remote]` extra bakes the `modal` SDK in). Default `--device remote` needs `uv run modal token new` + Modal app deploys per `song-remover` README. |
+| Codex CLI (Step 4 image gen only) | `codex` in PATH, logged in | `brew install codex` then `codex login`. Uses ChatGPT auth; no separate API key. **No longer used for subtitle cleanup** — that moved to Claude subagents (Step 5). NOT used by Step 4 intro forced-alignment (whisperx only). |
+| Google Gemini (image-gen fallback) | API key | Google AI Studio → API key (paid/billed). `GEMINI_API_KEY` in `.env`. Only for `video2yt-image --backend gemini`. |
+| YouTube Data API v3 | OAuth client | Google Cloud Console → enable YouTube Data API v3 → desktop OAuth client. Save JSON as `client_secret.json` (gitignored). Token cached in `youtube_token.json` (gitignored, testing-mode expiry ~7 days). |
+| Hearthstone Battlegrounds logo | `assets/hsbg_logo.png` | One-time download from Fandom wiki (RGBA). |
 
-`.env` and all secrets live in repo root, gitignored via `.gitignore` (`.env`, `client_secret*.json`, `youtube_token.json`).
+`.env` and all secrets live in repo root, gitignored (`.env`, `client_secret*.json`, `youtube_token.json`).
 
-## 4. The 10-step pipeline
+## 4. The pipeline (Steps 0–12)
+
+> **Reorder note (2026-06-24):** the intro is now built *after* downloading and understanding the two source videos (Steps 1–2) and *after* verifying terminology (Step 3). speech2srt runs only once per segment (Step 2); the burnt 繁體 subtitle is cleaned by Claude subagents in Step 5, not by a second speech2srt call.
 
 ### Step 0 — 选题 (topic discovery)
 
-**Tool**: `uv run video2yt-topic --days 10` → writes `output/topics/<YYYY-MM-DD>.md`.
+**Tool**: `uv run video2yt-topic` → prints the full link-bearing report between `===== CHAT-READY REPORT … =====` markers to stdout, and writes `output/topics/<YYYY-MM-DD>.md`.
 
-It pairs two whitelisted streamers along **three axes** — same 核心卡 (流派), same 英雄, same 饰品 — and marks each pair 新 / 已做过. The 英雄 / 饰品 axes (added 2026-06-07) mean a topic can be a **hero tutorial or a trinket tutorial**, not only a comp: two streamers on the same hero (or same 饰品) with *different* builds is a valid 选题.
+It pairs two whitelisted streamers along **three axes** — same 核心卡 (流派), same 英雄, same 饰品 — and marks each pair 新 / 已做过. A topic can be a comp, a hero tutorial, or a trinket tutorial.
 
-**HARD RULE — every candidate surfaced in chat MUST carry BOTH streamers' Bilibili links.** Present each 选题 as `<名称>（新/已做过）— <streamer1 标题+链接> × <streamer2 标题+链接>`, for **ALL** candidates you mention, not just the recommended ones. **Never list a candidate by name only.** The report already contains every link, one per streamer line — relay those lines verbatim; do not drop links "to save space." Also surface the report file itself (`SendUserFile output/topics/<date>.md`) so the user always has the complete link-bearing list. (Added 2026-06-07 after links were repeatedly dropped for non-recommended picks — see memory `feedback_topic_summary_include_links`.)
+**HARD RULE — every candidate surfaced in chat MUST carry BOTH streamers' Bilibili links.** Relay the stdout report block **verbatim**, `SendUserFile output/topics/<date>.md`, and layer your done/补丁 annotations *on top* — never re-author a condensed table (that is how links get dropped). This applies to ALL candidates you mention, including ones you do NOT recommend. **Never name-drop a candidate without its two URLs** — and that includes the 推荐/跳过 section you write after the verbatim block (the script only protects the verbatim block; any sentence you add naming a candidate is a fresh chance to drop links). See memory `feedback_topic_summary_include_links`.
 
-**Auto-annotation is a hint, not ground truth.** It matches on core-card substrings, so it misses cross-script names and same-comp/different-core-card cases (e.g. `合唱鱼` ≈ already-done `鱼人合唱团`; `宰割者` = already-done `zaige`). Eyeball every 新-marked pick against `assets/topic/done_topics.txt` before recommending, and flag suspected-already-done ones explicitly.
+**Auto-annotation is a hint, not ground truth.** It matches core-card substrings, so it misses cross-script names and same-comp/different-core cases, and it can mis-bucket (e.g. it filed 黃金箭, an **異變/Anomaly**, under the 饰品 axis). Eyeball every 新-marked pick against `assets/topic/done_topics.txt`.
 
-### Step 1 — Write a 30-second script
+### Step 1 — 下载两条源 (download both sources)
 
-**Input**: brief outline (sentence or two), target length (~30s).
-**Output**: `output/<project>/intro_script.txt` (UTF-8 plain text, ~110 chars for 30s at 1.0x speed).
+**Input**: the two chosen Bilibili URLs.
+**Output**: `temp/<uploader>：<title>/<bv>.mp4` + `<bv>.danmaku.ass` (Stage 1 cache).
+**Tool**: `video2yt-prefetch`.
 
-**Tip — prefetch Step 6 sources in the background now**: kick off `uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &` at the START of Step 1. The slow yt-dlp source downloads for Step 6's burnt segments then run in the background while you do the bandwidth-free intro work (Steps 1–5), so the Stage 1 cache is warm by the time you reach Step 6. **Note the `-o temp/`**: prefetch's `-o` is the *temp* dir (it mirrors `video2yt-fetch`), and it MUST match the dir Step 6 fetches into. Step 6 (`video2yt`) reads its Stage 1 cache from `--temp-dir` (default `./temp`) — NOT from the `-o output/<project>/` you pass for the final MP4. Pointing prefetch at `output/<project>/` writes the cache where Step 6 never looks, so it would re-download from scratch (cache miss).
+```bash
+uv run video2yt-prefetch "<url1>" "<url2>" -o temp/
+```
 
-Hand-write or LLM-draft the script. Length rule of thumb: **3.7 chars/sec at speech_rate=0** (1.0x). For a 30s intro, aim for 100–120 Chinese chars.
+`video2yt-prefetch` serial-downloads both sources into the Stage 1 cache (truncation retry + low-res quarantine + fail-fast). **Note the `-o temp/`**: prefetch's `-o` is the *temp* dir and MUST match where Step 5 reads its cache (`./temp`), NOT `output/<project>/`.
 
-**Before drafting (HARD RULE — added after `ringnaga` mistake)**: when the topic involves a Hearthstone Battlegrounds 流派/阵容/卡牌, FIRST verify the terminology before writing any script. Steps:
-1. `WebFetch https://search.bilibili.com/all?keyword=<策略名>` to find the UP 主's video on the topic. Read the first few titles + descriptions.
-2. Confirm what the 流派 actually pivots on — usually a specific 6-7星核心隨從 or hero. The Chinese name often differs from the English mechanic ("護戒" = the card 戒指龍 = Ring Bearer, NOT a Spellcraft "ring" buff).
-3. Only after confirming with the user (or matching the source video) should you draft the script.
+**Pre-flight resolution check**: eyeball the prefetch log — each line reports `<W>x<H>`. Both must be 1920x1080 (merge is strict). A VIP-locked 480p/360p source must be swapped or upscaled before Step 5. (Bilibili download robustness — sequential not parallel, aria2c for the video stream, `--codec h265` fallback if the avc1 copy is truncated — see CLAUDE.md "yt-dlp / Bilibili".)
 
-**Battlegrounds vocabulary (use these, NOT constructed-mode terms)**:
+### Step 2 — 抽 speech + 内容理解 → intro 稿 (understand, then write the intro)
+
+**Input**: the two cached segments.
+**Output**: `content_understanding.md` + `intro_script.txt`.
+**Tools**: `video2yt-stems`, `video2yt-subtitle --skip-cleanup`, then Claude reads + writes.
+
+This is where speech2srt runs — **exactly once per segment**, raw:
+
+```bash
+# per segment:
+uv run video2yt-stems     "temp/<dir>/<bv>.mp4"                 # Stage 2: speech.wav (Modal GPU, ~5 min)
+uv run video2yt-subtitle  "temp/<dir>/<bv>.mp4" --skip-cleanup  # Stage 3 ASR, RAW (no codex, no context)
+```
+
+Then build understanding from two text sources:
+1. **Speech → text**: the raw `<bv>/speech.wav.speech2srt.srt` from the command above (Simplified, ASR errors — fine for understanding).
+2. **Danmaku → text**: extract the dialogue lines from `temp/<dir>/<bv>.danmaku.ass` (Stage 1 / biliass output) — independent of speech2srt.
+
+Read both for each video, write up each video's 思路 (what the comp/line actually does, key turns, the streamer's angle), then **combine the two into one intro angle**. Capture this in `content_understanding.md`, and draft the narration in `intro_script.txt` (繁體, ~100–120 chars for ~30s at 1.0x; hook first).
+
+**Review checkpoint #1**: show the user the content understanding + the intro script together before moving on (the user asked to see both).
+
+**Battlegrounds vocabulary (use these in the script, NOT constructed-mode terms)**:
 
 | Use | Don't use | Notes |
 |---|---|---|
 | 阵容 / 流派 / 體系 | 牌組 / 套牌 / 構築 | "牌组" is constructed-only |
 | 隨從 / 小弟 | 法術 (rare in BG) | The board is mostly minions |
-| 酒館 / 卡池 / 升級 | 抽牌 / 牌庫 | BG has a tavern, not a deck |
+| 酒館 / 卡池 / 升級(跳本) | 抽牌 / 牌庫 | BG has a tavern, not a deck |
 | 站位 / 排位 | 起手 / mulligan | "起手" is constructed |
 | 餵 / 養 / 疊屬性 | 過渡 | "過渡" sounds like deck-building |
-| 開局 / 中期 / 後期 / 終局 | 早期 / 後期 alone | OK in moderation |
+| 開局 / 中期 / 後期 / 終局 | — | |
 | 吃雞 / 吃八雞 / 上分 | — | BG ranking jargon |
-| 種族羈絆 (海盜 / 元素 / 機械 / 食屍鬼 / 娜迦 / 龍 / 野獸 / 惡魔 / 任務小隊) | 種族特性 | Use the official族群 names |
+| 種族羈絆 (海盜 / 元素 / 機械 / 食屍鬼 / 娜迦 / 龍 / 野獸 / 惡魔 / 任務小隊) | 種族特性 | Use official 族群 names |
 | 三聯 / 三合一 / 三星 | — | Combine 3 same minions |
-| 法術強化 (Spellcraft) | — | Tavern spells with a cost-modifier mechanic |
-| 加buff / 加屬性 | 增益 | More natural in BG context |
+| 異變 (Anomaly) | 畸變 / 機變 | 简中=畸变; 繁中(台服)=異變 |
 
-### Step 2 — TTS via Volcengine BigTTS
+> **The raw ASR from this step is for understanding only.** It is NOT reused as the burnt subtitle — Step 5 cleans it into 繁體 separately (so speech2srt's flaky Volcengine upload runs once, not twice). The single speech2srt call here is the only transcription cost.
 
-**Input**: `intro_script.txt`, voice ID, speech rate.
-**Output**: `output/<project>/intro.mp3`.
-**Script**: `scripts/tts_quick.py`.
-**API**: HTTP Chunked unidirectional (`POST https://openspeech.bytedance.com/api/v3/tts/unidirectional`).
+### Step 3 — 术语核对 (terminology verification — HARD RULE)
 
-```bash
-uv run python scripts/tts_quick.py \
-  --text-file output/<project>/intro_script.txt \
-  --output    output/<project>/intro.mp3 \
-  --speech-rate 0
-```
+**Input**: the cards / heroes / anomaly / 流派 named in `intro_script.txt`.
+**Output**: a verified zhTW term list; corrected `intro_script.txt`.
 
-Auth: `X-Api-Key: $VOLCENGINE_API_KEY` + `X-Api-Resource-Id: seed-tts-2.0`.
-Default voice: `zh_female_vv_uranus_bigtts`.
-Speech rate range: `[-50, 100]`; `0` = 1.0x, `100` = 2.0x, `-50` = 0.5x.
+For any Hearthstone Battlegrounds term, **verify against the in-game zhTW card art before finalizing the intro** (added after the `ringnaga` mistake; reinforced by `midas_arrow` where 简中「点金箭」turned out to be 台服「黃金箭」). Order of attack, cheapest first:
 
-### Step 3 — Background image via Codex `image_gen` (default) or Gemini (fallback)
+1. **Danmaku + topic first.** The danmaku usually names the key cards already (`midas_arrow`'s danmaku said 点金箭/金铜须 outright), so you can often confirm terms without the speech. Prefer this — it lets the term-check precede heavy work.
+2. **Download the official zhTW card art and read the name off it.** `video2yt-research-card --name "<enUS>"` to resolve the card id, then `curl https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<id>.png` (anomalies: the same path works with the `BG..._Anomaly_...` id). The card face is the source of truth — Blizzard's zh-tw card *library* is JS-rendered (WebFetch can't read it) and fan wikis 403. This is how `黃金箭` / `金銅鬚` / `卡雷苟斯` were locked.
+3. Only `WebSearch` for the enUS name → confirm the mechanic; do NOT trust fan-site Chinese names (often OCR-blocked images).
 
-**Input**: detailed art-direction prompt, target size.
-**Output**: `output/<project>/intro_bg.png` (1920x1080, center-cropped).
-**Tool**: `video2yt-image` (`-o`, `--prompt-file`, `--save-raw`, `--target-size`, `--fit`).
+Fix every term in `intro_script.txt` to the verified zhTW form **before** Step 4 (TTS), so you don't TTS a wrong term and redo it. The same verified terms seed `subtitle_context.txt` in Step 5.
+
+### Step 4 — 生成 intro.mp4 (build the dynamic intro)
+
+**Input**: the corrected `intro_script.txt`.
+**Output**: `intro.mp4` (1920×1080, 30fps, h264 + aac).
+**Tools**: `video2yt-tts` → `video2yt-transcribe` → `video2yt-image` → `video2yt-intro`.
 
 ```bash
-# Default: Codex backend (ChatGPT auth, no separate API key, no billing).
-uv run video2yt-image \
+# 1. TTS (女老板 voice). Default speaker zh_female_vv_uranus_bigtts, rate 0 (1.0x).
+uv run video2yt-tts --text-file output/<project>/intro_script.txt -o output/<project>/intro.mp3
+
+# 2. Forced-alignment SRT (text from the script, timestamps from whisperx).
+uv run video2yt-transcribe --audio output/<project>/intro.mp3 \
+  --script output/<project>/intro_script.txt --max-block-chars 22 \
+  -o output/<project>/intro.srt
+
+# 3. Background (subjectless warm mid-key tavern; the mascot overlays separately).
+uv run video2yt-image --backend codex \
   --prompt-file output/<project>/intro_image_prompt.txt \
-  -o            output/<project>/intro_bg.png \
-  --save-raw    output/<project>/intro_bg_raw.png \
-  --target-size 1920x1080 \
-  --fit cover
+  -o output/<project>/intro_bg.png --save-raw output/<project>/intro_bg_raw.png
 
-# Fallback: Gemini (requires GEMINI_API_KEY with billing enabled).
-uv run video2yt-image --backend gemini ...
+# 4. Compose: bg + scrim + SRT-timed card spotlight + 女老板 mascot + burned subtitle.
+uv run video2yt-intro --audio output/<project>/intro.mp3 --bg output/<project>/intro_bg.png \
+  --srt output/<project>/intro.srt --cards output/<project>/intro_cards.txt \
+  -o output/<project>/intro.mp4
 ```
 
-Codex backend (default) calls `codex exec` with the `image_gen` tool; native output is 1536x1024 (3:2). Gemini backend always returns 1024x1024 (1:1). In both cases the CLI center-crops or letterboxes to the target. Prompts should explicitly say "no text, no logos, no watermarks" — both models hallucinate text/logos otherwise.
-
-**Art direction for the DYNAMIC intro (Step 5).** The intro background is no
-longer a hero-subject splash — the 女老板 mascot is now the on-screen figure, so a
-big creature/character in the bg fights her. Author `intro_image_prompt.txt` as a
-**subjectless environment** with a **warm, mid-key palette** (amber / honey-gold /
-candle-orange firelight, cozy and inviting — matches the warm cover + mascot, kills
-the gloom), but **keep the right half + lower-left locally dimmer** so the warm-gold
-mascot + white subtitles still read. Fixed scaffold + one per-theme slot:
-
-> Cinematic 16:9 atmospheric ENVIRONMENT backdrop for a HS Battlegrounds tutorial —
-> NO main character/creature/figure (the host mascot is overlaid separately). Cozy
-> fantasy tavern + moonlit harbor night, soft glow, shallow depth of field,
-> **WARM and MID-KEY** palette dominated by amber/honey-gold/candle-orange firelight
-> (brightened, golden, welcoming, NOT gloomy); deep teal/indigo only as cool
-> counter-accents, never the dominant field. IMPORTANT: even though warm overall,
-> keep the value noticeably LOWER and calmer across the **lower-left subtitle area**
-> and the **entire right mascot area** so overlaid white subtitles + the warm-gold
-> host stay readable. {theme motif}. Darker on the right half + bottom-right +
-> upper-center-left + a top strip; brightest warm focal glow low-center / center
-> background; gentle vignette. No text, letters, numbers, logos, watermarks, UI, faces.
-
-`{theme motif}` examples: 手牌魚 → "light teal murloc/aquatic ambiance, faint
-bubbles (no large fish)"; 龍 → "faint dragon-scale texture + distant ember glow (no
-dragon figure)"; 惡魔 → "faint arcane sigils + soft purple ember haze (no demon)".
-
-Codex invocation gotchas (validated on `ringnaga`):
-- Do NOT pass `writable_roots`. The default `--sandbox workspace-write` already allows writing inside cwd; adding `writable_roots` once caused an 11+ minute hang.
-- Keep the instruction concise. Multi-step checklists trigger an approval/thinking loop. The script wraps the user prompt with a single-sentence "use image_gen, save to <path>" preamble.
-- First-time setup: `brew install codex && codex login`.
-
-### Step 4 — Forced-alignment SRT
-
-**Input**: `intro.mp3` + `intro_script.txt`.
-**Output**: `output/<project>/intro.srt`.
-**Tool**: existing `video2yt-transcribe` (whisperx + wav2vec2, CPU).
-
-```bash
-uv run video2yt-transcribe \
-  --audio  output/<project>/intro.mp3 \
-  --script output/<project>/intro_script.txt \
-  --max-block-chars 30 \
-  -o       output/<project>/intro.srt
-```
-
-Text comes from the script (preserves correct terms / punctuation); whisperx provides only timestamps. Splits by Chinese sentence punctuation (`。`, `！`, `？`). Pass `--max-block-chars N` to additionally split sentences longer than N chars at semicolons/commas (`；，、;,`) — useful when the script uses commas/semicolons instead of periods in long sentences (the `ringnaga` script had a 60-char block that ran 12 seconds before this flag existed).
-
-### Step 5 — Compose the dynamic intro MP4
-
-**Input**: `intro.mp3` + `intro_bg.png` + `intro.srt` + `intro_cards.txt` + the
-女老板 mascot (`assets/cta/src/mascot_raw.png`).
-**Output**: `output/<project>/intro.mp4` (1920×1080, 30fps, h264 + aac).
-**Tool**: `video2yt-intro` (the dynamic composer — Option A: single big card spotlight).
-
-The 女老板 mascot dances as the on-screen narrator while the currently-introduced
-card is shown large, top-center, and swapped in time with the narration; the
-subtitle is burned bottom-left (bold W6). A reusable dark scrim
-(`assets/intro/intro_scrim.png`) is auto-overlaid on the background so white
-subtitles stay legible and the mascot/cards pop regardless of the generated bg.
-
-Author a per-project `intro_cards.txt`, one card per line in display order:
+**Card art for the spotlight**: download the zhTW BGS art for each card the script names (same `art.hearthstonejson.com/.../zhTW/...` source as Step 3), into `assets/cards/<slug>_zhTW_bgs_512.png`. Author `intro_cards.txt`, one card per line in display order; the `中文卡名` must be a substring that appears in `intro.srt`:
 
 ```
 # <png in assets/cards> | <中文卡名 matched in intro.srt> [| <start> <end>]
-double_stitch_needle_zhTW_bgs_512.png | 雙重縫針
-balinda_stonehearth_zhTW_bgs_512.png  | 巴琳達‧石爐
+golden_arrow_zhTW_bgs_512.png | 黃金箭
+brann_zhTW_bgs_512.png        | 銅鬚
 ```
 
-Each card shows from the SRT block where its 中文卡名 first appears (forward cursor,
-so a teaser mention can't steal a later card's slot) until the next card; an
-explicit `| <start> <end>` overrides. A name that matches no block fails fast.
+Each card shows from the SRT block where its name first appears (forward cursor) to the next card; a name matching no block fails fast.
+
+**Image-prompt art direction** (subjectless ENVIRONMENT, no figure/text/logo; warm amber/honey-gold/candle palette; keep the **lower-left subtitle area** and the **entire right mascot area** locally dimmer so white subs + the warm-gold mascot read; darker right half + bottom-left + top strip; brightest focal glow low-center; gentle vignette). Per-theme motif slot (e.g. 黃金箭 → "stacks of gold coins / gilded goblets catching firelight"). Codex gotchas: do NOT pass `writable_roots` (caused an 11-min hang); keep the prompt one concise paragraph.
+
+**Review checkpoint #2**: send the user `intro.mp4`.
+
+> The legacy static composer `video2yt-compose` (one still image + SRT, no mascot) still exists for non-BG/simple intros.
+
+### Step 5 — 烧录两条正片 (burn the two body segments)
+
+**Input**: the two cached segments + `subtitle_context.txt`.
+**Output**: two `output/<project>/<uploader>：<title>/<bv>_final.mp4` (+ `<bv>_final_music_credits.txt`).
+
+Stages 1–2 (fetch, stems) are already done from Steps 1–2 and cache-hit. The per-segment work here is **three things** — note that the subtitle is cleaned by Claude, NOT by a second speech2srt call:
+
+#### 5a. Build the CC0 music bed (Stage 4)
 
 ```bash
-uv run video2yt-intro \
-  --audio  output/<project>/intro.mp3 \
-  --bg     output/<project>/intro_bg.png \
-  --srt    output/<project>/intro.srt \
-  --cards  output/<project>/intro_cards.txt \
-  -o       output/<project>/intro.mp4
+uv run video2yt-music-mix "temp/<dir>/<bv>.mp4"
 ```
 
-No `--title` (the card art already carries the card name; the channel title lives
-in the YouTube title/thumbnail). Output is merge-ready (1920×1080/30fps/h264/AAC48k).
+`music_mix.render` → `music_library.select_sequence` greedily picks CC0 tracks from `~/.cache/video2yt/music/` (Kevin MacLeod, CC BY 3.0) until the stitched length (`Σ duration − (N−1)·crossfade`) ≥ the video duration → `_build_music_bed` joins consecutive tracks with a 2s `acrossfade`, trims to **exactly** the video duration with `-t`, applies a 2s `afade` out → `<bv>.music_bed.wav` + `<bv>.music_credits.txt` (attribution — required in the description). Cache key: `<bv>.music_bed_meta.json` (duration ±0.5s).
 
-> The legacy static composer (`video2yt-compose`: one still image + SRT, no mascot)
-> still exists for non-BG/simple intros. `compose.render` probes the audio and
-> passes `-t <audio_duration>` to work around `-shortest` not stopping a looped
-> still when AAC flushes.
+#### 5b. Clean the raw SRT into 繁體 myself (replaces the old speech2srt cleanup)
 
-### Step 6 — Burn N Bilibili segments (five-stage pipeline)
+speech2srt is NOT called again. Take the raw `<bv>/speech.cleaned.srt` (= the Step 2 raw ASR; `--skip-cleanup` wrote it there) and clean it deterministically:
 
-**Input**: Bilibili URL + optional `--cut START~END` ranges + optional `--speed`.
-**Output**: `output/<project>/<uploader>：<title>/<bv>_final[_cut][_<speed>x][_preview].mp4` + sidecar `<bv>_final_music_credits.txt`.
-**Tool**: `video2yt` (one CLI that orchestrates 5 stages).
+1. **Dump + split** the raw SRT into N chunks at block boundaries (~30 blocks each).
+2. **Parallel cleanup subagents** — one per chunk — each rewrites ONLY the text lines to 繁體 + corrected terms (from `subtitle_context.txt`), copying every block number and timestamp **verbatim** (same block count out as in). Keep the streamer's spoken/roast tone; don't summarize.
+3. **Splice** the chunks back and verify block-count + timestamps match the raw exactly.
+4. **Review subagent** (per `feedback_subagent_review_loop`): check 100% 繁體, term correctness, no meaning drift, block count.
+5. **Convert to ASS**: `compose.srt_to_ass(srt, 1920, 1080, font_face="Hiragino Sans GB", font_size=50, position="bottom", outline_px=4, shadow_px=2, margin_v=80)` → write `<bv>/speech.cleaned.ass`.
+
+`subtitle_context.txt` (≤2 KB) is the **term table fed to these subagents** (streamers, 流派, key cards with verified zhTW names, 口頭禪, ASR-error→correct mappings). It seeds from the Step 3 verified terms.
+
+> Why this replaces speech2srt's cleanup: the old codex-via-speech2srt cleanup (a) re-ran the slow/flaky Volcengine transcription a second time, and (b) had a length-drift guard that silently fell back to raw 简体 subs (`cleanup: applied=false` — hit on `futurefish`, `handfish`, `midas_arrow`/Kimmy). Doing the cleanup in subagents is deterministic, runs no second transcription, and has no guard to trip.
+
+#### 5c. Burn (Stage 5 — one ffmpeg pass)
 
 ```bash
-uv run video2yt "<bilibili_url>" \
-  [--cut 0~6]      \
-  [--speed 1.25]   \
-  [--no-subtitle]  \
-  [--no-music-swap] \
-  -o output/<project>/
+uv run video2yt-burn "temp/<dir>/" --bv <bv> \
+  -o "output/<project>/<dir>/<bv>_final.mp4"
+# default: subtitle layer ON + music-swap ON. --no-subtitle / --no-music-swap to skip.
 ```
 
-The five stages, all gated by the right skip flags (full details in `docs/superpowers/specs/2026-05-24-step6-restructure.md`):
+`burn._build_filter_complex` chains, in one `-filter_complex`:
+- **Two subtitle layers**: `[cv]subtitles=f='<bv>.danmaku.ass'[sv1]; [sv1]subtitles=f='<bv>.cleaned.ass'[sv]` — danmaku (Stage 1 biliass, floats top→mid) then the cleaned 繁體 subtitle (5b, bottom). Burned BEFORE the `setpts`/`atempo` speed stage so the ASS timeline matches the original. (Pre-flight symlinks `<bv>/speech.cleaned.ass` to a flat `<bv>.cleaned.ass` sibling for the cwd-with-basename escaping trick.)
+- **Audio**: `speech.wav` (the **reused** Stage 2 stem — the dry voice) + `music_bed.wav`; the bed is `volume`-scaled then `sidechaincompress` (`threshold=0.05:ratio=8:attack=5:release=300`) keyed by the speech so it ducks under the voice, then `amix`. The original music+SFX are discarded by design (CC0 risk reduction).
 
-1. **fetch** — yt-dlp downloads the raw mp4 + danmaku XML; biliass converts to ASS. Raw artifacts cached under `temp/<uploader>：<title>/<bv>.*`.
-2. **stems** — `song-remover` (Bandit-v2, default `--device remote` = Modal cloud GPU, ~7.2× faster than local CPU) writes 4 stems to `<bv>/{speech,music,sfx,no_music}.wav`. Only `speech.wav` is consumed downstream; the others stay on disk. Cache: `<bv>/.stems_source_meta.json`.
-3. **subtitle** — `speech2srt` subprocess (out-of-tree at `~/code/speech2srt`) runs Volcengine 豆包 Seed-ASR on `speech.wav` with word-level timing, then codex cleanup using a per-project free-form `--context-file` (authored at `output/<project>/subtitle_context.txt`, ≤ 2 KB). speech2srt owns its own cache at `<bv>/speech.wav.speech2srt.{json,srt}`; video2yt converts the SRT → `<bv>/speech.cleaned.ass` (Stage 5 contract). Cost ~¥0.0003/char (≈ ¥0.1 per 4-min segment).
-4. **music-mix** — CC0 bed stitched from `~/.cache/video2yt/music/` (Kevin MacLeod, CC BY 3.0 by default — attribution required, written to `<bv>.music_credits.txt`). Cache: `<bv>.music_bed_meta.json`.
-5. **burn** — ONE ffmpeg `-filter_complex` invocation: danmaku ASS + cleaned subtitle ASS burned together; speech + bed sidechain-ducked amix replaces source audio; optional cuts and speed applied last. Output: `-pix_fmt yuv420p -r 30 -ar 48000` for downstream merge compatibility.
+Output args: `-pix_fmt yuv420p -r 30 -ar 48000 -c:v libx264 -c:a aac` (satisfies merge strict mode).
 
-Each stage has its own per-CLI for partial reruns:
+#### Data flow
 
-```bash
-uv run video2yt-fetch "<url>" -o temp/
-uv run video2yt-stems temp/<dir>/<bv>.mp4
-uv run video2yt-subtitle temp/<dir>/<bv>.mp4 --context-file output/<project>/subtitle_context.txt
-uv run video2yt-music-mix temp/<dir>/<bv>.mp4
-uv run video2yt-burn temp/<dir>/ --bv <bv> -o output/<project>/<dir>/<bv>_final.mp4
+```
+Stage1 danmaku.ass ─────────────────────────────────────────────┐
+Stage2 speech.wav (cached, reused) ─┬─→ Step2 raw ASR ─→ 5b 我清洗 → speech.cleaned.ass ─┤
+                                    └──────────────────────────→ (dry voice) ───┐        │
+5a select CC0 → stitch to length → music_bed.wav ─────────────────→ (bed) ──────┴ sidechain+amix ─┐
+                                                                                                   ↓
+                                        5c burn: chain 2 subtitle layers + ducked amix → <bv>_final.mp4
 ```
 
-The orchestrator skip flags:
+**Per-streamer subtitle note**: if a streamer's source already has burnt-in bottom subs (e.g. 郭楓荷 sometimes), pass `--no-subtitle` to `video2yt-burn` and skip 5b for that segment (avoids double subs). Eyeball each source once.
 
-| Flag combination | Stages run |
-|---|---|
-| (no flags) | 1+2+3+4+5 — full pipeline |
-| `--no-subtitle` | 1+2+4+5 (stems still runs; music-swap needs `speech.wav`) |
-| `--no-music-swap` | 1+2+3+5 (stems still runs; subtitle needs `speech.wav`; Stage 5 maps source audio) |
-| `--no-subtitle --no-music-swap` | 1+5 (legacy danmaku-only path) |
+### Step 6 — Append the subscribe CTA to battle 1
 
-**Per-streamer skip-flag matrix:**
-
-| Streamer | Burnt-in subs? | Recommended flags |
-|---|---|---|
-| 炉石郭枫荷 (郭楓荷) | YES — source already has subs at the bottom | `--no-subtitle` |
-| 炉石传说瓦莉拉 | NO | (default — run subtitle) |
-| 炉石Kimmy | NO | (default) |
-| 高冷难神衣锦夜行 (夜吹) | NO | (default) |
-
-For any new streamer, eyeball the source video once before committing — if the streamer's stream has a bottom subtitle track (most Bilibili UP 主 add their own), pass `--no-subtitle` to save the ~3-6 min subtitle pipeline cost AND avoid double-subtitle visual mess.
-
-**Authoring the per-project subtitle context (Stage 3):** speech2srt's `--cleanup` reads `output/<project>/subtitle_context.txt` (≤ 2 KB UTF-8 free-form text). Write one per project describing:
-- Streamer name(s) (e.g. `B站UP主炉石郭枫荷`, `瓦莉拉`)
-- 流派 / 策略 + key 卡牌/隨從 names (繁體 OR 简体 — speech2srt's codex prompt handles both)
-- Streamer-specific 口頭禪 / 黑話
-- Known ASR error patterns (e.g. `'升过级'常被识别成'升过几'`)
-
-Pass via `video2yt --subtitle-context-file output/<project>/subtitle_context.txt`. NO sibling-file fallback — if the flag is omitted, a stderr WARNING fires and speech2srt runs context-less (quality drops; usable but not great).
-
-**Performance** (17 min source segment):
-
-| Phase | Cold | Warm cache |
-|---|---|---|
-| Stage 1 fetch | ~30s | ~0s (cache hit) |
-| Stage 2 stems (`--device remote`) | ~12–15 min | ~0s |
-| Stage 2 stems (`--device cpu`) | ~3 hr | ~0s |
-| Stage 3 subtitle | **~3–6 min (provisional)** — extrapolated from a 4-min smoke at 4:43; T7 production verification on a 17-min segment is the canonical measurement | <5s (speech2srt cache hit) |
-| Stage 4 music-mix | ~30s | ~0s |
-| Stage 5 burn | ~3 min | ~3 min (no cache) |
-| **Total cold (remote)** | **~18–24 min (provisional)** | — |
-| **Total warm** | — | **~3 min** |
-
-Modal cost: ~$0.10 per 17-min segment, within Modal's $30/mo free tier for personal use.
-
-**Migration note (2026-05-24)**: The old three-step pipeline (`video2yt` → `video2yt-music-swap` → `video2yt-subtitle`) was collapsed into this five-stage pipeline by the step6-restructure plan. The legacy `_with_danmaku.mp4`, `_clean.mp4`, `_subbed.mp4` intermediates are gone — the only segment output is `<bv>_final.mp4`. `video2yt-music-swap` was deleted; its bed-build logic moved into `video2yt-music-mix`, its Demucs separation was replaced by song-remover, and its mix step moved into Stage 5's `-filter_complex`.
-
-### Step 6.5 — Append the subscribe CTA to the first battle segment
-
-**Input**: the first **battle** segment from Step 6 (the first gameplay segment, NOT the intro).
-**Output**: `<battle1>_final_cta.mp4` — battle 1 with the ~5s subscribe+comment CTA appended.
-**Tool**: `scripts/append_cta.sh` + the shared asset `assets/cta/subscribe_cta.mp4`.
+**Input**: the first **battle** segment from Step 5 (NOT the intro).
+**Output**: `<battle1>_final_cta.mp4`.
+**Tool**: `scripts/append_cta.sh` + `assets/cta/subscribe_cta.mp4`.
 
 ```bash
 scripts/append_cta.sh output/<project>/<uploader1>：.../<bv1>_final.mp4
-# -> output/<project>/<uploader1>：.../<bv1>_final_cta.mp4
+# -> ..._final_cta.mp4
 ```
 
-The CTA is a faceless mascot clip (二次元 tavern-keeper girl + project BigTTS
-voice), compact 2-beat (~5s, redesigned 2026-06-11 after CTA best-practice
-research): beat A 「訂閱馬哥！」 with the canonical click sequence (arrow clicks
-red 訂閱 → grey 已訂閱 → bell pops/shakes + the single Mixkit bell ding); beat B
-the spoken PRIMARY ask 「想看什麼陣容？留言告訴我！」 with a blue comment bubble
-(repeat the same question as the Step 10 pinned comment's opener). It is
-re-encode concatenated (filter-level concat — stream copy once produced a
-backward-pts join that made merge drop the tail) onto the end of battle 1, so it
-plays **mid-roll between battle 1 and battle 2** (mid-roll converts better than
-a pre-roll ask). Because it rides **inside** battle
-1's chapter, each chapter still satisfies YouTube's ≥10s rule and no stray
-chapter is created — do NOT pass the CTA to merge as its own `--segment`.
-The clip + its editable sources live in `assets/cta/` (see that folder's README
-to restyle the mascot, change the slogan, or swap the voice).
+The ~5s faceless-mascot CTA (beat A 「訂閱馬哥！」 click sequence + bell ding; beat B spoken「想看什麼陣容？留言告訴我！」) is **re-encode** concatenated onto battle 1 so it plays **mid-roll between battles 1 and 2, inside battle 1's chapter** (each chapter still ≥10s; no stray chapter). Re-encode, not stream copy — a stream-copy join once emitted a backward-pts reset that made merge silently drop the segment tail + CTA. Never pass the CTA to merge as its own `--segment`.
 
 ### Step 7 — Merge into final video
 
-**Input**: ordered list of `--segment` + `--label` pairs (intro first; battle 1 is the `_cta` clip from Step 6.5), plus a working title.
+**Input**: ordered `--segment`/`--label` pairs (intro first; battle 1 is the `_cta` clip), a working title.
 **Output**: `output/<project>/<title>.mp4` + `<title>_chapters.txt` + `<title>_ffmeta.txt`.
-**Tool**: existing `video2yt-merge`.
+**Tool**: `video2yt-merge`. **`-o` is a full output MP4 file path, not a directory.**
 
 ```bash
 uv run video2yt-merge \
-  --segment output/<project>/intro.mp4                            --label "intro" \
-  --segment output/<project>/<uploader1>：.../<bv1>_final_cta.mp4 --label "教程" \
-  --segment output/<project>/<uploader2>：.../<bv2>_final_1.25x.mp4 --label "郭楓荷實戰" \
+  --segment output/<project>/intro.mp4                              --label "開場：<topic>" \
+  --segment output/<project>/<uploader1>：.../<bv1>_final_cta.mp4   --label "<streamer1>：<打法>" \
+  --segment output/<project>/<uploader2>：.../<bv2>_final.mp4       --label "<streamer2>：<打法>" \
   --title   "<working_title>" \
-  -o        output/<project>/<project>_final.mp4
+  -o        "output/<project>/<title>.mp4"
 ```
 
-Note the battle-1 `--segment` is the `_cta` clip from Step 6.5 (battle 1 + the
-subscribe CTA), so the CTA plays between battles 1 and 2 inside battle 1's chapter.
+All `--segment` inputs MUST be 1920x1080 30fps h264 (strict) AND ≥10s, with ≥3 segments (mirrors YouTube's chapter rules). Output: concat + per-segment loudnorm to -14 LUFS, CFR-normalized (`fps=30,setpts=PTS-STARTPTS`) before concat. Segmentation is delivered via the description chapter block (Step 9) from `<title>_chapters.txt`; the `_ffmeta` embed is best-effort only.
 
-All `--segment` inputs MUST be 1920x1080 30fps h264 (strict) AND ≥10s long, with at least 3 segments total (those rules mirror YouTube's chapter requirements; see Step 8). Output: concat + per-segment loudnorm to -14 LUFS. There is no burned-in progress bar — segmentation must be delivered through the description chapter block written in Step 8. merge writes `<title>_chapters.txt` for that paste, and also embeds the same chapters into the MP4 via `<title>_ffmeta.txt` + `-map_metadata`/`-map_chapters` as a best-effort extra (YouTube does not officially document reading embedded chapter atoms, so this is NOT a safety net for a missing description block).
+### Step 8 — YouTube thumbnail (confirm with the user)
 
-### Step 8 — Generate YouTube metadata
+**Input**: bg image (Step 4 style), logo, **zhTW BGS** card art, 8-char two-tier title.
+**Output**: `output/<project>/thumbnail.png` (1280x720).
+**Tool**: `scripts/thumbnail_polish.py` (the ONLY thumbnail tool — warm-tavern compositor: bg lift + edge vignette + tilted card right + left scrim + 女老板 mascot + two-tier title). All visual params are locked constants — do NOT tweak per-project.
 
-**Output**: two files in `output/<project>/`:
+**Title formula — 8-char two-tier** (present the 5 directions with examples from the source titles, then propose 3–4 concrete 4-char picks; **do not pick alone**):
+- **Top row (4 chars, primary)**: the 流派 canonical 4-char name.
+- **Bottom row (4 chars, secondary)**: payoff — pick a direction: **Numbers** (preferred, e.g. `二八萬攻`) / **Hyperbole** / **Tutorial promise** / **Mechanic teaser** / **Action-emotion**.
 
-- `youtube_metadata.txt` — human-readable; sections separated by `===` headers; contains title, two description variants (繁體 Taiwan + 简体), tags, chapters.
-- `youtube_metadata.json` — structured for Step 9. Fields:
+```bash
+# bg can reuse intro_bg.png (same warm tavern) or a fresh video2yt-image render.
+uv run python scripts/thumbnail_polish.py \
+  --bg output/<project>/intro_bg.png \
+  --card assets/cards/<slug>_zhTW_bgs_512.png \
+  --output output/<project>/thumbnail.png \
+  --primary "<4 字流派>" --secondary "<4 字 payoff>"
+# --logo / --mascot default to assets/hsbg_logo.png and assets/cta/src/mascot_raw.png
+```
+
+**Review checkpoint #3**: send the user `thumbnail.png` and confirm before upload.
+
+### Step 9 — Generate YouTube metadata
+
+**Output**: `output/<project>/youtube_metadata.json` for Step 10. Fields:
 
 ```json
 {
-  "title": "...",
-  "description": "...",
-  "tags": ["..."],
-  "category_id": "20",
-  "default_language": "zh-Hant",
-  "default_audio_language": "zh-Hant",
-  "privacy_status": "public",
-  "made_for_kids": false,
-  "expected_channel_id": "UC...",
-  "video_path": "output/<project>/<project>_final.mp4",
+  "title": "...", "description": "...", "tags": ["..."],
+  "category_id": "20", "default_language": "zh-Hant", "default_audio_language": "zh-Hant",
+  "privacy_status": "public", "made_for_kids": false,
+  "expected_channel_id": "UCEgIrCo0pR6DyyrXuSn3wBg",
+  "video_path": "output/<project>/<title>.mp4",
   "thumbnail_path": "output/<project>/thumbnail.png"
 }
 ```
 
-**Title format (locked):**
+**Title format (locked — feina style):**
 
 ```
-「英雄戰場」S<season><topic>完整教學 | <streamer1> × <streamer2> 實戰 [彈幕]
+「爐石戰記：英雄戰場」新賽季<topic>完整教學 | <streamer1> × <streamer2> 實戰 [彈幕]
 ```
 
-Examples:
-- `「英雄戰場」S13龍族崛起！紅龍滾雪球完整教學 | 郭楓荷 × 瓦莉拉 實戰 [彈幕]`
-- `「英雄戰場」S13宰割亡靈完整教學 | 郭楓荷 × 夜吹 實戰 [彈幕]`
+Example: `「爐石戰記：英雄戰場」新賽季黃金箭異變完整教學 | 郭楓荷 × Kimmy 實戰 [彈幕]`
 
-Rules:
-- Prefix is the player-口語 short name `「英雄戰場」` with Japanese-style 「」 brackets (NOT `[]`, NOT `《》`). The official full name 「爐石戰記：英雄戰場」 is too long for the title slot — keep it for the description body's first paragraph as a branding cue.
-- **No space** between `」` and the season number; no space between season number and topic — compact CJK style.
-- Season prefix is **uppercase `S`** (e.g. `S13`).
-- Hook phrases (e.g. `龍族崛起！`) can be embedded as part of the `<topic>` slot when a catchier title is needed.
-- Topic + `完整教學`, pipe `|` with single spaces on both sides.
-- Streamer names in 繁體, joined by ` × ` (with spaces) when multiple.
-- Final tag `[彈幕]` with half-width brackets.
-- DO NOT use `[爐石戰棋]` (China/B站 用法), `[Hearthstone Battlegrounds]` (global English), or 简体字 anywhere in the title.
+Rules: use the **full game name** 「爐石戰記：英雄戰場」 with 「」 brackets and **新賽季** (NOT `S13`); `完整教學`; pipe `|` with single spaces; streamer names in 繁體 joined by ` × `; final `[彈幕]` half-width. No 简体字 in the title. (The earlier `「英雄戰場」S13…` form is retired — `mirrorbox` had to be deleted + re-uploaded over it.)
 
-For Taiwan audience, primary description is 繁體 with TW grammar; append 简体 below as secondary. The first paragraph of the 繁體 description should mention `「爐石戰記：英雄戰場」` once so the channel branding stays connected to Blizzard's Taiwan localization.
+**Description**: 繁體 primary (first paragraph mentions 「爐石戰記：英雄戰場」 once), then the **single** `時間軸：` chapter block copied verbatim from `<title>_chapters.txt`, then 原片來源 links, then the 🎵 music credits (every line from the `_music_credits.txt` files — CC BY 3.0 requires it), then the hashtag line, then a short 简体 summary (NO second chapter block — a duplicate block resets to 00:00 and YouTube discards the whole list).
 
-**Required hashtags in the description body (locked):** every video's description MUST end with a hashtag line that includes **`#英雄戰場教學`** as a channel-wide tag. Put it among the first three hashtags so YouTube renders it above the title (YouTube only surfaces the first 3 hashtags as the above-title link). Recommended pattern:
-
+**Required hashtags (locked):** put `#英雄戰場教學` among the **first three** (YouTube only links the first 3 above the title):
 ```
 #英雄戰場教學 #英雄戰場 #爐石戰記 #<策略名> #<核心隨從> #戰棋 #Hearthstone #Battlegrounds
 ```
 
-The remaining hashtags (策略名 / 核心隨從 / 其他) vary per video, but `#英雄戰場教學` is the cross-video channel anchor and is NOT optional.
+**Chapter block rules** (YouTube-enforced): ≥3 timestamps, first is `00:00`, strictly ascending, each chapter ≥10s, exactly ONE block.
 
-**Chapter timestamps in the description — required, exactly one ascending block.** The description is the **only officially-supported** way to get the YouTube progress-bar segmentation. Rules YouTube enforces:
+### Step 10 — Upload to YouTube
 
-1. At least 3 timestamps.
-2. First timestamp is `00:00`.
-3. All timestamps strictly ascending, on their own lines.
-4. Each chapter ≥10 seconds.
-5. The whole list lives in **one** block — there must not be a second block that resets to `00:00`.
-
-A duplicated block (e.g. one under 繁體, another under 简体) makes the sequence jump backwards to `00:00` and YouTube discards the whole list — that is the `back2back`/`ringnaga`/`chickenking` bug. So put the `時間軸：` block **once** and do **not** repeat it inside the 简体 section. Copy directly from `<title>_chapters.txt` produced by merge — that file is already formatted correctly. merge also embeds the same chapters into the MP4 itself as a best-effort extra, but YouTube does NOT officially support reading embedded chapter atoms, so don't rely on it as a fallback — get the description block right.
-
-### Bonus — YouTube thumbnail
-
-**Input**: bg image (Step 3 style), logo PNG, **zhTW BGS** card art PNG, 8-char two-tier title.
-**Output**: `output/<project>/thumbnail.png` (1280x720).
-**Tools**: `video2yt-research-card` (download card art), `scripts/thumbnail_polish.py` (committed all-in-one **warm-tavern compositor** — bg lift + edge vignette + card + left scrim + 女老板 mascot + 8-char two-tier title).
-
-**Locked layout (2026-06-07 warm-tavern redesign, supersedes the 2026-05-10 dark layout):**
-
-The earlier recipe ran `video2yt-thumbnail` (base render) then a vignette+title-only polish, and read uniformly dark/cool in the feed. The redesign warms it and adds the brand mascot; `thumbnail_polish.py` is now a single self-contained pass over the raw pieces (bg + card + logo + mascot). All visual params are **locked constants in the script** — do NOT tweak per-project (consistent thumbnail brand is the point).
-
-- Canvas: **1280x720**.
-- **Background**: lifted (brightness ×1.12, saturation ×1.18) + faint warm tint — kills the near-black gloom. Radial vignette darkens the **EDGES** (center stays bright; the old polish had this inverted).
-- **Top-left**: HSBG logo (`assets/hsbg_logo.png`), 180px wide, 16px margin.
-- **Left half**: **8-char two-tier title** (formula below) over a **warm-charcoal LEFT gradient scrim** — a legible white-text anchor, not a pure-black slab.
-- **Center-right**: card art (zhTW BGS), tilted −8°, ~668px tall with a warm glow — the credibility hero; big = impact.
-- **Bottom-right**: **女老板 mascot** (`assets/cta/src/mascot_raw.png`) with a warm rim + halo — the bright brand focal point. Kept small so the card stays dominant. `--no-mascot` is a rare escape hatch.
-- **No season text** (S13 etc).
-
-**Title formula — 8-char two-tier:**
-
-- **Top row (4 chars, primary):** the 流派 canonical 4-char name (e.g. `護戒娜迦`, `紅龍滾雪`).
-- **Bottom row (4 chars, secondary):** quantifiable / promise payoff. Pick from 5 directions:
-  - **Numbers** (preferred, most click-worthy) — `兩千攻擊` style absolute-value.
-  - **Hyperbole** — `太超模了` / `根本崩盤`.
-  - **Tutorial promise** — `必學陣容`.
-  - **Mechanic teaser** — 4-char strategy explainer.
-  - **Action / emotion** — visceral verb-driven phrase.
-
-Always present the 5 directions to the user with examples drawn from the source-video titles, then propose 3–4 concrete 4-char picks under the chosen direction. **Do not pick alone.**
-
-**Visual params for the title (rendered in the polish pass, NOT the CLI — the CLI only supports single-row titles):**
-
-```
-row 1 (primary):    text=<流派 4 字>
-                    font=Hiragino Sans GB W6, font_size=180
-                    fill=pure white (255,255,255), stroke=black 16px
-                    drop-shadow: offset (10,14), blur 12, alpha 235
-                    char_gap=-10  (slight overlap, "stamp" feel)
-                    position: x=20, y=140
-
-row 2 (secondary):  text=<4 字 payoff>
-                    font=Hiragino Sans GB W6, font_size=130
-                    fill=saturated gold (245,195,75), stroke=dark brown (70,25,0) 12px
-                    drop-shadow: offset (7,10), blur 10, alpha 220
-                    char_gap=-6
-                    position: x=30, y=380
-```
-
-**Card art**: use the **zhTW BGS art** for any BG card (繁體 card name matches the Taiwan audience). `video2yt-research-card` currently downloads enUS only — manually `curl https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<id>.png` into `assets/cards/<slug>_zhTW_bgs_512.png` until the CLI grows a `--locale` flag.
-
-**Background**: Codex `image_gen` via `video2yt-image --backend codex` (default), 16:9 atmospheric tavern/scene matched to topic. **No figures, characters, text, or logos** in the prompt. The polish pass lifts + warms the bg, so it need not be bright — but keep the **left third darker** (title scrim) and the **bottom-right calmer** (mascot zone) so both overlay cleanly.
-
-**Invocation pattern (3 steps — `thumbnail_polish.py` now does the whole composite):**
+**Input**: `youtube_metadata.json`, `client_secret.json`, cached `youtube_token.json`.
+**Tool**: `video2yt-upload`.
 
 ```bash
-# 1. Background (1280x720)
-uv run video2yt-image --backend codex \
-  --prompt-file output/<project>/thumbnail_bg_prompt.txt \
-  --output      output/<project>/thumbnail_bg.png \
-  --save-raw    output/<project>/thumbnail_bg_raw.png \
-  --target-size 1280x720 --fit cover
-
-# 2. zhTW card art (manual curl until --locale lands)
-curl -o assets/cards/<slug>_zhTW_bgs_512.png \
-  https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<id>.png
-
-# 3. Warm-tavern compositor (bg lift + vignette + card + scrim + mascot + title)
-uv run python scripts/thumbnail_polish.py \
-  --bg        output/<project>/thumbnail_bg.png \
-  --card      assets/cards/<slug>_zhTW_bgs_512.png \
-  --output    output/<project>/thumbnail.png \
-  --primary   "<4 字流派>" \
-  --secondary "<4 字 payoff>"
-# --logo / --mascot default to assets/hsbg_logo.png and assets/cta/src/mascot_raw.png
+uv run video2yt-upload --metadata output/<project>/youtube_metadata.json --dry-run   # auth + channel check
+uv run video2yt-upload --metadata output/<project>/youtube_metadata.json             # real upload
 ```
 
-The old `video2yt-thumbnail` base render has been **removed** (deleted 2026-06-15 — `src/video2yt/thumbnail.py`, `thumbnail_cli.py`, and the `video2yt-thumbnail` console script are gone, so the wrong default layout can't be picked by mistake). **All thumbnails MUST use `scripts/thumbnail_polish.py`** — it composites bg + card + logo + mascot + two-tier title itself; do not invent a new layout per project.
+Aborts unless `expected_channel_id` is among the authenticated channels (catches wrong-account auth). Resumable upload + thumbnail set; prints watch + studio URLs.
 
-`video2yt-research-card` queries `api.hearthstonejson.com/v1/latest/enUS/cards.json` (cached at `~/.cache/video2yt/`, 7-day TTL). `--style auto` picks `bgs` for BATTLEGROUND-set cards, `render` for constructed.
+**OAuth re-auth (testing-mode tokens expire ~7 days; a failed refresh auto-deletes `youtube_token.json`):** surface the consent URL by running the `--dry-run` UNBUFFERED to a log, not through `tail` (which buffers):
+```bash
+PYTHONUNBUFFERED=1 uv run video2yt-upload --metadata <meta> --dry-run > /tmp/auth.log 2>&1 &
+grep accounts.google.com /tmp/auth.log   # the auth URL; redirect_uri=http://localhost:<PORT>
+```
+**Claude-in-Chrome CANNOT drive the Google consent page** — `navigate` to `accounts.google.com` is refused ("Permission denied by user", a sensitive auth domain). Hand the user the URL; they only click "Allow" (no password). The local server on `localhost:<PORT>` catches the redirect and saves the token. (See `feedback_oauth_via_claude_in_chrome` — the self-drive path documented there no longer works for the consent page itself.)
 
-### Step 9 — Upload to YouTube
+### Step 11 — Post the subscribe comment (MANDATORY)
 
-**Input**: `youtube_metadata.json`, `client_secret.json`, cached `youtube_token.json` (or fresh OAuth flow on first run).
-**Output**: published video URL printed to stderr.
-**Script**: `scripts/youtube_upload.py`.
+**Input**: the uploaded `video_id`, `output/<project>/subscribe_comment.txt`.
+**Tool**: `scripts/post_comment.py` (uses `youtube_token.json`; `youtube.force-ssl` scope).
 
 ```bash
-# First time: OAuth dry-run to verify channel
-uv run python scripts/youtube_upload.py \
-  --metadata output/<project>/youtube_metadata.json \
-  --dry-run
-
-# Real upload
-uv run python scripts/youtube_upload.py \
-  --metadata output/<project>/youtube_metadata.json
+uv run python scripts/post_comment.py --video-id <ID> \
+  --text-file output/<project>/subscribe_comment.txt \
+  --expected-channel-id UCEgIrCo0pR6DyyrXuSn3wBg
 ```
 
-Behavior:
+繁體, one top-level comment: (a) one line recapping the 核心卡/combo so it reads as content, (b) 按讚 / 訂閱 / 開小鈴鐺, (c) invite 留言許願.
 
-1. OAuth via `InstalledAppFlow.run_local_server(port=0)`. Browser opens for consent on first run; token cached to `youtube_token.json` after.
-2. Lists authenticated channels via `channels.list(mine=True)`. **Aborts** if `expected_channel_id` from metadata is not in the list (catches wrong-account auth). All uploads from this repo go to channel **`UCEgIrCo0pR6DyyrXuSn3wBg`** — use it as `expected_channel_id`.
-3. Resumable upload via `MediaFileUpload` with 8 MB chunks. Progress logged every ≥5%.
-4. Uploads thumbnail via `thumbnails().set()` after video upload completes.
-5. Prints watch URL + studio URL.
+### Step 12 — Reclaim disk (`video2yt-cleanup`)
 
-OAuth gotchas:
-
-- App in "Testing" status only allows allow-listed test users (add at OAuth consent screen → test users).
-- Test-mode refresh tokens expire after 7 days. **`get_credentials` auto-recovers**: if `creds.refresh()` raises `RefreshError`, the cached `youtube_token.json` is deleted and `run_local_server` is invoked to mint a fresh token. The browser will pop again on day 8+.
-- Brand channels require signing in to that brand account during the OAuth consent flow.
-
-### Step 10 — Post a subscribe call-to-action comment
-
-**MANDATORY after every upload.** Once Step 9 returns the `video_id`, post one top-level comment from the channel that (a) recaps the comp/核心卡 in one line so it reads as genuine content, and (b) asks viewers to 按讚 / 訂閱 / 開小鈴鐺. Keep it 繁體 to match the video.
-
-**Input**: the uploaded `video_id`, a per-project comment text.
-**Output**: posted comment id.
-**Script**: `scripts/post_comment.py` (uses the same cached `youtube_token.json`; the `youtube.force-ssl` scope authorizes `commentThreads.insert`).
+**Run last, once the upload is confirmed.**
 
 ```bash
-# Write the comment text per project (recap the comp + subscribe CTA)
-#   output/<project>/subscribe_comment.txt
-uv run python scripts/post_comment.py \
-  --video-id <ID> \
-  --text-file output/<project>/subscribe_comment.txt
+uv run video2yt-cleanup --project <project>          # DRY-RUN: plan + reclaimable bytes
+uv run video2yt-cleanup --project <project> --yes     # delete
 ```
 
-Template (adapt the first line to the actual comp each time):
+Policy: delete the CURRENT project's `temp/<source>/` caches (regenerable) but KEEP `output/<project>/` as a one-period buffer; delete the PREVIOUS shipped project's entire `output/<project>/`. A "shipped project" = an `output/` subfolder with `youtube_metadata.json`. Every delete passes `cleanup.assert_within`. NEVER hand-roll `rm -rf temp/*<glob>*`. Flags: `--all-previous`, `--no-prev`, `--no-temp`.
 
-```
-<一句話點出核心卡/combo，例：雙重縫針配巴琳達‧石爐，加倍法術放兩次，身材指數爆炸>！這套<流派>新賽季高端局真的猛！
-如果這集對你上分有幫助，幫我按個讚 👍、訂閱頻道 🔔 開個小鈴鐺，之後每隻新流派教學都不錯過～
-有想看的流派也歡迎在留言區許願！
-```
-
-### Step 11 — Reclaim disk (`video2yt-cleanup`)
-
-**Run after Step 10, once the upload is confirmed.** Storage is limited, so each shipped video cleans up after itself and after the one before it.
-
-**Policy:** the CURRENT project's `temp/<source>/` caches are deleted (raw mp4 + stems + sidecars are all regenerable), but `output/<project>/` is KEPT as a one-period buffer; the PREVIOUS shipped project's entire `output/<project>/` folder is deleted (the video already lives on YouTube).
-
-```bash
-uv run video2yt-cleanup --project <project>          # DRY-RUN: prints the plan + reclaimable bytes
-uv run video2yt-cleanup --project <project> --yes     # actually delete
-```
-
-A "shipped project" = an `output/` subfolder carrying `youtube_metadata.json`; infra folders (`topics/`, `avatar/`, scratch) lack it and are never touched. Every delete passes `cleanup.assert_within` (refuses anything not strictly inside `./temp` or `./output`, and refuses the roots + the current project). NEVER hand-roll an `rm -rf temp/*<glob>*` — that is exactly what this CLI exists to replace. Flags: `--all-previous` (sweep every older project, not just the latest), `--no-prev` (purge current temp only), `--no-temp` (delete previous output only).
-
-## 5. Scripts added by this workflow
-
-All under `scripts/` (untracked by default — they're project-specific tooling, but useful enough to be reused; promote to `src/video2yt/` if formalizing into proper CLIs).
+## 5. Scripts and CLIs used by this workflow
 
 | File | Purpose | Key deps |
 |---|---|---|
-| `scripts/tts_quick.py` | Volcengine BigTTS HTTP Chunked client | `requests`, `python-dotenv` |
-| `scripts/image_quick.py` | Image-gen via Codex (default) or Gemini, then crop/letterbox to target | `google-genai`, `Pillow`, `python-dotenv`, `codex` CLI |
-| `scripts/thumbnail_polish.py` | Warm-tavern composite (the ONLY thumbnail tool): bg lift + vignette + tilted card on the right + scrim + mascot + two-tier title (`--primary`/`--secondary`[/`--tertiary`]); all params locked constants | `numpy`, `Pillow` |
-| `video2yt-research-card` (`src/video2yt/research_card{,_cli}.py`) | Look up Hearthstone card on hearthstonejson.com and download 512px art | `requests` |
-| `scripts/youtube_upload.py` | YouTube Data API v3 OAuth + resumable upload + thumbnail set | `google-api-python-client`, `google-auth-oauthlib`, `google-auth-httplib2` |
-
-`pyproject.toml` got these new deps added during this session:
-
-- `google-genai>=1.73.1`
-- `google-api-python-client>=2.194.0`
-- `google-auth-oauthlib>=1.3.1`
-- `google-auth-httplib2>=0.3.1`
-- `python-dotenv>=1.2.2`
-- `requests>=2.33.1`
+| `video2yt-topic` | Pair streamers along 流派/英雄/饰品, emit link-bearing report | — |
+| `video2yt-prefetch` | Serial pre-download of sources into the Stage 1 cache | `yt-dlp` |
+| `video2yt-stems` / `video2yt-subtitle` | Stage 2 stems / Stage 3 ASR (`--skip-cleanup` in Step 2) | `song-remover`, `speech2srt` |
+| `video2yt-tts` | Volcengine BigTTS narration | `VOLCENGINE_API_KEY` |
+| `video2yt-transcribe` | whisperx forced-alignment SRT | `whisperx` |
+| `video2yt-image` | Image-gen via Codex (default) or Gemini, crop/letterbox | `codex` CLI / `google-genai`, `Pillow` |
+| `video2yt-intro` | Dynamic intro compositor (mascot + card spotlight + scrim) | `ffmpeg`+libass |
+| `video2yt-research-card` | Resolve HS card id on hearthstonejson.com + download art | `requests` |
+| `video2yt-music-mix` / `video2yt-burn` | Stage 4 CC0 bed / Stage 5 burn | `ffmpeg`+libass |
+| `video2yt-merge` | Concat + loudnorm + chapters | `ffmpeg` |
+| `scripts/thumbnail_polish.py` | The ONLY thumbnail compositor (`--primary`/`--secondary`) | `numpy`, `Pillow` |
+| `video2yt-upload` | YouTube Data API v3 OAuth + resumable upload + thumbnail | `google-api-python-client`, `google-auth-oauthlib` |
+| `scripts/post_comment.py` | Post the subscribe comment | `google-api-python-client` |
+| `video2yt-cleanup` | Post-ship disk reclaim | — |
 
 ## 6. Tech debt and follow-ups
 
 | Area | Status | Notes |
 |---|---|---|
-| `compose -shortest` bug | **Fixed** in this session | `compose.render` now probes audio duration and adds `-t <audio_duration>` as an output-side clamp. |
-| Promote `scripts/*.py` to CLIs | Pending | User originally chose option (A) — formalize as `video2yt-tts`, `video2yt-image`, `video2yt-upload` with TDD. Current scripts are working but lack tests and are not installed as console scripts. (`video2yt-thumbnail` was the exception — deleted 2026-06-15; thumbnails use `scripts/thumbnail_polish.py` only.) |
-| Image fit aspect ratio | Improved (Codex 3:2) | Gemini outputs 1024x1024 (44% vertical loss to 16:9). Codex `image_gen` outputs 1536x1024 (3:2 — only ~16% loss). The `image_quick.py --backend codex` default benefits from this; can switch back via `--backend gemini`. |
-| Thumbnail font auto-fit | Obsolete (tooling removed) | Historical: the `vertical-left` / `card-tilt-right` orientations auto-shrank the title font on overflow. Moot since `video2yt-thumbnail` was deleted 2026-06-15 — `scripts/thumbnail_polish.py` is the only thumbnail path now. |
-| OAuth app publishing | Pending (user-side) | While in Testing status, tokens expire in 7 days. To upload reliably long-term, publish the OAuth consent screen (or rotate tokens). |
+| speech2srt: split raw-transcription cache from cleanup | Pending (out-of-repo) | The cleanest fix would let the slow/flaky Volcengine transcription cache independently of cleanup, so changing context re-runs only the cheap part. Until then, we run speech2srt once (`--skip-cleanup`, Step 2) and do cleanup ourselves (Step 5b). |
+| OAuth app publishing | Pending (user-side) | Testing-status tokens expire ~7 days → weekly re-consent (Step 10). Publishing the consent screen would fix it. |
+| Image fit aspect ratio | Improved (Codex 3:2) | Codex `image_gen` outputs 1536x1024 (~16% loss to 16:9) vs Gemini 1024x1024 (44%). |
 
-## 7. Verification log — projects that have shipped through this pipeline
+## 7. Verification log — projects shipped through this pipeline
 
 | Project | Date | Video ID | Notes |
 |---|---|---|---|
-| `back2back` | 2026-04-17 | [`DuglxlhKbzw`](https://www.youtube.com/watch?v=DuglxlhKbzw) | First end-to-end run. `intro.mp3` 21.89s → `intro.mp4` 21.97s (Δ < 0.1s). Final 21:55, 847 MB. 8m 24s upload. Originated the `compose -shortest` fix. |
-| `ringnaga` | 2026-05-02 | [`hP27PqfL6zY`](https://www.youtube.com/watch?v=hP27PqfL6zY) | First `card-tilt-right` thumbnail. Validated Codex `image_gen` as Gemini fallback. Surfaced 6 workflow improvements (term research, BG glossary, thumbnail formalization, transcribe multi-separator, OAuth auto-refresh, image backend), all batched after ship and folded into this spec on 2026-05-03. |
-| `redchroma` | 2026-05-23 | [`QwzUGIE3C6s`](https://www.youtube.com/watch?v=QwzUGIE3C6s) | First end-to-end run of `video2yt-music-swap` (Step 6.5). 22 Kevin MacLeod CC BY 3.0 tracks auto-downloaded from Internet Archive on first invocation. Demucs MPS path ~10 min per ~18-min segment. Hit a torchaudio backend bug on first attempt; fixed by `uv add soundfile` mid-pipeline. 瓦莉拉's source was VIP-locked at 480p, so the burnt segment had to be upscaled to 1920x1080 via ffmpeg before music-swap to meet merge's strict resolution rule. Final 36:37, 1.26 GB. 4m 43s upload. |
-| `mooniron` | 2026-05-24 | [`O5tkP2YAFhY`](https://www.youtube.com/watch?v=O5tkP2YAFhY) | Last segment shipped under the old 3-step pipeline (`video2yt` → `video2yt-music-swap` → `video2yt-subtitle`). Surfaced the merge audio-truncation gotcha (initial upload `RrR9lqn3M3s` lost 27 min of audio from the 夜吹 segment) — root cause was yt-dlp merger truncation on cached download; fixed by quarantining `.broken` files and validating AV duration match in `download.fetch`. |
-| `dragon_snip_4m50_to_9m` A/B | 2026-05-25 | — | T11 regression run for the step6-restructure (new five-stage pipeline). Source: 4:10 mooniron sub-clip (1920×1080 h264, 250.1s, 143 MB). New pipeline outputs an identical 1920×1080 30fps h264 yuv420p file (136.5 MB / 4577 kbps / **duration 250.10s, exact match** vs OLD pipeline's 250.07s drift). Audio sample-rate flipped 44.1k → **48k** (T6 design: aligns with song-remover speech.wav). Wall-clock: stems 1:57 (Modal T4) + ASR 2:03 + cleanup 0:18 + music-mix 0:01 + burn 1:00 = **5:21 cold** (≈ 1.28× realtime). Old pipeline same clip estimated 30–50 min (Demucs CPU + two video re-encodes) → **~6–10× speedup**. Artifacts: `output/regression-ab/dragon_snip_NEW_final.mp4`; A/B baseline `output/mooniron/dragon_snip_4m50_to_9m_b_subbed.mp4`. |
-| `mirrorbox` | 2026-05-31 | [`qvyZtPh_36Y`](https://www.youtube.com/watch?v=qvyZtPh_36Y) | 鏡匣經濟惡魔流 (S13). 郭楓荷 (`BV18AGj6bEik`, --no-subtitle) + 夜吹 (`BV1SEGm6UEXt`, full subtitle). Final 39:59, 1.19 GB. **Both sources hit the avc1 merger-truncation gotcha** (video 1152s vs audio 815s) — avc1 prefetch failed 3/3 retries; `--codec h265` fallback rescued both (per the Bilibili-download-robustness rule). speech2srt on the 20-min 夜吹 segment took **1224.8s** (codex cleanup dominates long clips — provisional 3–6 min estimate is way low for 20-min sources). 鏡匣 = `BG35_MagicItem_817` Lens Case (複映透鏡 = `..._817t`); zhTW BGS card art downloaded for the thumbnail. Term-check (HARD RULE) needed user-supplied trinket definition — public fan sites embed it as images that WebFetch can't read; future lookups should use the Blizzard Developer API. **Title-format lesson**: first upload used `「英雄戰場」S13…` but user requires the feina-style `「爐石戰記：英雄戰場」新賽季…` (full game name, "新賽季" not "S13"); had to delete the first video (`C0pAsIpr7d4`) and re-upload. Also: the cached `youtube_token.json` only had `youtube.upload`+`readonly` scopes, so post-upload title edits via API 403'd — added `youtube.force-ssl` to `upload.py` SCOPES so future runs can edit. |
+| `back2back` | 2026-04-17 | [`DuglxlhKbzw`](https://www.youtube.com/watch?v=DuglxlhKbzw) | First end-to-end run (old order). Originated the `compose -shortest` fix. |
+| `ringnaga` | 2026-05-02 | [`hP27PqfL6zY`](https://www.youtube.com/watch?v=hP27PqfL6zY) | First `card-tilt-right` thumbnail; validated Codex `image_gen`. Surfaced the term-research HARD RULE. |
+| `mirrorbox` | 2026-05-31 | [`qvyZtPh_36Y`](https://www.youtube.com/watch?v=qvyZtPh_36Y) | Title-format lesson: must be feina-style 「爐石戰記：英雄戰場」新賽季… (deleted+re-uploaded over the `S13` form). Term-check needs in-game source, not fan sites. |
+| `midas_arrow` | 2026-06-24 | [`nY2u4ZPx6Mo`](https://www.youtube.com/watch?v=nY2u4ZPx6Mo) | First run of the **reordered** workflow (download→understand→intro→term-check→burn). Term trap: 简中「点金箭」= 台服「黃金箭」 (an 異變, not a 饰品; topic tool mis-bucketed it), locked from the zhTW card art. First run with **speech2srt-once + subagent cleanup** as the default (not fallback) — Kimmy's segment would have failed the old codex guard. OAuth: Claude-in-Chrome refused the Google consent page; user clicked the URL. |
 
-## 8. Per-project workflow template
+## 8. Per-project workflow checklist
 
-Every new project starts by creating `output/<project>/` and copying this checklist into a project-local `WORKFLOW_NOTES.md`. Track step status as you go, and **log every awkward bit / spec gap into the "Issues to fix later" section without breaking flow** — fix in a batch after the video ships.
+Copy into a project-local `WORKFLOW_NOTES.md`; track status and log spec gaps as you hit them (fix in a batch after ship).
 
 ```markdown
-# <Project> Workflow Notes
+# <Project> Workflow Notes — `<project>` (<topic>)
+**Channel**: UCEgIrCo0pR6DyyrXuSn3wBg | **Started**: <YYYY-MM-DD>
+Running through docs/superpowers/specs/2026-04-18-video-production-workflow.md.
 
-**Project**: `<project>` (<one-line topic>)
-**Channel**: `UCEgIrCo0pR6DyyrXuSn3wBg`
-**Started**: <YYYY-MM-DD>
-
-Running through `docs/superpowers/specs/2026-04-18-video-production-workflow.md`.
-Anything that should be fixed in the scripts / CLIs / spec gets logged below as
-we hit it. Address them in a batch after the video ships.
-
-## Step status
-
-- [ ] Step 0 — 选题 via `video2yt-topic` (流派/英雄/饰品 三维度); when reporting candidates in chat, EVERY pick carries both Bilibili links + `SendUserFile` the report (HARD RULE, see spec Step 0)
-- [ ] Step 1 — write intro script (term-research first if BG topic; see spec Step 1)
-- [ ] Step 1 (parallel) — kick off `uv run video2yt-prefetch "<url1>" "<url2>" -o temp/ &` NOW so Step 6 sources download in the background while you do Steps 1–5 (see spec Step 1 tip; `-o` MUST be the `temp/` dir, not `output/<project>/`)
-- [ ] Step 2 — TTS via `tts_quick.py`
-- [ ] Step 3 — bg image via `video2yt-image` (Codex backend default; subjectless warm mid-key bg — see Step 3)
-- [ ] Step 4 — forced-alignment SRT via `video2yt-transcribe`
-- [ ] Step 5 — compose dynamic intro via `video2yt-intro` (author `intro_cards.txt`)
-- [ ] Step 6 — burn N Bilibili segments via `video2yt`
-- [ ] Step 6 covers the full per-segment pipeline (fetch → stems → subtitle → music-mix → burn) in one `video2yt` invocation. Per-segment skip flags `--no-subtitle` / `--no-music-swap` replace the old Step 6.5 / 6.6 sub-steps. See the table in §"Step 6 — Burn N Bilibili segments (five-stage pipeline)" above.
-- [ ] Step 6.5 — append the subscribe CTA to **battle 1** via `scripts/append_cta.sh <battle1>_final.mp4` → `<battle1>_final_cta.mp4` (plays mid-roll between battles, inside battle 1's chapter). Merge MUST use the `_cta` clip as battle 1's `--segment`; never pass the CTA as its own `--segment` (<10s nukes the chapter list). See spec Step 6.5.
-- [ ] Step 7 — merge via `video2yt-merge`
-- [ ] Bonus — thumbnail (`video2yt-research-card` + `video2yt-image` for bg → `scripts/thumbnail_polish.py` warm-tavern compositor)
-- [ ] Step 8 — write `youtube_metadata.{txt,json}`
-- [ ] Step 9 — upload via `youtube_upload.py`
-- [ ] Step 10 — post subscribe-CTA comment via `scripts/post_comment.py` (MANDATORY after every upload; recap the comp + 按讚/訂閱/小鈴鐺)
-- [ ] Step 11 — reclaim disk via `video2yt-cleanup --project <project> --yes` (delete current project's temp/ caches + previous shipped project's output/ folder; dry-run first)
+- [ ] Step 0 — 选题 via video2yt-topic (relay verbatim; EVERY pick carries both links incl. in 推荐/跳过)
+- [ ] Step 1 — download both sources via video2yt-prefetch -o temp/ (check 1080p)
+- [ ] Step 2 — stems + video2yt-subtitle --skip-cleanup (speech2srt ONCE) → read raw ASR + danmaku → content_understanding.md + intro_script.txt  [REVIEW #1: understanding + script]
+- [ ] Step 3 — term-check (danmaku/topic first, then zhTW card art) → correct intro_script.txt
+- [ ] Step 4 — TTS → transcribe → image → video2yt-intro → intro.mp4  [REVIEW #2: intro.mp4]
+- [ ] Step 5 — per segment: music-mix + clean raw SRT MYSELF (subagents → speech.cleaned.ass) + video2yt-burn
+- [ ] Step 6 — append_cta.sh on battle 1 → _cta.mp4
+- [ ] Step 7 — video2yt-merge (-o is a FILE path) → final + chapters
+- [ ] Step 8 — thumbnail_polish.py (8-char two-tier, 5 directions, don't pick alone)  [REVIEW #3: thumbnail]
+- [ ] Step 9 — youtube_metadata.json (feina title; one chapter block; #英雄戰場教學 in first 3)
+- [ ] Step 10 — video2yt-upload (dry-run then real; OAuth URL → user clicks Allow)
+- [ ] Step 11 — post_comment.py (MANDATORY: recap + 按讚/訂閱/小鈴鐺)
+- [ ] Step 12 — video2yt-cleanup --project <project> --yes (dry-run first)
 
 ## Issues to fix later
-
-<!-- Format per item:
-### N. <short title>
-- **Step**: which workflow step / which script
-- **Symptom**: what went wrong / what was awkward
-- **Proposed fix**: what to change
--->
+<!-- ### N. <title> — Step / Symptom / Proposed fix -->
 ```
-
-After the video ships:
-1. Review the per-project `WORKFLOW_NOTES.md` "Issues to fix later" section.
-2. Implement fixes in the scripts / CLIs / this spec, in priority order (blockers > frequency > cost).
-3. Once all items in a project's notes are addressed, the file can be deleted (its lessons live in the spec now). Keep it temporarily if a future project still relies on quirks documented there.
