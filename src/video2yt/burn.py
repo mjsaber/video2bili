@@ -27,8 +27,10 @@ from video2yt import cuts
 # Audio constants ported from music_swap.mix(): the known-good ducking
 # config when mixing CC0 bed under speech. See spec §6 note 6.
 _SIDECHAIN_PARAMS = "threshold=0.05:ratio=8:attack=5:release=300"
-_MUSIC_BED_VOLUME = 0.18  # was 0.25 in music_swap; slightly lower since
-# Bandit-v2 speech.wav has higher relative loudness than Demucs vocals.
+_MUSIC_BED_VOLUME = 0.12  # was 0.18; lowered 2026-07-03 after viewer
+# feedback that the BGM bed was too loud under speech. (Originally 0.25
+# in music_swap; Bandit-v2 speech.wav has higher relative loudness than
+# Demucs vocals.)
 
 
 def _build_filter_complex(

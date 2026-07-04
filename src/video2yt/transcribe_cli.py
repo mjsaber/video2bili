@@ -1,4 +1,4 @@
-"""CLI for video2yt-transcribe: audio + script -> SRT via whisperx alignment."""
+"""CLI for video2yt-transcribe: audio + script -> SRT via ffmpeg span alignment."""
 
 import argparse
 import shutil
@@ -16,22 +16,21 @@ def _log(msg: str) -> None:
 def preflight() -> None:
     if shutil.which("ffmpeg") is None:
         raise RuntimeError(
-            "ffmpeg not found in PATH (whisperx needs it to read audio)"
+            "ffmpeg not found in PATH (needed for silencedetect span detection)"
         )
-    try:
-        import whisperx  # noqa: F401
-    except ImportError as e:
+    if shutil.which("ffprobe") is None:
         raise RuntimeError(
-            "whisperx not installed. Run: uv add whisperx"
-        ) from e
+            "ffprobe not found in PATH (needed to probe audio duration)"
+        )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="video2yt-transcribe",
         description=(
-            "Align an audio file to a script using whisperx forced alignment, "
-            "producing an SRT with the script's text and audio-derived timestamps."
+            "Align an audio file to a script using an ffmpeg-derived speech "
+            "span (silencedetect + ffprobe), producing an SRT with the "
+            "script's text and proportionally allocated timestamps."
         ),
     )
     parser.add_argument(
@@ -53,23 +52,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--language",
         default="zh",
-        help="Audio language (default: zh for Chinese). Passed to whisperx.",
+        help="DEPRECATED, ignored (whisperx leftover; will be removed).",
     )
     parser.add_argument(
         "--model",
         default="small",
-        help=(
-            "Whisper model name (tiny/base/small/medium/large-v3). "
-            "Default: small for speed. Use large-v3 for best quality."
-        ),
+        help="DEPRECATED, ignored (whisperx leftover; will be removed).",
     )
     parser.add_argument(
         "--device",
         default="cpu",
-        help=(
-            "whisperx device (cpu/cuda/mps). Default: cpu. "
-            "On macOS, CPU is usually the only reliable option."
-        ),
+        help="DEPRECATED, ignored (whisperx leftover; will be removed).",
     )
     parser.add_argument(
         "--max-block-chars",
@@ -102,17 +95,15 @@ def run(args: argparse.Namespace) -> Path:
     script_text = args.script.read_text(encoding="utf-8")
     _log(f"read script: {len(script_text)} chars")
 
-    _log(
-        f"running whisperx (model={args.model}, language={args.language}, "
-        f"device={args.device})"
-    )
-    _log("  (first run downloads models; subsequent runs are faster)")
+    if (args.language, args.model, args.device) != ("zh", "small", "cpu"):
+        _log(
+            "note: --language/--model/--device are deprecated and ignored "
+            "(alignment is now ffmpeg span-based, no ASR involved)"
+        )
+    _log("detecting speech span (ffmpeg silencedetect)")
     srt = transcribe.transcribe_script(
         audio_path=args.audio,
         script_text=script_text,
-        language=args.language,
-        model_name=args.model,
-        device=args.device,
         max_block_chars=args.max_block_chars,
     )
 

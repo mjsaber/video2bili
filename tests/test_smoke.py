@@ -3502,10 +3502,9 @@ def test_segments_to_srt_basic():
 
 def test_transcribe_script_end_to_end_mocked(monkeypatch):
     from video2yt import transcribe
-    fake_words = [("你", 0.0, 0.5), ("好", 0.5, 1.0), ("世", 1.0, 1.5), ("界", 1.5, 2.0)]
     monkeypatch.setattr(
-        "video2yt.transcribe.run_whisperx_alignment",
-        lambda audio_path, language, model_name, device: fake_words,
+        "video2yt.transcribe.detect_speech_span",
+        lambda audio_path: (0.0, 2.0),
     )
     srt = transcribe.transcribe_script(
         audio_path=Path("fake.mp3"),
@@ -3515,6 +3514,200 @@ def test_transcribe_script_end_to_end_mocked(monkeypatch):
     assert "世界。" in srt
     assert "00:00:00,000" in srt
     assert srt.count("\n\n") >= 1
+
+
+def test_transcribe_script_last_block_ends_at_speech_end(monkeypatch):
+    # Regression for the whisperx tail-drop class: the SRT tail must land on
+    # the detected speech_end, not somewhere earlier.
+    from video2yt import transcribe
+    monkeypatch.setattr(
+        "video2yt.transcribe.detect_speech_span",
+        lambda audio_path: (0.3, 45.5),
+    )
+    srt = transcribe.transcribe_script(
+        audio_path=Path("fake.mp3"),
+        script_text="第一句话很长很长很长。第二句。收尾！",
+    )
+    blocks = [b for b in srt.strip().split("\n\n") if b.strip()]
+    last_ts = blocks[-1].split("\n")[1].split(" --> ")[1]
+    assert last_ts == "00:00:45,500"
+    first_ts = blocks[0].split("\n")[1].split(" --> ")[0]
+    assert first_ts == "00:00:00,300"
+
+
+def test_transcribe_script_ignores_deprecated_kwargs(monkeypatch):
+    from video2yt import transcribe
+    monkeypatch.setattr(
+        "video2yt.transcribe.detect_speech_span",
+        lambda audio_path: (0.0, 2.0),
+    )
+    srt = transcribe.transcribe_script(
+        audio_path=Path("fake.mp3"),
+        script_text="你好。",
+        language="en",
+        model_name="large-v3",
+        device="cuda",
+    )
+    assert "你好。" in srt
+
+
+def test_align_script_to_span_proportional():
+    from video2yt.transcribe import align_script_to_span
+    sentences = ["短句。", "中等长度的句子。", "这是一个明显更长更长更长的句子。"]
+    segments = align_script_to_span(sentences, 0.0, 30.0)
+    assert len(segments) == 3
+    assert segments[0].start == 0.0
+    assert segments[-1].end == pytest.approx(30.0)
+    assert segments[1].start == segments[0].end
+    dur0 = segments[0].end - segments[0].start
+    dur2 = segments[2].end - segments[2].start
+    assert dur2 > dur0
+
+
+def test_align_script_to_span_zero_duration_raises():
+    from video2yt.transcribe import align_script_to_span
+    with pytest.raises(ValueError, match="zero duration"):
+        align_script_to_span(["a。"], 5.0, 5.0)
+
+
+def _mk_span_env(monkeypatch, duration, stderr):
+    """Point detect_speech_span at a fake probe + fake silencedetect run."""
+    from video2yt import transcribe, validate
+    info = MediaInfo(
+        duration=duration, width=0, height=0,
+        has_video=False, has_audio=True,
+        vcodec="", acodec="mp3", size_bytes=1000,
+    )
+    monkeypatch.setattr(validate, "probe", lambda p: info)
+    monkeypatch.setattr(
+        transcribe, "_run_silencedetect", lambda p, n, d: stderr
+    )
+    return transcribe
+
+
+def test_detect_speech_span_no_silence_at_all(monkeypatch):
+    t = _mk_span_env(monkeypatch, 45.5, "decode noise, no silence lines\n")
+    assert t.detect_speech_span(Path("a.mp3")) == (0.0, 45.5)
+
+
+def test_detect_speech_span_leading_and_trailing(monkeypatch):
+    stderr = (
+        "[silencedetect] silence_start: 0.0\n"
+        "[silencedetect] silence_end: 0.42 | silence_duration: 0.42\n"
+        "[silencedetect] silence_start: 44.1\n"
+        "[silencedetect] silence_end: 45.48 | silence_duration: 1.38\n"
+    )
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.42, 44.1)
+
+
+def test_detect_speech_span_interior_silence_ignored(monkeypatch):
+    stderr = (
+        "[silencedetect] silence_start: 12.0\n"
+        "[silencedetect] silence_end: 13.0 | silence_duration: 1.0\n"
+    )
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.0, 45.5)
+
+
+def test_detect_speech_span_unmatched_trailing_start(monkeypatch):
+    # File ends inside a silence run: silence_start with no silence_end.
+    stderr = "[silencedetect] silence_start: 40.2\n"
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.0, 40.2)
+
+
+def test_detect_speech_span_trailing_within_eof_tolerance(monkeypatch):
+    # silence_end lands 0.2s short of the probed duration (VBR mp3 jitter):
+    # still counts as a trailing run.
+    stderr = (
+        "[silencedetect] silence_start: 44.0\n"
+        "[silencedetect] silence_end: 45.3 | silence_duration: 1.3\n"
+    )
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.0, 44.0)
+
+
+def test_detect_speech_span_trailing_outside_tolerance_is_interior(monkeypatch):
+    # Run ends 0.4s before EOF -> interior pause, span keeps full duration.
+    stderr = (
+        "[silencedetect] silence_start: 44.0\n"
+        "[silencedetect] silence_end: 45.1 | silence_duration: 1.1\n"
+    )
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.0, 45.5)
+
+
+def test_detect_speech_span_all_silence_raises(monkeypatch):
+    stderr = "[silencedetect] silence_start: 0.0\n"
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    with pytest.raises(ValueError, match="silent"):
+        t.detect_speech_span(Path("a.mp3"))
+
+
+def test_detect_speech_span_trailing_start_beyond_probed_duration(monkeypatch):
+    # VBR mp3: decode runs longer than the header duration. The unmatched
+    # trailing silence_start lands BEYOND the probed duration and must be
+    # used as-is (never truncated down to the metadata duration).
+    stderr = "[silencedetect] silence_start: 45.3\n"
+    t = _mk_span_env(monkeypatch, 45.0, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.0, 45.3)
+
+
+def test_detect_speech_span_orphan_silence_end_ignored(monkeypatch):
+    # A silence_end with no preceding silence_start (e.g. log line lost or
+    # filter restarted) must not crash or produce a phantom run.
+    stderr = "[silencedetect] silence_end: 3.0 | silence_duration: 3.0\n"
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.0, 45.5)
+
+
+def test_detect_speech_span_only_first_leading_run_trims(monkeypatch):
+    # Two early silence runs: only the one starting at ~0 trims speech_start;
+    # the second is an interior pause and is ignored.
+    stderr = (
+        "[silencedetect] silence_start: 0.02\n"
+        "[silencedetect] silence_end: 0.5 | silence_duration: 0.48\n"
+        "[silencedetect] silence_start: 1.0\n"
+        "[silencedetect] silence_end: 2.0 | silence_duration: 1.0\n"
+    )
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.5, 45.5)
+
+
+def test_detect_speech_span_scientific_notation(monkeypatch):
+    # ffmpeg occasionally logs tiny times in scientific notation.
+    stderr = (
+        "[silencedetect] silence_start: 1.9e-05\n"
+        "[silencedetect] silence_end: 4.2e-01 | silence_duration: 0.42\n"
+    )
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    start, end = t.detect_speech_span(Path("a.mp3"))
+    assert start == pytest.approx(0.42)
+    assert end == 45.5
+
+
+def test_detect_speech_span_single_leading_run_only(monkeypatch):
+    # One run, consumed as leading; it does not reach EOF, so speech_end
+    # falls back to the container duration.
+    stderr = (
+        "[silencedetect] silence_start: 0.0\n"
+        "[silencedetect] silence_end: 0.42 | silence_duration: 0.42\n"
+    )
+    t = _mk_span_env(monkeypatch, 45.5, stderr)
+    assert t.detect_speech_span(Path("a.mp3")) == (0.42, 45.5)
+
+
+def test_detect_speech_span_no_audio_stream_raises(monkeypatch):
+    from video2yt import transcribe, validate
+    info = MediaInfo(
+        duration=45.5, width=0, height=0,
+        has_video=False, has_audio=False,
+        vcodec="", acodec=None, size_bytes=1000,
+    )
+    monkeypatch.setattr(validate, "probe", lambda p: info)
+    with pytest.raises(ValueError, match="no audio stream"):
+        transcribe.detect_speech_span(Path("a.mp3"))
 
 
 def test_transcribe_cli_parse_args_defaults():
@@ -3561,6 +3754,44 @@ def test_transcribe_cli_run_happy_path(tmp_path, monkeypatch):
     assert result == audio.with_suffix(".srt")
     assert result.exists()
     assert "第一句" in result.read_text(encoding="utf-8")
+
+
+def test_transcribe_cli_preflight_requires_ffprobe(monkeypatch):
+    from video2yt import transcribe_cli
+    monkeypatch.setattr(
+        "video2yt.transcribe_cli.shutil.which",
+        lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None,
+    )
+    with pytest.raises(RuntimeError, match="ffprobe"):
+        transcribe_cli.preflight()
+
+
+def test_transcribe_cli_deprecated_flag_notice(tmp_path, monkeypatch, capsys):
+    from video2yt import transcribe_cli
+    audio = tmp_path / "audio.mp3"
+    audio.write_bytes(b"fake")
+    script = tmp_path / "script.md"
+    script.write_text("第一句。\n", encoding="utf-8")
+
+    monkeypatch.setattr("video2yt.transcribe_cli.preflight", lambda: None)
+    audio_info = MediaInfo(
+        duration=30.0, width=0, height=0,
+        has_video=False, has_audio=True,
+        vcodec="", acodec="mp3", size_bytes=1000,
+    )
+    monkeypatch.setattr("video2yt.transcribe_cli.validate.probe", lambda p: audio_info)
+    monkeypatch.setattr(
+        "video2yt.transcribe_cli.transcribe.transcribe_script",
+        lambda **kwargs: "1\n00:00:00,000 --> 00:00:05,000\n第一句。\n",
+    )
+
+    args = transcribe_cli.parse_args([
+        "--audio", str(audio),
+        "--script", str(script),
+        "--language", "en",
+    ])
+    transcribe_cli.run(args)
+    assert "deprecated" in capsys.readouterr().err
 
 
 def test_transcribe_cli_run_rejects_missing_audio(tmp_path, monkeypatch):
@@ -3656,10 +3887,9 @@ def test_transcribe_cli_parse_args_max_block_chars_default_zero():
 
 def test_transcribe_script_passes_max_block_chars(monkeypatch):
     from video2yt import transcribe
-    fake_words = [("x", 0.0, 0.5), ("y", 9.5, 10.0)]
     monkeypatch.setattr(
-        "video2yt.transcribe.run_whisperx_alignment",
-        lambda audio_path, language, model_name, device: fake_words,
+        "video2yt.transcribe.detect_speech_span",
+        lambda audio_path: (0.0, 10.0),
     )
     # 一段 25-char 的句子，含分号；max_block_chars=10 时应被切为多块。
     script = "我們先做一件事；然後做第二件事；最後做第三件事。"
