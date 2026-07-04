@@ -59,7 +59,7 @@ output/<project>/
 | Volcengine BigTTS (Step 4 intro voice) | API key | Volcano Ark console → API Key 管理 → create. Stored as `VOLCENGINE_API_KEY` in `.env`. `video2yt-tts` reads it. |
 | `speech2srt` CLI (Step 2 ASR — Volcengine 火山 Seed-ASR) | `speech2srt` in PATH | One-time: `cd ~/code/speech2srt && uv tool install . --force`. Requires `VOLCENGINE_API_KEY`. Cost ~¥0.0003/char, ≈ ¥0.1 per 4-min segment. **Called exactly ONCE per segment now** (Step 2, `--skip-cleanup`); the subtitle cleanup no longer goes through speech2srt's codex path (see Step 5). |
 | `song-remover` CLI (Step 2 stems — Bandit-v2 multilingual separator) | `song-remover` in PATH | One-time: `cd ~/code/song-remover && uv tool install '.[remote]'` (the `[remote]` extra bakes the `modal` SDK in). Default `--device remote` needs `uv run modal token new` + Modal app deploys per `song-remover` README. |
-| Codex CLI (Step 4 image gen only) | `codex` in PATH, logged in | `brew install codex` then `codex login`. Uses ChatGPT auth; no separate API key. **No longer used for subtitle cleanup** — that moved to Claude subagents (Step 5). NOT used by Step 4 intro forced-alignment (whisperx only). |
+| Codex CLI (Step 4 image gen only) | `codex` in PATH, logged in | `brew install codex` then `codex login`. Uses ChatGPT auth; no separate API key. **No longer used for subtitle cleanup** — that moved to Claude subagents (Step 5). NOT used by Step 4 intro alignment (pure ffmpeg silencedetect since 2026-07-04). |
 | Google Gemini (image-gen fallback) | API key | Google AI Studio → API key (paid/billed). `GEMINI_API_KEY` in `.env`. Only for `video2yt-image --backend gemini`. |
 | YouTube Data API v3 | OAuth client | Google Cloud Console → enable YouTube Data API v3 → desktop OAuth client. Save JSON as `client_secret.json` (gitignored). Token cached in `youtube_token.json` (gitignored, testing-mode expiry ~7 days). |
 | Hearthstone Battlegrounds logo | `assets/hsbg_logo.png` | One-time download from Fandom wiki (RGBA). |
@@ -156,7 +156,7 @@ Fix every term in `intro_script.txt` to the verified zhTW form **before** Step 4
 # 1. TTS (女老板 voice). Default speaker zh_female_vv_uranus_bigtts, rate 0 (1.0x).
 uv run video2yt-tts --text-file output/<project>/intro_script.txt -o output/<project>/intro.mp3
 
-# 2. Forced-alignment SRT (text from the script, timestamps from whisperx).
+# 2. Alignment SRT (text from the script; timestamps = ffmpeg silencedetect span, proportional slicing).
 uv run video2yt-transcribe --audio output/<project>/intro.mp3 \
   --script output/<project>/intro_script.txt --max-block-chars 22 \
   -o output/<project>/intro.srt
@@ -381,7 +381,7 @@ Policy: delete the CURRENT project's `temp/<source>/` caches (regenerable) but K
 | `video2yt-prefetch` | Serial pre-download of sources into the Stage 1 cache | `yt-dlp` |
 | `video2yt-stems` / `video2yt-subtitle` | Stage 2 stems / Stage 3 ASR (`--skip-cleanup` in Step 2) | `song-remover`, `speech2srt` |
 | `video2yt-tts` | Volcengine BigTTS narration | `VOLCENGINE_API_KEY` |
-| `video2yt-transcribe` | whisperx forced-alignment SRT | `whisperx` |
+| `video2yt-transcribe` | ffmpeg-span alignment SRT | ffmpeg+ffprobe |
 | `video2yt-image` | Image-gen via Codex (default) or Gemini, crop/letterbox | `codex` CLI / `google-genai`, `Pillow` |
 | `video2yt-intro` | Dynamic intro compositor (mascot + card spotlight + scrim) | `ffmpeg`+libass |
 | `video2yt-research-card` | Resolve HS card id on hearthstonejson.com + download art | `requests` |

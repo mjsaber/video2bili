@@ -1,12 +1,34 @@
-"""Align a written script to an audio file using whisperx forced alignment.
+"""Align a written script to an audio file via ffmpeg-derived speech span.
 
-The user has the authoritative script text. whisperx gives us audio-derived
-word-level timestamps. We use the timestamps to slice the script proportionally.
+The user has the authoritative script text. ffmpeg silencedetect + ffprobe
+give us the speech span [speech_start, speech_end]; the script is sliced
+proportionally by char weight into that span.
+
+This assumes constant-pace narration (our input is single-speaker Volcengine
+BigTTS with no music bed). For audio with long dramatic pauses the
+proportional model drifts — see
+docs/superpowers/specs/2026-07-04-transcribe-ffmpeg-span.md (which also
+records why the previous whisperx-based span source was replaced: it
+deterministically dropped the audio tail on two consecutive productions).
 """
 
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+# silencedetect tuning (internal constants — logged on every run so the
+# values are observable; see spec "Resolved questions" #3).
+_SPAN_NOISE_DB = -35.0
+_SPAN_MIN_SILENCE = 0.35
+# A trailing silence run counts as "reaches EOF" if its end lands within this
+# many seconds of the ffprobe container duration. Wide on purpose: VBR MP3
+# header duration and encoder/decoder padding can disagree with the decoded
+# stream by well over 50ms.
+_EOF_TOLERANCE = 0.25
+# A leading silence run counts as "starts at 0" within this tolerance.
+_LEAD_TOLERANCE = 0.1
 
 
 @dataclass
@@ -125,32 +147,28 @@ def _count_effective_chars(text: str) -> int:
     return cjk + latin_words * 2
 
 
-def align_script_to_words(
+def align_script_to_span(
     script_sentences: list[str],
-    word_timestamps: list[tuple[str, float, float]],
+    speech_start: float,
+    speech_end: float,
 ) -> list[AlignedSegment]:
     """Assign (start, end) times to each script sentence.
 
     Strategy: proportional allocation. Compute the total char-weight of all
     sentences, then map each sentence to a proportional slice of
-    [first_word.start, last_word.end].
+    [speech_start, speech_end].
 
-    Assumes the reader followed the script from start to end without large
-    skips or insertions. If they did improvise, results will drift — a future
-    upgrade could use difflib anchors between whisperx's ASR text and the
-    script to recalibrate between anchors.
+    Assumes the reader followed the script from start to end at constant pace
+    without large skips or insertions (true for TTS narration). Interior
+    pauses are absorbed by the proportional model.
     """
-    if not word_timestamps:
-        raise ValueError("no word timestamps provided (whisperx returned no words)")
     if not script_sentences:
         raise ValueError("no script sentences to align")
 
-    total_start = word_timestamps[0][1]
-    total_end = word_timestamps[-1][2]
-    total_duration = total_end - total_start
+    total_duration = speech_end - speech_start
     if total_duration <= 0:
         raise ValueError(
-            f"word timestamps span zero duration: {total_start} to {total_end}"
+            f"word timestamps span zero duration: {speech_start} to {speech_end}"
         )
 
     weights = [_count_effective_chars(s) for s in script_sentences]
@@ -159,7 +177,7 @@ def align_script_to_words(
         raise ValueError("script sentences contain no alignable characters")
 
     segments: list[AlignedSegment] = []
-    cursor = total_start
+    cursor = speech_start
     for sentence, weight in zip(script_sentences, weights):
         duration = total_duration * (weight / total_weight)
         segments.append(
@@ -167,6 +185,25 @@ def align_script_to_words(
         )
         cursor += duration
     return segments
+
+
+def align_script_to_words(
+    script_sentences: list[str],
+    word_timestamps: list[tuple[str, float, float]],
+) -> list[AlignedSegment]:
+    """DEPRECATED shim over :func:`align_script_to_span`.
+
+    Kept for one release for API compatibility with the old whisperx-based
+    interface: consumes a word-timestamp list but only ever used
+    ``word_timestamps[0].start`` and ``word_timestamps[-1].end``.
+    """
+    if not word_timestamps:
+        raise ValueError("no word timestamps provided (whisperx returned no words)")
+    return align_script_to_span(
+        script_sentences,
+        speech_start=word_timestamps[0][1],
+        speech_end=word_timestamps[-1][2],
+    )
 
 
 def _format_srt_time(seconds: float) -> str:
@@ -194,59 +231,102 @@ def segments_to_srt(segments: list[AlignedSegment]) -> str:
     return "\n".join(lines)
 
 
-def run_whisperx_alignment(
-    audio_path: Path,
-    language: str = "zh",
-    model_name: str = "small",
-    device: str = "cpu",
-) -> list[tuple[str, float, float]]:
-    """Run whisperx ASR + phoneme-level forced alignment.
+_SILENCE_START = re.compile(r"silence_start:\s*(-?[0-9.]+(?:[eE][+-]?\d+)?)")
+_SILENCE_END = re.compile(r"silence_end:\s*(-?[0-9.]+(?:[eE][+-]?\d+)?)")
 
-    Returns a list of (word, start, end) tuples covering the audio.
 
-    Isolated in its own function so tests can monkeypatch this boundary; real
-    calls hit whisperx and are slow on first run (model download).
+def _run_silencedetect(
+    audio_path: Path, noise_db: float, min_silence: float
+) -> str:
+    """One ffmpeg decode pass; returns stderr (where silencedetect logs).
+
+    Explicit mono downmix so stereo channel imbalance cannot skew detection.
+    Isolated so tests can monkeypatch this subprocess boundary.
     """
-    import whisperx
-
-    audio = whisperx.load_audio(str(audio_path))
-
-    model = whisperx.load_model(
-        model_name, device, compute_type="int8", language=language
+    result = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-nostats",
+            "-i", str(audio_path),
+            "-af",
+            (
+                "aformat=channel_layouts=mono,"
+                f"silencedetect=n={noise_db}dB:d={min_silence}"
+            ),
+            "-f", "null", "-",
+        ],
+        check=True, capture_output=True, text=True,
     )
-    result = model.transcribe(audio, language=language)
-    segments = result.get("segments", [])
-    if not segments:
-        raise RuntimeError(
-            f"whisperx ASR returned no segments for {audio_path}; audio may be silent"
+    return result.stderr
+
+
+def detect_speech_span(
+    audio_path: Path,
+    noise_db: float = _SPAN_NOISE_DB,
+    min_silence: float = _SPAN_MIN_SILENCE,
+) -> tuple[float, float]:
+    """Return (speech_start, speech_end) via ffmpeg silencedetect + ffprobe.
+
+    - speech_start: end of a leading silence run (one starting within
+      ``_LEAD_TOLERANCE`` of 0), else 0.0.
+    - speech_end: start of a trailing silence run (one whose end is missing —
+      file ends silent — or lands within ``_EOF_TOLERANCE`` of the container
+      duration), else the container duration. Never truncated below a
+      parsed value by a shorter metadata duration.
+    - raises ValueError if the detected span is degenerate (< 0.5s), e.g. the
+      whole file is silence.
+    """
+    from video2yt import validate
+
+    info = validate.probe(audio_path)
+    if not info.has_audio:
+        raise ValueError(f"audio file has no audio stream: {audio_path}")
+    duration = info.duration
+
+    stderr = _run_silencedetect(audio_path, noise_db, min_silence)
+
+    # Pair silence_start/silence_end lines in order; a final start without a
+    # matching end means the file ends inside a silence run.
+    events: list[tuple[float, float | None]] = []
+    pending_start: float | None = None
+    for line in stderr.splitlines():
+        m = _SILENCE_START.search(line)
+        if m:
+            pending_start = float(m.group(1))
+            continue
+        m = _SILENCE_END.search(line)
+        if m and pending_start is not None:
+            events.append((pending_start, float(m.group(1))))
+            pending_start = None
+    if pending_start is not None:
+        events.append((pending_start, None))
+
+    speech_start = 0.0
+    speech_end = duration
+
+    if events:
+        first_start, first_end = events[0]
+        if first_start <= _LEAD_TOLERANCE and first_end is not None:
+            speech_start = first_end
+
+        last_start, last_end = events[-1]
+        reaches_eof = last_end is None or last_end >= duration - _EOF_TOLERANCE
+        if reaches_eof:
+            # For an all-silence file this drives the span degenerate
+            # (speech_end <= speech_start) and the guard below raises.
+            speech_end = last_start
+
+    if speech_end - speech_start < 0.5:
+        raise ValueError(
+            f"audio appears to be silent (detected speech span "
+            f"{speech_start:.2f}-{speech_end:.2f}s in {audio_path})"
         )
 
-    align_model, metadata = whisperx.load_align_model(
-        language_code=language, device=device
+    print(
+        f"[transcribe] speech span {speech_start:.2f}-{speech_end:.2f}s "
+        f"of {duration:.2f}s (silencedetect n={noise_db}dB d={min_silence}s)",
+        file=sys.stderr,
     )
-    aligned = whisperx.align(
-        segments,
-        align_model,
-        metadata,
-        audio,
-        device,
-        return_char_alignments=False,
-    )
-
-    word_tuples: list[tuple[str, float, float]] = []
-    for seg in aligned.get("segments", []):
-        for w in seg.get("words", []):
-            word = w.get("word") or w.get("text") or ""
-            start = w.get("start")
-            end = w.get("end")
-            if word and start is not None and end is not None:
-                word_tuples.append((str(word).strip(), float(start), float(end)))
-
-    if not word_tuples:
-        raise RuntimeError(
-            f"whisperx alignment produced no word-level timestamps for {audio_path}"
-        )
-    return word_tuples
+    return speech_start, speech_end
 
 
 def transcribe_script(
@@ -262,18 +342,19 @@ def transcribe_script(
     `max_block_chars > 0` enables a secondary split: any sentence longer than
     that many characters is cut at semicolons/commas (`；，、;,`). 0 = legacy
     behavior (split on `。！？` only).
+
+    `language` / `model_name` / `device` are DEPRECATED and ignored (whisperx
+    leftovers, kept one release for API compatibility — the span now comes
+    from ffmpeg silencedetect).
     """
+    del language, model_name, device  # deprecated, ignored
+
     prose = strip_markdown(script_text)
     sentences = split_into_sentences(prose)
     sentences = split_long_sentences(sentences, max_block_chars)
     if not sentences:
         raise ValueError("script has no sentences after markdown stripping")
 
-    word_timestamps = run_whisperx_alignment(
-        audio_path=audio_path,
-        language=language,
-        model_name=model_name,
-        device=device,
-    )
-    segments = align_script_to_words(sentences, word_timestamps)
+    speech_start, speech_end = detect_speech_span(audio_path)
+    segments = align_script_to_span(sentences, speech_start, speech_end)
     return segments_to_srt(segments)
