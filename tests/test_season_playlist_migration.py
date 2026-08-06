@@ -77,3 +77,25 @@ def test_refuses_ambiguous_duplicate_s13_playlists():
 def test_refuses_missing_s13_source_playlist():
     with pytest.raises(RuntimeError, match="neither old nor renamed"):
         migration.migrate(FakeYouTube(), apply=False, log=lambda _msg: None)
+
+
+def test_wait_for_postconditions_polls_until_memberships_converge(monkeypatch):
+    first, second = migration.S14_VIDEO_IDS
+    responses = {
+        "PL13": iter([{first: "stale-membership"}, {}]),
+        "PL14": iter([
+            {first: "one", second: "two"},
+            {first: "one", second: "two"},
+        ]),
+    }
+    sleeps = []
+    monkeypatch.setattr(
+        migration.playlists,
+        "playlist_members",
+        lambda _youtube, playlist_id: next(responses[playlist_id]),
+    )
+    monkeypatch.setattr(migration.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    migration._wait_for_postconditions(object(), "PL13", "PL14", attempts=2, delay=3.0)
+
+    assert sleeps == [3.0]

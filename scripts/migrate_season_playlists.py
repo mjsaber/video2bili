@@ -6,6 +6,7 @@
 
 import argparse
 import sys
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -25,6 +26,31 @@ S14_VIDEO_IDS = ("hZiEib2tzAs", "KXlycy1Kb1A")
 
 def log(message: str) -> None:
     print(f"[season-playlists] {message}", file=sys.stderr)
+
+
+def _wait_for_postconditions(
+    youtube,
+    s13_id: str,
+    s14_id: str,
+    *,
+    attempts: int = 6,
+    delay: float = 3.0,
+) -> None:
+    """Poll until YouTube's eventually consistent membership reads converge."""
+    final_s13: dict[str, str] = {}
+    final_s14: dict[str, str] = {}
+    for attempt in range(attempts):
+        final_s13 = playlists.playlist_members(youtube, s13_id)
+        final_s14 = playlists.playlist_members(youtube, s14_id)
+        removed_from_s13 = all(video_id not in final_s13 for video_id in S14_VIDEO_IDS)
+        present_in_s14 = all(video_id in final_s14 for video_id in S14_VIDEO_IDS)
+        if removed_from_s13 and present_in_s14:
+            return
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    if any(video_id in final_s13 for video_id in S14_VIDEO_IDS):
+        raise RuntimeError("postcondition failed: S14 video remains in S13")
+    raise RuntimeError("postcondition failed: S14 video missing from S14")
 
 
 def migrate(youtube, apply: bool, log: Callable[[str], None]) -> list[str]:
@@ -72,12 +98,7 @@ def migrate(youtube, apply: bool, log: Callable[[str], None]) -> list[str]:
         if video_id in s13_members:
             playlists.remove_video(youtube, s13_id, video_id)
 
-    final_s13 = playlists.playlist_members(youtube, s13_id)
-    final_s14 = playlists.playlist_members(youtube, s14_id)
-    if any(video_id in final_s13 for video_id in S14_VIDEO_IDS):
-        raise RuntimeError("postcondition failed: S14 video remains in S13")
-    if any(video_id not in final_s14 for video_id in S14_VIDEO_IDS):
-        raise RuntimeError("postcondition failed: S14 video missing from S14")
+    _wait_for_postconditions(youtube, s13_id, s14_id)
     return actions
 
 
