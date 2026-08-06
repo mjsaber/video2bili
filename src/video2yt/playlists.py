@@ -61,16 +61,20 @@ def playlist_definitions(title: str, season: int) -> list[tuple[str, str]]:
 
 
 def _execute_retrying_404(request, attempts: int = 4, delay: float = 3.0):
-    """Execute a playlistItems request, retrying transient playlistNotFound 404s.
+    """Execute a playlistItems request, retrying known transient API failures.
 
     A freshly created playlist can 404 on playlistItems endpoints for a few
-    seconds before it propagates (observed live 2026-07-08).
+    seconds before it propagates (observed live 2026-07-08). YouTube can also
+    abort the first insert with 409/SERVICE_UNAVAILABLE (observed 2026-08-06).
     """
     for attempt in range(attempts):
         try:
             return request.execute()
         except HttpError as e:
-            if e.status_code != 404 or attempt == attempts - 1:
+            transient_409 = (
+                e.status_code == 409 and b'"SERVICE_UNAVAILABLE"' in e.content
+            )
+            if (e.status_code != 404 and not transient_409) or attempt == attempts - 1:
                 raise
             time.sleep(delay)
 

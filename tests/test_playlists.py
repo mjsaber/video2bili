@@ -159,8 +159,8 @@ def test_add_video_reuses_existing_playlist():
     assert yt.store[S14]["videos"] == ["old", "vid2"]
 
 
-def _http_error(status):
-    return HttpError(httplib2.Response({"status": status}), b"")
+def _http_error(status, content=b""):
+    return HttpError(httplib2.Response({"status": status}), content)
 
 
 class _FlakyRequest:
@@ -201,6 +201,25 @@ def test_execute_retrying_404_does_not_retry_other_errors(monkeypatch):
     with pytest.raises(HttpError):
         playlists._execute_retrying_404(_Fail500())
     assert calls == []  # no retry sleeps for non-404
+
+
+def test_execute_retrying_404_recovers_service_unavailable_409(monkeypatch):
+    monkeypatch.setattr(playlists.time, "sleep", lambda _seconds: None)
+
+    class _Transient409:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise _http_error(
+                    409,
+                    b'{"error":{"errors":[{"reason":"SERVICE_UNAVAILABLE"}]}}',
+                )
+            return {"id": "inserted"}
+
+    assert playlists._execute_retrying_404(_Transient409()) == {"id": "inserted"}
 
 
 def test_ensure_playlist_updates_existing_map_in_place():
