@@ -4987,6 +4987,8 @@ class _FakeYoutube:
         self._insert_raises = insert_raises
         self._set_raises = set_raises
         self.insert_body: dict | None = None
+        # title -> {"id": ..., "videos": [...]} — backs playlists()/playlistItems()
+        self.playlist_store: dict = {}
 
     def channels(self):
         outer = self
@@ -5020,6 +5022,51 @@ class _FakeYoutube:
 
         return _Thumbnails()
 
+    def playlists(self):
+        outer = self
+
+        class _Playlists:
+            def list(self, **kw):
+                items = [
+                    {"id": v["id"], "snippet": {"title": title}}
+                    for title, v in outer.playlist_store.items()
+                ]
+                return _ExecuteWrapper({"items": items})
+
+            def insert(self, **kw):
+                title = kw["body"]["snippet"]["title"]
+                playlist_id = f"PL_{len(outer.playlist_store)}"
+                outer.playlist_store[title] = {"id": playlist_id, "videos": []}
+                return _ExecuteWrapper({"id": playlist_id})
+
+        return _Playlists()
+
+    def playlistItems(self):
+        outer = self
+
+        def _by_id(playlist_id):
+            for v in outer.playlist_store.values():
+                if v["id"] == playlist_id:
+                    return v
+            raise KeyError(playlist_id)
+
+        class _PlaylistItems:
+            def list(self, **kw):
+                items = [
+                    {"contentDetails": {"videoId": vid}}
+                    for vid in _by_id(kw["playlistId"])["videos"]
+                ]
+                return _ExecuteWrapper({"items": items})
+
+            def insert(self, **kw):
+                snip = kw["body"]["snippet"]
+                _by_id(snip["playlistId"])["videos"].append(
+                    snip["resourceId"]["videoId"]
+                )
+                return _ExecuteWrapper({})
+
+        return _PlaylistItems()
+
 
 def _meta_dict(video_path: Path, thumb_path: Path, *, channel="UC_TEST"):
     return {
@@ -5034,6 +5081,7 @@ def _meta_dict(video_path: Path, thumb_path: Path, *, channel="UC_TEST"):
         "video_path": str(video_path),
         "thumbnail_path": str(thumb_path),
         "expected_channel_id": channel,
+        "season": 14,
     }
 
 
@@ -5269,15 +5317,48 @@ def test_upload_cli_run_full_happy_path(tmp_path, monkeypatch):
     meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
 
     monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
-    monkeypatch.setattr(
-        "video2yt.upload_cli.build",
-        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ"),
-    )
+    build_calls = []
+
+    def _fake_build(*a, **kw):
+        fake = _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ")
+        build_calls.append(fake)
+        return fake
+
+    monkeypatch.setattr("video2yt.upload_cli.build", _fake_build)
     args = upload_cli.parse_args(["--metadata", str(meta)])
     result = upload_cli.run(args)
     assert result["video_id"] == "vidXYZ"
     assert "youtube.com/watch?v=vidXYZ" in result["video_url"]
     assert "studio.youtube.com/video/vidXYZ" in result["studio_url"]
+    # Explicit metadata routes the video to exactly one season playlist.
+    fake = build_calls[0]
+    assert ["vidXYZ"] == fake.playlist_store["英雄戰場 S14 流派教學"]["videos"]
+    assert len(fake.playlist_store) == 1
+
+
+def test_upload_cli_run_playlist_failure_is_swallowed(tmp_path, monkeypatch):
+    """Any playlist-add exception (not just HttpError) must not fail the upload."""
+    from video2yt import upload_cli
+
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"x" * 1024)
+    thumb = tmp_path / "t.png"
+    thumb.write_bytes(_PIL_PNG_BYTES())
+    meta = tmp_path / "meta.json"
+    meta.write_text(json.dumps(_meta_dict(video, thumb, channel="UC_OK")), encoding="utf-8")
+
+    def _boom(*a, **kw):
+        raise ConnectionResetError("network died mid-playlist-add")
+
+    monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
+    monkeypatch.setattr(
+        "video2yt.upload_cli.build",
+        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ"),
+    )
+    monkeypatch.setattr("video2yt.upload_cli.playlists.add_video", _boom)
+    args = upload_cli.parse_args(["--metadata", str(meta)])
+    result = upload_cli.run(args)
+    assert result["video_id"] == "vidXYZ"
 
 
 def test_upload_cli_run_http_error_on_insert_becomes_runtime_error(tmp_path, monkeypatch):

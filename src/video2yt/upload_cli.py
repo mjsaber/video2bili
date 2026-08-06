@@ -8,7 +8,7 @@ from pathlib import Path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from video2yt import upload
+from video2yt import playlists, upload
 
 
 def _log(msg: str) -> None:
@@ -91,6 +91,11 @@ def run(args: argparse.Namespace) -> dict:
             upload.upload_thumbnail(youtube, video_id, thumbnail_path)
         except HttpError as e:
             _log(f"thumbnail upload failed: {e} (video itself is uploaded)")
+
+    try:
+        playlists.add_video(youtube, video_id, meta["title"], meta["season"], log=_log)
+    except Exception as e:  # never fail the upload over playlist bookkeeping
+        _log(f"playlist add failed: {e} (video itself is uploaded)")
 
     url = f"https://www.youtube.com/watch?v={video_id}"
     studio_url = f"https://studio.youtube.com/video/{video_id}/edit"

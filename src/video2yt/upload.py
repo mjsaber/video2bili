@@ -29,7 +29,7 @@ SCOPES = [
 REQUIRED_META_FIELDS = (
     "video_path", "thumbnail_path", "title", "description", "tags",
     "category_id", "default_language", "default_audio_language",
-    "privacy_status", "expected_channel_id",
+    "privacy_status", "expected_channel_id", "season",
 )
 
 
@@ -44,6 +44,9 @@ def validate_meta(meta: dict) -> None:
     missing = [k for k in REQUIRED_META_FIELDS if k not in meta]
     if missing:
         raise ValueError(f"metadata missing required keys: {missing}")
+    season = meta["season"]
+    if isinstance(season, bool) or not isinstance(season, int) or season < 1:
+        raise ValueError("metadata season must be a positive integer")
 
 
 def _covers_scopes(creds: Credentials) -> bool:
