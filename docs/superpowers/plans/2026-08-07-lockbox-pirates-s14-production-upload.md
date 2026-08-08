@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Execution authorization — 2026-08-07:** The user approved content review #1, selected the urgent ending below, chose multi-agent execution, and explicitly authorized continuing through direct public upload. Remaining review packages still receive independent internal verification, but execution does not pause again unless a concrete defect or external authentication blocker requires user action.
+
 **Goal:** 把郭楓荷与瓦莉拉的两条 S14 海盗实战制作成一支完整教学视频，以「新經濟循環」为封面卖点，并在 Intro 中完整解释实际出现的新经济卡、成长卡与终局卡机制。
 
 **Architecture:** 复用仓库既有 Stage 1–5 缓存管线：串行下载两条 Bilibili 素材，每条只做一次 raw ASR，再以 speech、弹幕和关键帧建立逐卡证据表。审核通过内容理解与 Intro 文案后，核对官方 zhTW 卡面、制作高对比锁箱 Intro、烧录两条正片、合并并制作缩略图和元数据；公开上传作为独立最终状态变更，必须再次获得明确授权，并验证只加入 S14 播放列表。
@@ -234,7 +236,7 @@ Requirements:
 - Explain the mechanism in this order: spending Gold → escapee/mutineer Lockbox production or acceleration → deliverer/parrot Golden creation plus Cookie Captain same-type resources → actually playing a Golden minion → Discover-triggered scaling of other Pirates → the two hero/operation startup differences → visible thousands/near-ten-thousand result.
 - Name or show only update cards proven in Task 4. Do not list every new card if it does not materially help explain the actual match.
 - Use objective, direct, highly assertive wording; avoid anthropomorphism and metaphors such as `咬一口`, `起飛`, and `引擎`.
-- End with a decisive early-meta verdict and immediate learning CTA in the established style: `這套絕對是賽季初期斷層 T0，趕緊學會……`.
+- End exactly with: `這套絕對是賽季初期斷層 T0，後續很可能被調整，趁改動前趕緊爽起來！`. This creates urgency without claiming an officially announced deletion or nerf.
 
 - [ ] **Step 2: Run textual acceptance checks**
 
@@ -251,7 +253,7 @@ Expected: the opening, length, mechanism coverage, verdict, CTA, and forbidden-l
 
 - [ ] **Step 3: Review checkpoint #1**
 
-Present the complete two-video understanding, the actual new-card mechanism table, the exact Intro script, and the predicted spoken duration together. Stop until the user approves or requests revisions. Record the result in `WORKFLOW_NOTES.md`.
+Present the complete two-video understanding, the actual new-card mechanism table, the exact Intro script, and the predicted spoken duration together. The user approved this checkpoint on 2026-08-07 and then requested the fixed urgent ending; record both decisions in `WORKFLOW_NOTES.md` before TTS.
 
 ### Task 6: Verify official zhTW names and rules before TTS
 
@@ -365,7 +367,7 @@ Expected: 1920×1080, 30 fps, H.264/AAC; complete decode succeeds; every card ap
 
 - [ ] **Step 5: Review checkpoint #2**
 
-Present `intro.mp4`, `intro_bg_preview_640.png`, and the final card timeline. Stop until the user approves or asks for a background, timing, wording, or card-display revision. Record approval in `WORKFLOW_NOTES.md`.
+Run an independent visual review of `intro.mp4`, `intro_bg_preview_640.png`, and the final card timeline. Record the result in `WORKFLOW_NOTES.md`; because the user authorized continuous execution through upload, continue automatically when the review passes and stop only for a concrete defect that cannot be corrected within the approved design.
 
 ### Task 8: Prepare subtitles, music, and both body segments
 
@@ -494,7 +496,7 @@ Write a short Traditional Chinese recap that distinguishes the Lockbox economy l
 
 - [ ] **Step 1: Present the final review package**
 
-Provide the final MP4, 640px thumbnail preview, exact title, complete description, chapters, tags, both source URLs, all music credits, and the uploader's expected S14 playlist classification. Stop for explicit upload authorization and record it in `WORKFLOW_NOTES.md`.
+Assemble the final MP4, 640px thumbnail preview, exact title, complete description, chapters, tags, both source URLs, all music credits, and the uploader's expected S14 playlist classification. Run independent internal verification and record it in `WORKFLOW_NOTES.md`. The user already gave explicit authorization on 2026-08-07 to proceed directly to public upload, so do not pause again when the package passes.
 
 - [ ] **Step 2: Run uploader dry-run after final review**
 
@@ -506,7 +508,7 @@ uv run video2yt-upload --metadata output/lockbox_pirates_s14/youtube_metadata.js
 
 Expected: authentication succeeds and the resolved channel ID exactly matches `UCEgIrCo0pR6DyyrXuSn3wBg`; title, privacy, thumbnail, description, video path, and season classification are correct; no video is uploaded.
 
-- [ ] **Step 3: Upload only after explicit authorization**
+- [ ] **Step 3: Upload publicly under the recorded explicit authorization**
 
 Run:
 
