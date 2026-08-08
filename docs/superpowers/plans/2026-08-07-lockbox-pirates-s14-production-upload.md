@@ -232,7 +232,7 @@ Requirements:
 
 - Start exactly with `你敢相信？`.
 - Use Traditional Chinese and BG vocabulary such as `旅店`, `隨從`, `陣容`, and `異變` when applicable.
-- Target 45–50 seconds of narration, approximately 190–230 Chinese characters before TTS timing verification; the user-requested auxiliary new-card mechanisms take priority over an artificially shorter script.
+- Target 45–50 seconds of narration, approximately 220–250 Chinese characters before TTS timing verification; the user-requested auxiliary new-card mechanisms and fixed urgent ending take priority over an artificially shorter script. Actual synthesized duration remains the hard timing check.
 - Explain the mechanism in this order: spending Gold → escapee/mutineer Lockbox production or acceleration → deliverer/parrot Golden creation plus Cookie Captain same-type resources → actually playing a Golden minion → Discover-triggered scaling of other Pirates → the two hero/operation startup differences → visible thousands/near-ten-thousand result.
 - Name or show only update cards proven in Task 4. Do not list every new card if it does not materially help explain the actual match.
 - Use objective, direct, highly assertive wording; avoid anthropomorphism and metaphors such as `咬一口`, `起飛`, and `引擎`.
@@ -244,7 +244,7 @@ Run:
 
 ```bash
 test -s output/lockbox_pirates_s14/intro_script.txt
-python -c "from pathlib import Path; s=Path('output/lockbox_pirates_s14/intro_script.txt').read_text().strip(); assert s.startswith('你敢相信？'); assert 190 <= len(s) <= 230; print(len(s))"
+python -c "from pathlib import Path; s=Path('output/lockbox_pirates_s14/intro_script.txt').read_text().strip(); assert s.startswith('你敢相信？'); assert 220 <= len(s) <= 250; print(len(s))"
 rg -n '積極的逃脫者|帶鎖箱|被關押的叛亂者|沉默送貨人|寶藏鸚鵡|餅乾船長|金卡|發現|其他海盜|斷層 T0|趕緊學' output/lockbox_pirates_s14/intro_script.txt
 ! rg -n '酒館|畸變|牌組|套牌|構築|咬一口|起飛|引擎|T[BB]D|T[OO]DO|待[定]' output/lockbox_pirates_s14/intro_script.txt
 ```
