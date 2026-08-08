@@ -186,7 +186,7 @@ Expected: four readable contact sheets cover setup and late game. Additionally e
 
 - [ ] **Step 3: Identify every BG36 Pirate that materially appears in either match**
 
-Start with official IDs `BG36_523`, `BG36_520t`, `BG36_344`, and `BG36_524`, then inspect both boards, hands, Discover choices, and triggered UI for other actual BG36 Pirates. A card enters the evidence table only when a timestamped source frame proves it appears; cards merely mentioned in commentary go in a separate “spoken but not shown” note and cannot appear in the Intro card timeline.
+Start with the source-proven IDs `BG36_523`, `BG36_520t`, `BG36_344`, `BG36_521`, `BG36_343`, `BG36_760`, and `BG36_763`, then inspect both boards, hands, Discover choices, and triggered UI for other actual BG36 Pirates. A card enters the evidence table only when a timestamped source frame proves it appears; cards merely mentioned in commentary go in a separate “spoken but not shown” note and cannot appear in the Intro card timeline. Record `BG36_524` only in the excluded/unverified section because neither source provides a reliable frame.
 
 - [ ] **Step 4: Write `content_understanding.md` with a fixed mechanism table**
 
@@ -207,7 +207,7 @@ Use these sections and columns:
 ## 排除的未證實說法
 ```
 
-Fill both streamer sections with hero, economy source, new cards, turn-by-turn pivot, triple/discover handling, terminal board, and exact evidence. The complete chain must distinguish: spending Gold; escapee/lockbox generation and acceleration; actually playing the Golden minion; Hooktusk Discover triggers that scale other Pirates; Maritime Extortionist's wherever-this-is single-card scaling; hero-provided Gold. Do not describe Lockbox itself as direct Gold refund.
+Fill both streamer sections with hero, economy source, new cards, turn-by-turn pivot, triple/discover handling, terminal board, and exact evidence. The complete chain must distinguish: spending Gold; escapee/mutineer Lockbox generation and acceleration; deliverer/parrot Golden creation; Cookie Captain same-type resource replacement; actually playing a Golden minion; Hooktusk Discover triggers that scale other Pirates; hero-provided Gold. Do not describe Lockbox itself as direct Gold refund.
 
 - [ ] **Step 5: Run evidence acceptance checks**
 
@@ -215,8 +215,8 @@ Run:
 
 ```bash
 test -s output/lockbox_pirates_s14/content_understanding.md
-rg -n 'BV1Lw3U6xEJp|BV1uSMU6kEzB|BG36_523|BG36_520t|BG36_344|BG36_524' output/lockbox_pirates_s14/content_understanding.md
-rg -n '花費|鎖箱|金色|發現|全隊|單卡|霍格' output/lockbox_pirates_s14/content_understanding.md
+rg -n 'BV1Lw3U6xEJp|BV1uSMU6kEzB|BG36_523|BG36_520t|BG36_344|BG36_521|BG36_343|BG36_760|BG36_763|BG36_524' output/lockbox_pirates_s14/content_understanding.md
+rg -n '花費|鎖箱|金卡|發現|其他海盜|主廚精選|黃金之觸|霍格' output/lockbox_pirates_s14/content_understanding.md
 ! rg -n 'T[BB]D|T[OO]DO|待[定]|自動返金' output/lockbox_pirates_s14/content_understanding.md
 ```
 
@@ -231,7 +231,7 @@ Requirements:
 - Start exactly with `你敢相信？`.
 - Use Traditional Chinese and BG vocabulary such as `旅店`, `隨從`, `陣容`, and `異變` when applicable.
 - Target 45–50 seconds of narration, approximately 160–200 Chinese characters before TTS timing verification.
-- Explain the mechanism in this order: spending Gold → escapee/Lockbox production or acceleration → random Golden minion with a type → actually playing that Golden minion → Discover-triggered scaling of other Pirates → wherever-this-is single-card scaling → the two hero/operation startup differences → visible thousands/near-ten-thousand result.
+- Explain the mechanism in this order: spending Gold → escapee/mutineer Lockbox production or acceleration → deliverer/parrot Golden creation plus Cookie Captain same-type resources → actually playing a Golden minion → Discover-triggered scaling of other Pirates → the two hero/operation startup differences → visible thousands/near-ten-thousand result.
 - Name or show only update cards proven in Task 4. Do not list every new card if it does not materially help explain the actual match.
 - Use objective, direct, highly assertive wording; avoid anthropomorphism and metaphors such as `咬一口`, `起飛`, and `引擎`.
 - End with a decisive early-meta verdict and immediate learning CTA in the established style: `這套絕對是賽季初期斷層 T0，趕緊學會……`.
@@ -243,7 +243,7 @@ Run:
 ```bash
 test -s output/lockbox_pirates_s14/intro_script.txt
 python -c "from pathlib import Path; s=Path('output/lockbox_pirates_s14/intro_script.txt').read_text().strip(); assert s.startswith('你敢相信？'); assert 160 <= len(s) <= 220; print(len(s))"
-rg -n '積極的逃脫者|帶鎖箱|金色|發現|全隊|單卡|斷層 T0|趕緊學' output/lockbox_pirates_s14/intro_script.txt
+rg -n '積極的逃脫者|帶鎖箱|被關押的叛亂者|沉默送貨人|寶藏鸚鵡|餅乾船長|金卡|發現|其他海盜|斷層 T0|趕緊學' output/lockbox_pirates_s14/intro_script.txt
 ! rg -n '酒館|畸變|牌組|套牌|構築|咬一口|起飛|引擎|T[BB]D|T[OO]DO|待[定]' output/lockbox_pirates_s14/intro_script.txt
 ```
 
@@ -257,13 +257,16 @@ Present the complete two-video understanding, the actual new-card mechanism tabl
 
 - [ ] **Step 1: Download official zhTW BGS art for every Intro card**
 
-Run the research helper for the four core English names:
+Run the research helper for every source-proven new-card English name:
 
 ```bash
 uv run video2yt-research-card --name 'Enterprising Escapee'
 uv run video2yt-research-card --name 'Lockbox'
 uv run video2yt-research-card --name 'Hooktusk, Master Marauder'
-uv run video2yt-research-card --name 'Maritime Extortionist'
+uv run video2yt-research-card --name 'Locked-up Mutineer'
+uv run video2yt-research-card --name 'Silent Deliverer'
+uv run video2yt-research-card --name 'Cookie Captain'
+uv run video2yt-research-card --name 'Treasure Parrot'
 ```
 
 For every card retained in the approved Intro, use its resolved official ID to download:
@@ -272,7 +275,7 @@ For every card retained in the approved Intro, use its resolved official ID to d
 https://art.hearthstonejson.com/v1/bgs/latest/zhTW/512x/<official-card-id>.png
 ```
 
-Save the four core images as `assets/cards/enterprising_escapee_zhTW_bgs_512.png`, `assets/cards/lockbox_zhTW_bgs_512.png`, `assets/cards/hooktusk_master_marauder_zhTW_bgs_512.png`, and `assets/cards/maritime_extortionist_zhTW_bgs_512.png`. Give any additional verified card the same lowercase English-slug convention ending in `_zhTW_bgs_512.png`. Open every PNG and read the zhTW name and rule text directly from the card face.
+Save the seven proven images as `assets/cards/enterprising_escapee_zhTW_bgs_512.png`, `assets/cards/lockbox_zhTW_bgs_512.png`, `assets/cards/hooktusk_master_marauder_zhTW_bgs_512.png`, `assets/cards/locked_up_mutineer_zhTW_bgs_512.png`, `assets/cards/silent_deliverer_zhTW_bgs_512.png`, `assets/cards/cookie_captain_zhTW_bgs_512.png`, and `assets/cards/treasure_parrot_zhTW_bgs_512.png`. Give any additional verified card the same lowercase English-slug convention ending in `_zhTW_bgs_512.png`. Open every PNG and read the zhTW name and rule text directly from the card face.
 
 - [ ] **Step 2: Record exact term evidence**
 
@@ -485,7 +488,7 @@ The Traditional Chinese description must explain both economy and new-card scali
 
 - [ ] **Step 3: Create the subscribe comment**
 
-Write a short Traditional Chinese recap that distinguishes the Lockbox economy loop from the other-Pirate scaling and single-card-scaling payoffs, followed by a natural request to like, subscribe, enable notifications, and comment the next desired composition.
+Write a short Traditional Chinese recap that distinguishes the Lockbox economy loop, auxiliary new-card resource roles, and Hooktusk's other-Pirate scaling, followed by a natural request to like, subscribe, enable notifications, and comment the next desired composition.
 
 ### Task 11: Final review, authorized upload, playlist verification, and cleanup
 
