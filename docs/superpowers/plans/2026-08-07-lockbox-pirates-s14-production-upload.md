@@ -94,12 +94,12 @@ Run:
 ```bash
 test "$(rg --files temp | rg -c '/BV1Lw3U6xEJp\.mp4$')" -eq 1
 test "$(rg --files temp | rg -c '/BV1uSMU6kEzB\.mp4$')" -eq 1
-test "$(rg --files temp | rg -c '/BV1Lw3U6xEJp\.danmaku\.(ass|xml)$')" -eq 1
-test "$(rg --files temp | rg -c '/BV1uSMU6kEzB\.danmaku\.(ass|xml)$')" -eq 1
+test "$(rg --files temp | rg -c '/BV1Lw3U6xEJp\.danmaku\.(ass|xml)$')" -eq 2
+test "$(rg --files temp | rg -c '/BV1uSMU6kEzB\.danmaku\.(ass|xml)$')" -eq 2
 rg --files temp | rg '/(BV1Lw3U6xEJp|BV1uSMU6kEzB)\.(mp4|danmaku\.(ass|xml))$'
 ```
 
-Expected: all four assertions pass and four non-empty paths print.
+Expected: all four assertions pass and six non-empty paths print: one MP4 plus one raw XML and one converted ASS per BVID.
 
 - [ ] **Step 3: Verify media dimensions, streams, duration, and decode health**
 
@@ -207,7 +207,7 @@ Use these sections and columns:
 ## 排除的未證實說法
 ```
 
-Fill both streamer sections with hero, economy source, new cards, turn-by-turn pivot, triple/discover handling, terminal board, and exact evidence. The complete chain must distinguish: spending Gold; escapee/lockbox generation and acceleration; Golden-minion count; Hooktusk-style team scaling; extortionist-style single-card scaling; hero-provided Gold. Do not describe Lockbox itself as direct Gold refund.
+Fill both streamer sections with hero, economy source, new cards, turn-by-turn pivot, triple/discover handling, terminal board, and exact evidence. The complete chain must distinguish: spending Gold; escapee/lockbox generation and acceleration; actually playing the Golden minion; Hooktusk Discover triggers that scale other Pirates; Maritime Extortionist's wherever-this-is single-card scaling; hero-provided Gold. Do not describe Lockbox itself as direct Gold refund.
 
 - [ ] **Step 5: Run evidence acceptance checks**
 
@@ -231,7 +231,7 @@ Requirements:
 - Start exactly with `你敢相信？`.
 - Use Traditional Chinese and BG vocabulary such as `旅店`, `隨從`, `陣容`, and `異變` when applicable.
 - Target 45–50 seconds of narration, approximately 160–200 Chinese characters before TTS timing verification.
-- Explain the mechanism in this order: spending Gold → escapee/Lockbox production or acceleration → random Golden typed minion → Golden-minion count → team-scaling new card → single-card-scaling new card → the two hero/operation startup differences → visible thousands/near-ten-thousand result.
+- Explain the mechanism in this order: spending Gold → escapee/Lockbox production or acceleration → random Golden minion with a type → actually playing that Golden minion → Discover-triggered scaling of other Pirates → wherever-this-is single-card scaling → the two hero/operation startup differences → visible thousands/near-ten-thousand result.
 - Name or show only update cards proven in Task 4. Do not list every new card if it does not materially help explain the actual match.
 - Use objective, direct, highly assertive wording; avoid anthropomorphism and metaphors such as `咬一口`, `起飛`, and `引擎`.
 - End with a decisive early-meta verdict and immediate learning CTA in the established style: `這套絕對是賽季初期斷層 T0，趕緊學會……`.
@@ -485,7 +485,7 @@ The Traditional Chinese description must explain both economy and new-card scali
 
 - [ ] **Step 3: Create the subscribe comment**
 
-Write a short Traditional Chinese recap that distinguishes the Lockbox economy loop from the team-scaling and single-card-scaling payoffs, followed by a natural request to like, subscribe, enable notifications, and comment the next desired composition.
+Write a short Traditional Chinese recap that distinguishes the Lockbox economy loop from the other-Pirate scaling and single-card-scaling payoffs, followed by a natural request to like, subscribe, enable notifications, and comment the next desired composition.
 
 ### Task 11: Final review, authorized upload, playlist verification, and cleanup
 
