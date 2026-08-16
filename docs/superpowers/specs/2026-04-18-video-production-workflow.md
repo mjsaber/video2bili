@@ -6,16 +6,16 @@
 
 ## 1. Goal
 
-Take a topic (two streamers on the same 流派/英雄/饰品) and produce a publish-ready YouTube video with:
+Take a topic (normally two streamers on the same 流派/英雄/饰品, or one manually approved “new invention” source) and produce a publish-ready YouTube video with:
 
-- A short (~30s) original spoken intro **derived from the actual content of the two source videos** (not guessed from the topic title)
-- Two burnt-in Bilibili source segments (danmaku + cleaned 繁體 subtitle) as the body
+- A short original spoken intro **derived from the actual content of all approved source videos** (not guessed from the topic title)
+- One or more burnt-in Bilibili source segments (danmaku + cleaned 繁體 subtitle) as the body
 - A concatenated final MP4 with chapter markers + loudness normalization
 - A YouTube thumbnail
 - Localized title / description / tags
 - Uploaded to YouTube via API with all metadata pre-filled
 
-**Key ordering principle (2026-06-24 redesign):** download and *understand the real content first*, then write the intro from the combination of the two videos' 思路; verify terminology against the in-game card art; only then finish the body. The old "write the intro script first from the topic guess" order is retired.
+**Key ordering principle (2026-06-24 redesign):** download and *understand the real content first*, then write the intro from all approved sources' actual 思路; verify terminology against the in-game card art; only then finish the body. The old "write the intro script first from the topic guess" order is retired.
 
 The pipeline is a sequence of steps, each backed by an existing CLI command (`video2yt-*`) or a one-off script in `scripts/`. Only Step 5's per-segment work is partly automated (`video2yt-burn` etc.); the rest is an agent following this SOP and invoking CLIs in order.
 
@@ -68,7 +68,7 @@ output/<project>/
 
 ## 4. The pipeline (Steps 0–12)
 
-> **Reorder note (2026-06-24):** the intro is now built *after* downloading and understanding the two source videos (Steps 1–2) and *after* verifying terminology (Step 3). speech2srt runs only once per segment (Step 2); the burnt 繁體 subtitle is cleaned by Claude subagents in Step 5, not by a second speech2srt call.
+> **Reorder note (2026-06-24):** the intro is now built *after* downloading and understanding every approved source video (Steps 1–2) and *after* verifying terminology (Step 3). speech2srt runs only once per segment (Step 2); the burnt 繁體 subtitle is cleaned by Claude subagents in Step 5, not by a second speech2srt call.
 
 ### Step 0 — 选题 (topic discovery)
 
@@ -76,27 +76,29 @@ output/<project>/
 
 It pairs two whitelisted streamers along **three axes** — same 核心卡 (流派), same 英雄, same 饰品 — and marks each pair 新 / 已做过. A topic can be a comp, a hero tutorial, or a trinket tutorial.
 
+Paired topics remain the default. A manually reviewed “new invention” topic may use one source when that single game contains a complete setup-to-payoff arc and a second candidate does not share the same mechanism. This exception is a production decision, not an automatic title-keyword rule: do not change `video2yt-topic` to surface singletons merely because a title says “新发明”.
+
 **HARD RULE — every candidate surfaced in chat MUST carry BOTH streamers' Bilibili links.** Relay the stdout report block **verbatim**, `SendUserFile output/topics/<date>.md`, and layer your done/补丁 annotations *on top* — never re-author a condensed table (that is how links get dropped). This applies to ALL candidates you mention, including ones you do NOT recommend. **Never name-drop a candidate without its two URLs** — and that includes the 推荐/跳过 section you write after the verbatim block (the script only protects the verbatim block; any sentence you add naming a candidate is a fresh chance to drop links). See memory `feedback_topic_summary_include_links`.
 
 **Auto-annotation is a hint, not ground truth.** It matches core-card substrings, so it misses cross-script names and same-comp/different-core cases, and it can mis-bucket (e.g. it filed 黃金箭, an **異變/Anomaly**, under the 饰品 axis). Eyeball every 新-marked pick against `assets/topic/done_topics.txt`.
 
-### Step 1 — 下载两条源 (download both sources)
+### Step 1 — 下载所有已批准来源 (download all approved sources)
 
-**Input**: the two chosen Bilibili URLs.
+**Input**: all approved Bilibili URL(s).
 **Output**: `temp/<uploader>：<title>/<bv>.mp4` + `<bv>.danmaku.ass` (Stage 1 cache).
 **Tool**: `video2yt-prefetch`.
 
 ```bash
-uv run video2yt-prefetch "<url1>" "<url2>" -o temp/
+uv run video2yt-prefetch "<approved-url>"... -o temp/
 ```
 
-`video2yt-prefetch` serial-downloads both sources into the Stage 1 cache (truncation retry + low-res quarantine + fail-fast). **Note the `-o temp/`**: prefetch's `-o` is the *temp* dir and MUST match where Step 5 reads its cache (`./temp`), NOT `output/<project>/`.
+`video2yt-prefetch` serial-downloads every approved source into the Stage 1 cache (truncation retry + low-res quarantine + fail-fast). **Note the `-o temp/`**: prefetch's `-o` is the *temp* dir and MUST match where Step 5 reads its cache (`./temp`), NOT `output/<project>/`.
 
-**Pre-flight resolution check**: eyeball the prefetch log — each line reports `<W>x<H>`. Both must be 1920x1080 (merge is strict). A VIP-locked 480p/360p source must be swapped or upscaled before Step 5. (Bilibili download robustness — sequential not parallel, aria2c for the video stream, `--codec h265` fallback if the avc1 copy is truncated — see CLAUDE.md "yt-dlp / Bilibili".)
+**Pre-flight resolution check**: eyeball the prefetch log — each line reports `<W>x<H>`. Every approved source must be 1920x1080 (merge is strict). A VIP-locked 480p/360p source must be swapped or upscaled before Step 5. (Bilibili download robustness — sequential not parallel, aria2c for the video stream, `--codec h265` fallback if the avc1 copy is truncated — see CLAUDE.md "yt-dlp / Bilibili".)
 
 ### Step 2 — 抽 speech + 内容理解 → intro 稿 (understand, then write the intro)
 
-**Input**: the two cached segments.
+**Input**: all approved cached segment(s).
 **Output**: `content_understanding.md` + `intro_script.txt`.
 **Tools**: `video2yt-stems`, `video2yt-subtitle --skip-cleanup`, then Claude reads + writes.
 
@@ -108,11 +110,11 @@ uv run video2yt-stems     "temp/<dir>/<bv>.mp4"                 # Stage 2: speec
 uv run video2yt-subtitle  "temp/<dir>/<bv>.mp4" --skip-cleanup  # Stage 3 ASR, RAW (no codex, no context)
 ```
 
-Then build understanding from two text sources:
+Then build understanding from two evidence types for every approved source:
 1. **Speech → text**: the raw `<bv>/speech.wav.speech2srt.srt` from the command above (Simplified, ASR errors — fine for understanding).
 2. **Danmaku → text**: extract the dialogue lines from `temp/<dir>/<bv>.danmaku.ass` (Stage 1 / biliass output) — independent of speech2srt.
 
-Read both for each video, write up each video's 思路 (what the comp/line actually does, key turns, the streamer's angle), then **combine the two into one intro angle**. Capture this in `content_understanding.md`, and draft the narration in `intro_script.txt` (繁體, ~100–120 chars for ~30s at 1.0x; hook first).
+Read both evidence types for each approved video, write up each video's 思路 (what the comp/line actually does, key turns, the streamer's angle), then **combine the approved source material into one intro angle**. For a single-source new invention, explain the complete setup-to-payoff arc and why no second source was paired. Capture this in `content_understanding.md`, and draft the narration in `intro_script.txt` (繁體, hook first; use the current project spec for target duration).
 
 **Review checkpoint #1**: show the user the content understanding + the intro script together before moving on (the user asked to see both).
 
