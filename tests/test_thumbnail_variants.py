@@ -163,6 +163,15 @@ def test_sketch_default_preserves_pale_paper_and_dark_title(assets):
     assert ink.getextrema()[0] < 60
 
 
+def test_sketch_title_scrim_retains_visible_pastel_background(assets):
+    Image.new('RGB', (1280, 720), (185, 220, 203)).save(assets['bg'])
+    result = polish.build(assets['bg'], assets['card'], None, None, 'TEST', 'RESULT')
+    red, green, blue = result.getpixel((5, 100))[:3]
+    assert green - red >= 12
+    assert green > blue > red
+    assert min(red, green, blue) >= 200
+
+
 def test_legacy_thumbnail_style_is_available(assets):
     Image.new('RGB', (1280, 720), (252, 250, 245)).save(assets['bg'])
     result = polish.build(assets['bg'], assets['card'], None, None, 'TEST', 'RESULT',

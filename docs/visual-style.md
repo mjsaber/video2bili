@@ -3,9 +3,9 @@
 自 2026-09-05 起，新封面与片头背景默认采用 `anime-sketch`。
 
 - **画法**：日式动漫线稿、可见铅笔笔触、细排线、轻网点；纸张纹理自然。
-- **配色**：米白纸底、石墨深灰，少量低饱和赭黄与灰蓝铅笔淡彩。
+- **配色**：日式小清新彩铅配色：奶油白 `#FFF8EE`、薄荷绿 `#B9DCCB`、雾蓝 `#B7D6E8`、蜜桃粉 `#F0C4B8`、浅杏黄 `#F2D69B`。颜色以柔和但清晰可见的色块覆盖道具和环境，缩图上也能辨认；线稿与纸纹透过颜色保留。避免近灰阶、单一褐色及几乎看不见的淡彩。
 - **构图**：左侧标题区与左下字幕区留白；本期主题道具集中在中右部，避免抢字。
-- **合成**：深墨标题、浅纸细描边；去掉金色光晕和厚重暗角。背景及角色要使用真实生成的素描素材，合成参数不会把旧油画变成素描。
+- **合成**：深墨主标题、深青绿重点文字、浅纸细描边；浅色遮罩保留背景配色，去掉金色光晕和厚重暗角。背景及角色要使用真实生成的素描素材，合成参数不会把旧油画变成素描。
 - **辨识**：官方卡面与游戏标识保持原样；头像和已经制作的 CTA 视频继续使用各自原素材。
 
 ## 新背景
@@ -19,13 +19,13 @@ uv run video2yt-image \
   -o output/demo/intro_bg_sketch.png
 ```
 
-图像生成具有随机性，生成后检查线稿、留白和纹理；不要直接复用与新风格矛盾的旧背景。通用参考图：`assets/branding/anime_sketch/tavern_bg.png`。其他流派应替换道具，不必每期都画宝箱。
+图像生成具有随机性，生成后检查线稿、留白和纹理；不要直接复用与新风格矛盾的旧背景。当前彩色参考图：`assets/branding/anime_sketch/tavern_bg_pastel.png`。其他流派应替换道具，不必每期都画宝箱。
 
 ## 封面
 
 ```bash
 uv run python scripts/thumbnail_polish.py \
-  --bg assets/branding/anime_sketch/tavern_bg.png \
+  --bg assets/branding/anime_sketch/tavern_bg_pastel.png \
   --card assets/cards/hooktusk_master_marauder_zhTW_bgs_512.png \
   --primary '鉤牙海盜' --secondary '全隊破萬' \
   --style anime-sketch --layout payoff \
@@ -57,3 +57,5 @@ uv run video2yt-intro --audio output/demo/intro.mp3 \
 封面预览：`output/style_preview/thumbnail_sketch_clean.png`，缩图：`output/style_preview/thumbnail_sketch_clean_mobile.png`。预览使用既有鉤牙卡面及项目文案，仅展示画风，不代表新视频已发布或完成效果实验。
 
 2026-09-05 收尾验收：`output/repository_closeout_20260905/` 保存最终单卡、双卡封面、320×180 移动端预览、三色底角色检查图及 3 秒片头。均使用默认透明素描角色，未改动历史成片。
+
+配色修订预览：`output/pastel_sketch_20260905/thumbnail.png`、`thumbnail_mobile.png`、`intro.mp4`。新背景由内置 ImageGen 在原素描背景上重新配色，最终提示词在 `assets/branding/anime_sketch/tavern_bg_pastel.prompt.txt`。原 `tavern_bg.png` 保留为早期素描参考。

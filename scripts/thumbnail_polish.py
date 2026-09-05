@@ -36,7 +36,7 @@ DEFAULT_LOGO = Path("assets/hsbg_logo.png")
 DEFAULT_MASCOT = default_mascot(DEFAULT_STYLE)
 PAPER = (252, 250, 245, 255)
 INK = (40, 44, 49, 255)
-ACCENT = (54, 79, 91, 255)
+ACCENT = (58, 108, 100, 255)  # Deep sage ink complements the fresh pastel background.
 
 # --- legacy warm-tavern constants ---
 BG_BRIGHT = 1.12
@@ -108,7 +108,7 @@ def left_scrim(style: str = "warm-tavern") -> Image.Image:
     xs = np.arange(W, dtype=float)
     sketch = style == "anime-sketch"
     width = TEXT_RIGHT + 120 if sketch else SCRIM_WIDTH
-    a = np.clip(1.0 - xs / width, 0, 1) * (245 if sketch else SCRIM_ALPHA0)
+    a = np.clip(1.0 - xs / width, 0, 1) * (160 if sketch else SCRIM_ALPHA0)
     alpha = np.tile(a.astype(np.uint8), (H, 1))
     layer = Image.new("RGBA", (W, H), (*(PAPER[:3] if sketch else SCRIM_FILL), 0))
     layer.putalpha(Image.fromarray(alpha, "L"))

@@ -32,11 +32,16 @@ def style_prompt(scene: str, style: str = DEFAULT_STYLE) -> str:
     if style not in STYLES:
         raise ValueError(f"unknown visual style: {style}")
     direction = (
-        "Japanese anime pencil-sketch illustration: expressive graphite linework, "
+        "Japanese anime pencil-sketch illustration with fresh Japanese pastel colors: "
+        "expressive graphite linework, "
         "fine hand-drawn cross-hatching and restrained screentone on natural ivory "
-        "sketchbook paper. Predominantly paper-white and graphite, with very light "
-        "muted ochre and desaturated blue colored-pencil washes. Airy negative space, "
-        "clear silhouettes, no glossy metallic glow, heavy vignette, photorealism, "
+        "sketchbook paper. Use cream ivory, mint green, powder blue, peach pink and "
+        "apricot yellow in clearly visible colored-pencil areas and gentle washes "
+        "across the scene. A harmonious airy slice-of-life palette with soft spring "
+        "daylight; keep pencil strokes visible through the color. Color must remain "
+        "recognizable at mobile-thumbnail size, never monochrome, sepia-dominated "
+        "or barely tinted grayscale. Airy negative space and clear silhouettes; "
+        "no neon saturation, glossy metallic glow, heavy vignette, photorealism, "
         "oil painting or 3D rendering. Draw all scene details in this style, not a "
         "photo with a sketch filter."
         if style == DEFAULT_STYLE else

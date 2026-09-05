@@ -297,4 +297,4 @@ The tooling prepares experiments and measures results; Studio A/B tests, end scr
 
 ### 封面与背景画风
 
-默认使用**日式动漫素描**：铅笔线稿、轻排线、淡彩与纸张质感。图像生成、封面和动态片头统一 `--style anime-sketch`；参考素材与用法见 [画风规范](docs/visual-style.md)。
+默认使用**日式动漫素描**：铅笔线稿、轻排线与纸纹，搭配日式小清新彩铅配色（薄荷绿、雾蓝、蜜桃粉、浅杏黄、奶油白），保留清晰可见的颜色。图像生成、封面和动态片头统一 `--style anime-sketch`；参考素材与用法见 [画风规范](docs/visual-style.md)。

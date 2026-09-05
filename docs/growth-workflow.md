@@ -49,7 +49,7 @@ uv run video2yt-cta --video output/demo/battle.mp4 \
 
 ## 标题、封面实验
 
-默认采用**日式动漫素描**：纸白底、石墨线稿、轻排线和少量淡彩。`video2yt-image`、`thumbnail_polish.py`、`video2yt-intro` 统一默认 `--style anime-sketch`。风格与 `brand/payoff` 布局独立；真实卡面保留，素描角色已通过真实透明通道和合成预览检查，默认启用；原透明角色保留为回退。生成步骤、参考图和旧风格选项见 [画风规范](visual-style.md)。
+默认采用**日式动漫素描**：奶油白底、铅笔线稿与轻排线，搭配清晰可见的薄荷绿、雾蓝、蜜桃粉和浅杏黄彩铅色块。`video2yt-image`、`thumbnail_polish.py`、`video2yt-intro` 统一默认 `--style anime-sketch`。风格与 `brand/payoff` 布局独立；真实卡面保留，素描角色已通过真实透明通道和合成预览检查，默认启用；原透明角色保留为回退。生成步骤、参考图和旧风格选项见 [画风规范](visual-style.md)。
 
 标题将具体结果或决策放前面，游戏、流派、主播信息按需要后置；不要求固定全称前缀或“完整教学”。标题/封面只承诺实际兑现的内容。
 

@@ -25,7 +25,7 @@ Customization → Branding → Picture, or in Google Account → brand-account p
 
 ## Cover and intro style (2026-09-05)
 
-`anime_sketch/tavern_bg.png` is the pale graphite/pencil-wash background reference.
+`anime_sketch/tavern_bg_pastel.png` is the current colored-pencil background reference: mint, powder blue, peach and apricot on cream paper. The earlier mostly graphite `tavern_bg.png` is preserved for history.
 `anime_sketch/mascot.png` is the completed RGBA overlay, selected automatically for sketch covers/intros. User-authorized local extraction removed the baked checkerboard from `mascot_reference.png`; the original reference and reusable `mascot_alpha.png` are preserved. See [asset provenance and reproduction](anime_sketch/README.md). The original transparent mascot remains the fallback for missing or opaque sketch assets.
 The new art direction is Japanese anime pencil sketch; official card images stay original.
 These files do not replace the avatar or previously rendered CTA clips.

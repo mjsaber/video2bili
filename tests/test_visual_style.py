@@ -24,6 +24,10 @@ def test_default_image_style_reaches_both_backends(backend, monkeypatch, tmp_pat
     assert 'Japanese anime pencil-sketch' in captured[0]
     assert 'graphite' in captured[0]
     assert 'ivory' in captured[0]
+    for color in ['mint green', 'powder blue', 'peach pink', 'apricot yellow']:
+        assert color in captured[0]
+    assert 'clearly visible' in captured[0]
+    assert 'Predominantly paper-white and graphite' not in captured[0]
 
 
 def test_image_none_style_preserves_exact_prompt(monkeypatch, tmp_path):
