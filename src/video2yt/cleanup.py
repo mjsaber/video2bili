@@ -6,7 +6,7 @@ Policy (locked 2026-06-18, user has limited storage):
   stems + sidecars are all regenerable), but KEEP ``output/<project>/`` as a
   one-period buffer.
 - **PREVIOUS project(s)**: delete the entire ``output/<project>/`` folder —
-  the shipped video already lives on YouTube.
+  the successful upload is confirmed and lightweight artifacts are archived first.
 
 Safety is the whole point of this module (a prior over-broad ``rm -rf
 temp/*<glob>*`` once wiped unrelated caches). Every delete is funnelled through
@@ -21,7 +21,10 @@ import os
 import re
 import shutil
 from dataclasses import dataclass
+from contextlib import ExitStack
 from pathlib import Path
+
+from video2yt import publication
 
 BV_RE = re.compile(r"BV[0-9A-Za-z]{10}")
 METADATA_NAME = "youtube_metadata.json"
@@ -66,29 +69,38 @@ def assert_within(path: Path, roots: list[Path]) -> Path:
 
 
 def is_shipped_project(p: Path) -> bool:
-    """A folder is a shipped video project iff it carries the upload manifest.
-    This is what distinguishes real projects from infra folders (topics/,
-    avatar/, scratch dirs) that must never be cleaned."""
-    return p.is_dir() and (p / METADATA_NAME).is_file()
+    """Only a completed successful-upload receipt authorizes post-ship cleanup."""
+    try:
+        receipt = publication.load(p) if p.is_dir() else None
+        return bool(receipt and receipt["status"] == "complete")
+    except ValueError:
+        return False
+
+
+def _uploaded_at(p: Path) -> float:
+    receipt = publication.load(p)
+    if not receipt or receipt["status"] != "complete":
+        raise ValueError(f"not a shipped project (complete publication receipt required): {p}")
+    return publication.uploaded_time(receipt)
 
 
 def find_shipped_projects(output_dir: Path) -> list[Path]:
-    """Shipped project folders under ``output_dir``, newest first (by mtime)."""
+    """Shipped project folders under ``output_dir``, newest first (by confirmed upload timestamp)."""
     if not output_dir.is_dir():
         return []
     projs = [d for d in output_dir.iterdir() if is_shipped_project(d)]
-    return sorted(projs, key=lambda d: d.stat().st_mtime, reverse=True)
+    return sorted(projs, key=_uploaded_at, reverse=True)
 
 
 def newer_shipped_than(output_dir: Path, current: Path) -> list[Path]:
     """Shipped projects strictly NEWER than ``current`` — the ones a stale
     ``--project`` would otherwise be at risk of deleting. They are always kept;
     the CLI surfaces them so naming a stale project is obvious."""
-    cur_mtime = current.stat().st_mtime
+    cur_mtime = _uploaded_at(current)
     cur_res = current.resolve()
     return [
         p for p in find_shipped_projects(output_dir)
-        if p.resolve() != cur_res and p.stat().st_mtime > cur_mtime
+        if p.resolve() != cur_res and _uploaded_at(p) > cur_mtime
     ]
 
 
@@ -156,7 +168,7 @@ def resolve_current(output_dir: Path, project: str | Path | None) -> Path:
         shipped = find_shipped_projects(output_dir)
         if not shipped:
             raise ValueError(
-                f"no shipped project (folder with {METADATA_NAME}) found under "
+                f"no shipped project (folder with complete {publication.RECEIPT_NAME}) found under "
                 f"{output_dir.resolve()}; pass --project explicitly"
             )
         return shipped[0]
@@ -166,15 +178,15 @@ def resolve_current(output_dir: Path, project: str | Path | None) -> Path:
         # bare name → ALWAYS under output_dir, regardless of any cwd collision
         p = output_dir / name
     out_res = output_dir.resolve()
-    if out_res not in p.resolve().parents:
+    if p.resolve().parent != out_res:
         raise ValueError(
-            f"--project must be a folder under {out_res}, got {p.resolve()}"
+            f"--project must be a direct child folder of {out_res}, got {p.resolve()}"
         )
     if not p.is_dir():
         raise ValueError(f"--project not found: {p}")
     if not is_shipped_project(p):
         raise ValueError(
-            f"--project {p} is not a shipped project (no {METADATA_NAME}). "
+            f"--project {p} is not a shipped project (no complete {publication.RECEIPT_NAME}). "
             f"Refusing: cleanup is a post-ship step, and pointing it at a "
             f"non-shipped folder would treat your real latest video as the "
             f"'previous' project and delete it."
@@ -203,11 +215,11 @@ def build_plan(
         # stale --project must never delete a newer shipped video — only ones
         # that predate the named current. find_shipped_projects is newest-first,
         # so after this filter others[:1] is the true immediately-previous one.
-        current_mtime = current.stat().st_mtime
+        current_mtime = _uploaded_at(current)
         others = [
             p for p in find_shipped_projects(output_dir)
             if p.resolve() != current.resolve()
-            and p.stat().st_mtime < current_mtime
+            and _uploaded_at(p) < current_mtime
         ]
         if not all_previous:
             others = others[:1]
@@ -218,13 +230,40 @@ def build_plan(
 def execute(plan: Plan, output_dir: Path, temp_dir: Path) -> list[Target]:
     """Delete every target, each re-checked against the allowed roots and never
     equal to the current project. Returns what was deleted."""
-    roots = [output_dir, temp_dir]
-    current_resolved = plan.current.resolve()
-    deleted: list[Target] = []
-    for t in plan.all_targets():
-        safe = assert_within(t.path, roots)
-        if safe == current_resolved:
+    projects = {plan.current.resolve(), *(t.path.resolve() for t in plan.prev_targets)}
+    with ExitStack() as stack:
+        for project in sorted(projects):
+            assert_within(project, [output_dir])
+            if not project.is_dir():
+                raise ValueError(f"project disappeared before cleanup: {project}")
+            stack.enter_context(publication.locked(project))
+        return _execute_locked(plan, output_dir, temp_dir)
+
+
+def _execute_locked(plan: Plan, output_dir: Path, temp_dir: Path) -> list[Target]:
+    # Check the entire plan before deleting any target. Recompute membership so
+    # stale/manually constructed plans cannot remove drafts or unrelated caches.
+    if not is_shipped_project(plan.current):
+        raise ValueError("current project no longer has a complete publication receipt")
+    current_resolved = assert_within(plan.current, [output_dir])
+    allowed_temp = {p.resolve() for p in temp_dirs_for_project(plan.current, temp_dir)}
+    for target in plan.all_targets():
+        roots = [temp_dir] if target.kind == "temp" else [output_dir]
+        safe = assert_within(target.path, roots)
+        if safe == current_resolved or safe in current_resolved.parents:
             raise ValueError(f"refusing to delete the current project: {safe}")
-        shutil.rmtree(safe)
-        deleted.append(t)
+        if target.kind == "output":
+            if not is_shipped_project(safe) or _uploaded_at(safe) >= _uploaded_at(plan.current):
+                raise ValueError(f"not an older confirmed shipped project: {safe}")
+        elif target.kind != "temp" or safe not in allowed_temp:
+            raise ValueError(f"unrelated temp target: {safe}")
+    archive_root = output_dir.parent / "assets" / "publications"
+    # Archive all eligible projects first; any archive error aborts all deletion.
+    publication.archive(plan.current, archive_root)
+    for target in plan.prev_targets:
+        publication.archive(target.path, archive_root)
+    deleted: list[Target] = []
+    for target in plan.all_targets():
+        shutil.rmtree(target.path.resolve())
+        deleted.append(target)
     return deleted

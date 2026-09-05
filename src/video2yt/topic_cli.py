@@ -20,7 +20,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Hearthstone Battlegrounds streamers, summarize each via Codex, and "
             "report topic candidates where two streamers overlap on the same "
             "comp (流派), hero (英雄), or trinket (饰品). Writes a Markdown report "
-            "under output/topics/."
+            "and a sibling evidence JSON under output/topics/. Candidates require human verification."
         ),
     )
     parser.add_argument(
@@ -41,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path("assets/topic/done_topics.txt"),
         help=(
             "Optional manual list of strategies you've already covered. "
-            "Augments the auto-scan of output/<project>/intro_script.txt. "
+            "Augments scripts in output/<project>/ and assets/publications/<id>/. "
             "Default: assets/topic/done_topics.txt (empty file shipped)."
         ),
     )
@@ -100,6 +100,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "browser first. Pass empty string to skip and run unauthenticated."
         ),
     )
+    parser.add_argument(
+        "--now-ts", type=int, default=None,
+        help="Fixed Unix timestamp for the scan window and age normalization (default: current time).",
+    )
     return parser.parse_args(argv)
 
 
@@ -107,8 +111,9 @@ def run(args: argparse.Namespace) -> Path:
     streamers = topic.parse_streamers(args.whitelist)
     _log(f"loaded {len(streamers)} streamer(s) from {args.whitelist}")
 
+    now_ts = args.now_ts if args.now_ts is not None else int(time.time())
     if args.report is None:
-        date_str = time.strftime("%Y-%m-%d")
+        date_str = time.strftime("%Y-%m-%d", time.localtime(now_ts))
         report_path = Path("output") / "topics" / f"{date_str}.md"
     else:
         report_path = args.report
@@ -129,6 +134,7 @@ def run(args: argparse.Namespace) -> Path:
         pages_per_streamer=args.pages,
         codex_timeout=args.codex_timeout,
         credential=credential,
+        now_ts=now_ts,
     )
 
 

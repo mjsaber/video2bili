@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Append the channel subscribe CTA clip to the end of a burnt battle segment,
-# so the CTA plays right after that battle (mid-roll). Feed the COMBINED clip
-# to video2yt-merge as that chapter — the CTA rides inside the chapter, so each
-# chapter still satisfies YouTube's >=10s rule and no extra chapter is created.
+# as an optional full-screen variant. Default growth workflow uses video2yt-cta
+# for a contextual overlay after delivered value. Chapters are independent of
+# segment boundaries; define them using video2yt-merge --chapters-file.
 #
 # Usage:
 #   scripts/append_cta.sh <segment.mp4> [output.mp4]
@@ -63,4 +63,4 @@ if not ok:
 PY
 
 echo "[append_cta] wrote $out"
-echo "[append_cta] -> feed THIS as the battle-1 --segment to video2yt-merge"
+echo "[append_cta] -> feed this as a chosen --segment to video2yt-merge"

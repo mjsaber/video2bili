@@ -10,7 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from video2yt import cleanup, cleanup_cli
+from video2yt import cleanup, cleanup_cli, publication
+import json
+from datetime import datetime, timezone
 
 
 def _make_project(output_dir: Path, name: str, bvs: list[str], shipped: bool = True):
@@ -18,12 +20,20 @@ def _make_project(output_dir: Path, name: str, bvs: list[str], shipped: bool = T
     proj.mkdir(parents=True)
     if shipped:
         (proj / cleanup.METADATA_NAME).write_text("{}", encoding="utf-8")
+        publication.save(proj, {"status": "complete", "video_id": name.ljust(11, "x")[:11],
+                                "channel_id": "channel", "uploaded_at": publication.now_iso()})
     (proj / "intro.mp4").write_bytes(b"x" * 100)
     for bv in bvs:
         sub = proj / f"streamer：{name}-{bv}"
         sub.mkdir()
         (sub / f"{bv}_final.mp4").write_bytes(b"y" * 1000)
     return proj
+
+
+def _set_uploaded_at(project, times):
+    receipt = publication.load(project)
+    receipt["uploaded_at"] = datetime.fromtimestamp(times[0], timezone.utc).isoformat()
+    publication.save(project, receipt)
 
 
 def _make_temp_source(temp_dir: Path, dirname: str, bv: str, size: int = 5000):
@@ -94,8 +104,8 @@ def test_find_shipped_projects_newest_first(tree):
     a = _make_project(out, "alpha", ["BV1p2Jg6nEJA"])
     b = _make_project(out, "beta", ["BV1eGEC6fEoW"])
     import os
-    os.utime(a, (1000, 1000))
-    os.utime(b, (2000, 2000))
+    _set_uploaded_at(a, (1000, 1000))
+    _set_uploaded_at(b, (2000, 2000))
     names = [p.name for p in cleanup.find_shipped_projects(out)]
     assert names == ["beta", "alpha"]
 
@@ -201,8 +211,8 @@ def test_plan_keeps_current_deletes_prev_and_temp(tree):
     import os
     cur = _make_project(out, "futurefish", ["BV1p2Jg6nEJA"])
     prev = _make_project(out, "golem_mech", ["BV1eGEC6fEoW"])
-    os.utime(cur, (2000, 2000))
-    os.utime(prev, (1000, 1000))
+    _set_uploaded_at(cur, (2000, 2000))
+    _set_uploaded_at(prev, (1000, 1000))
     sub_name = next(p for p in cur.iterdir() if p.is_dir()).name
     _make_temp_source(tmp, sub_name, "BV1p2Jg6nEJA")
 
@@ -218,7 +228,7 @@ def test_plan_all_previous_sweeps_all_older(tree):
     import os
     for i, name in enumerate(["p_old", "p_mid", "p_cur"]):
         proj = _make_project(out, name, [f"BV{i}aaaaaaaaa"])
-        os.utime(proj, (1000 + i, 1000 + i))
+        _set_uploaded_at(proj, (1000 + i, 1000 + i))
     plan = cleanup.build_plan(out, tmp, project="p_cur", all_previous=True)
     assert sorted(t.path.name for t in plan.prev_targets) == ["p_mid", "p_old"]
 
@@ -233,9 +243,9 @@ def test_plan_stale_project_never_deletes_newer(tree):
     old = _make_project(out, "old", ["BV1aaaaaaaaaa"])
     cur = _make_project(out, "cur", ["BV1bbbbbbbbbb"])
     newer = _make_project(out, "newer", ["BV1cccccccccc"])
-    os.utime(old, (1000, 1000))
-    os.utime(cur, (2000, 2000))
-    os.utime(newer, (3000, 3000))
+    _set_uploaded_at(old, (1000, 1000))
+    _set_uploaded_at(cur, (2000, 2000))
+    _set_uploaded_at(newer, (3000, 3000))
 
     plan = cleanup.build_plan(out, tmp, project="cur", all_previous=True)
     names = sorted(t.path.name for t in plan.prev_targets)
@@ -251,8 +261,8 @@ def test_cli_stale_project_warns_and_keeps_newer(tree, capsys):
     import os
     cur = _make_project(out, "cur", ["BV1bbbbbbbbbb"])
     newer = _make_project(out, "newer", ["BV1cccccccccc"])
-    os.utime(cur, (2000, 2000))
-    os.utime(newer, (3000, 3000))
+    _set_uploaded_at(cur, (2000, 2000))
+    _set_uploaded_at(newer, (3000, 3000))
     rc = cleanup_cli.main(
         ["--project", "cur", "--output-dir", str(out), "--temp-dir", str(tmp), "--yes"]
     )
@@ -267,8 +277,8 @@ def test_newer_shipped_than_helper(tree):
     import os
     a = _make_project(out, "a", ["BV1aaaaaaaaaa"])
     b = _make_project(out, "b", ["BV1bbbbbbbbbb"])
-    os.utime(a, (1000, 1000))
-    os.utime(b, (2000, 2000))
+    _set_uploaded_at(a, (1000, 1000))
+    _set_uploaded_at(b, (2000, 2000))
     assert [p.name for p in cleanup.newer_shipped_than(out, a)] == ["b"]
     assert cleanup.newer_shipped_than(out, b) == []
 
@@ -288,8 +298,8 @@ def test_execute_deletes_targets_only(tree):
     _root, out, tmp = tree
     prev = _make_project(out, "golem_mech", ["BV1eGEC6fEoW"])
     cur = _make_project(out, "futurefish", ["BV1p2Jg6nEJA"])
-    os.utime(prev, (1000, 1000))  # current is the newest (just-shipped)
-    os.utime(cur, (2000, 2000))
+    _set_uploaded_at(prev, (1000, 1000))  # current is the newest (just-shipped)
+    _set_uploaded_at(cur, (2000, 2000))
     sub_name = next(p for p in cur.iterdir() if p.is_dir()).name
     src = _make_temp_source(tmp, sub_name, "BV1p2Jg6nEJA")
 
@@ -323,8 +333,8 @@ def test_cli_dry_run_does_not_delete(tree, capsys):
     _root, out, tmp = tree
     prev = _make_project(out, "golem_mech", ["BV1eGEC6fEoW"])
     cur = _make_project(out, "futurefish", ["BV1p2Jg6nEJA"])
-    os.utime(prev, (1000, 1000))
-    os.utime(cur, (2000, 2000))
+    _set_uploaded_at(prev, (1000, 1000))
+    _set_uploaded_at(cur, (2000, 2000))
     rc = cleanup_cli.main(
         ["--project", "futurefish", "--output-dir", str(out), "--temp-dir", str(tmp)]
     )
@@ -338,8 +348,8 @@ def test_cli_yes_deletes(tree, capsys):
     _root, out, tmp = tree
     prev = _make_project(out, "golem_mech", ["BV1eGEC6fEoW"])
     cur = _make_project(out, "futurefish", ["BV1p2Jg6nEJA"])
-    os.utime(prev, (1000, 1000))
-    os.utime(cur, (2000, 2000))
+    _set_uploaded_at(prev, (1000, 1000))
+    _set_uploaded_at(cur, (2000, 2000))
     sub_name = next(p for p in cur.iterdir() if p.is_dir()).name
     src = _make_temp_source(tmp, sub_name, "BV1p2Jg6nEJA")
     rc = cleanup_cli.main(

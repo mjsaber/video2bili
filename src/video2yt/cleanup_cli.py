@@ -45,8 +45,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Current (just-shipped) project: a bare name resolved under "
             "--output-dir, or omit to use the newest folder with "
-            "youtube_metadata.json. Must be a SHIPPED project (carry "
-            "youtube_metadata.json) and live inside --output-dir."
+            "a complete publication.json receipt. Must be a SHIPPED project (carry "
+            "a complete publication.json) and live inside --output-dir."
         ),
     )
     parser.add_argument(
@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         return run(args)
-    except ValueError as exc:
+    except (ValueError, OSError, RuntimeError) as exc:
         _log(f"error: {exc}")
         return 2
 

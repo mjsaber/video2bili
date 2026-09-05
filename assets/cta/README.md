@@ -10,18 +10,16 @@
   Mixkit bell ding (`src/bell_ding.wav`, Mixkit Free License, no attribution).
 - **Beat B (comment, spoken PRIMARY ask)**: BigTTS asks
   「想看什麼陣容？留言告訴我！」 while a blue speech bubble pops beside the
-  mascot. Research: a specific bounded question is the highest-converting
-  mid-roll ask; share asks convert worst and were dropped.
+  mascot. This is a historical creative choice; measure its conversion rather than assuming it performs best for this channel.
 
 Output spec matches burn (1920x1080 30fps h264 yuv420p + AAC 48k) so it
 satisfies merge strict mode after the append.
 
 ## How it's used (per video)
 
-Append it to the **first battle segment** (the first gameplay segment, NOT the
-intro) so the CTA plays mid-roll between battle 1 and battle 2, then feed the
-combined clip to `video2yt-merge`. See Step 6.5 of
-`docs/superpowers/specs/2026-04-18-video-production-workflow.md`.
+Since the approved 2026-09-05 growth review, the default is a contextual text overlay after the first useful decision, using `video2yt-cta` (see `docs/growth-workflow.md`). It keeps gameplay and audio running. Select and record the timestamp per video, and inspect nearby audience retention.
+
+This full-screen clip is an optional experiment. The helper below appends it after a chosen segment; it is no longer mandatory after the first battle. Short media segments are supported by merge; use independent editorial chapters instead of assigning a short CTA its own chapter.
 
 ```bash
 scripts/append_cta.sh output/<project>/<battle1>_final.mp4   # -> <battle1>_final_cta.mp4
@@ -32,10 +30,9 @@ scripts/append_cta.sh output/<project>/<battle1>_final.mp4   # -> <battle1>_fina
 Stream copy was abandoned 2026-06-11: it once emitted a backward-pts join that
 made merge's concat silently drop the segment tail + the CTA.
 
-The CTA rides *inside* battle 1's chapter, so each chapter still satisfies
-YouTube's ≥10s rule and no stray chapter is created.
+When using the appended variant, define chapters on the final timeline. YouTube chapter limits apply to chapter spans, not input clip duration.
 
-**Step 10 tie-in**: open the post-upload pinned comment with the same question
+**Comment tie-in**: if explicitly authorized to post, open the post-upload comment with the same question
 (「想看什麼陣容？留言告訴我！」) so latecomers see the ask too.
 
 ## Regenerating / editing (`src/`)

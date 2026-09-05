@@ -51,6 +51,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "-o", "--output", type=Path, default=None,
         help="Output MP4 file path. Default: <first_segment_parent>/<sanitized_title>.mp4",
     )
+    chapter_options = parser.add_mutually_exclusive_group()
+    chapter_options.add_argument(
+        "--chapters-file", type=Path,
+        help="YouTube timestamp text on the final video timeline, independent of segments.",
+    )
+    chapter_options.add_argument(
+        "--no-chapters", action="store_true",
+        help="Omit chapter markers and chapter sidecars. Default: valid segment chapters only.",
+    )
     return parser.parse_args(argv)
 
 
@@ -62,11 +71,8 @@ def run(args: argparse.Namespace) -> Path:
             f"--segment ({len(args.segment)}) and --label ({len(args.label)}) "
             f"counts must match"
         )
-    if len(args.segment) < 3:
-        raise ValueError(
-            "at least 3 segments are required to merge: each segment becomes one "
-            "chapter, and YouTube only renders chapter segmentation with 3+ chapters"
-        )
+    if not args.segment:
+        raise ValueError("at least 1 segment is required to merge")
 
     segments = [
         merge.Segment(path=p, label=lbl)
@@ -89,7 +95,14 @@ def run(args: argparse.Namespace) -> Path:
         output_path = segments[0].path.parent / f"{safe_title}.mp4"
 
     _log(f"rendering -> {output_path}")
-    merge_inputs = merge.MergeInputs(segments=segments, title=args.title)
+    chapters = None
+    if args.chapters_file is not None:
+        chapters = merge.parse_chapters_text(
+            args.chapters_file.read_text(encoding="utf-8"), total_duration=total,
+        )
+    merge_inputs = merge.MergeInputs(
+        segments=segments, title=args.title, chapters=chapters, no_chapters=args.no_chapters,
+    )
     merge.render(merge_inputs, output_path)
 
     # Validate output
@@ -105,7 +118,10 @@ def run(args: argparse.Namespace) -> Path:
         )
 
     chapters_path = output_path.parent / f"{output_path.stem}_chapters.txt"
-    _log(f"chapters: {chapters_path}")
+    if chapters_path.exists():
+        _log(f"chapters: {chapters_path}")
+    else:
+        _log("chapters omitted (disabled or segment boundaries do not meet chapter requirements)")
     _log(f"success: {output_path}")
     return output_path
 

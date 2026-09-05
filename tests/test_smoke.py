@@ -3957,12 +3957,12 @@ def test_generate_ffmetadata_three_segments():
 
 
 def test_merge_render_embeds_chapter_metadata(tmp_path, monkeypatch):
-    """render() must pass the ffmetadata file as an input and -map_metadata it
-    so YouTube reads chapter markers straight from the uploaded MP4."""
+    """Valid automatic chapters are embedded and emitted for description paste."""
     from video2yt import merge
     segs = [
         merge.Segment(tmp_path / "a.mp4", "Intro", duration=25.0),
         merge.Segment(tmp_path / "b.mp4", "实战", duration=300.0),
+        merge.Segment(tmp_path / "c.mp4", "结局", duration=30.0),
     ]
     captured = {}
 
@@ -4072,9 +4072,8 @@ def test_validate_segments_strict_accepts_valid_input(tmp_path, monkeypatch):
     assert seg.duration == 60.5
 
 
-def test_validate_segments_strict_rejects_sub_10s_segment(tmp_path, monkeypatch):
-    """Each chapter must be at least 10s — YouTube discards the entire chapter
-    list otherwise. Segments shorter than that are rejected up front."""
+def test_validate_segments_strict_accepts_sub_10s_segment(tmp_path, monkeypatch):
+    """Media duration is independent of the optional chapter list."""
     from video2yt.merge import validate_segments_strict, Segment
     seg = Segment(tmp_path / "short.mp4", "x")
     (tmp_path / "short.mp4").write_bytes(b"fake")
@@ -4090,8 +4089,8 @@ def test_validate_segments_strict_rejects_sub_10s_segment(tmp_path, monkeypatch)
         })
         return result
     monkeypatch.setattr("video2yt.merge.subprocess.run", fake_run)
-    with pytest.raises(ValueError, match="< 10s"):
-        validate_segments_strict([seg])
+    validate_segments_strict([seg])
+    assert seg.duration == 7.4
 
 
 def test_merge_cli_parse_args_defaults():
@@ -4120,18 +4119,12 @@ def test_merge_cli_run_mismatched_counts_raises(monkeypatch):
         merge_cli.run(args)
 
 
-def test_merge_cli_run_too_few_segments_raises(monkeypatch):
-    """Fewer than 3 segments means fewer than 3 chapters — YouTube won't render
-    chapter segmentation, so the merge is rejected up front."""
+def test_merge_cli_run_no_segments_raises(monkeypatch):
     from video2yt import merge_cli
     monkeypatch.setattr("video2yt.merge_cli.preflight", lambda: None)
-    for seg_args in (
-        ["--segment", "a.mp4", "--label", "A"],
-        ["--segment", "a.mp4", "--label", "A", "--segment", "b.mp4", "--label", "B"],
-    ):
-        args = merge_cli.parse_args([*seg_args, "--title", "T"])
-        with pytest.raises(ValueError, match="at least 3 segments"):
-            merge_cli.run(args)
+    args = merge_cli.parse_args(["--title", "T"])
+    with pytest.raises(ValueError, match="at least 1 segment"):
+        merge_cli.run(args)
 
 
 def test_merge_cli_run_happy_path_default_output_in_first_segment_dir(tmp_path, monkeypatch):
@@ -4885,7 +4878,7 @@ def test_image_cli_run_codex_full_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr("video2yt.image_gen_cli.image_gen.generate_codex", fake_codex)
     out = tmp_path / "out.png"
     args = image_gen_cli.parse_args([
-        "--prompt", "test prompt", "-o", str(out),
+        "--prompt", "test prompt", "--style", "none", "-o", str(out),
         "--target-size", "1920x1080", "--fit", "cover",
     ])
     result = image_gen_cli.run(args)
@@ -4912,7 +4905,7 @@ def test_image_cli_run_reads_prompt_file_and_save_raw(monkeypatch, tmp_path):
 
     monkeypatch.setattr("video2yt.image_gen_cli.image_gen.generate_codex", fake_codex)
     args = image_gen_cli.parse_args([
-        "--prompt-file", str(pf), "-o", str(out),
+        "--prompt-file", str(pf), "--style", "none", "-o", str(out),
         "--save-raw", str(raw), "--fit", "none",
     ])
     image_gen_cli.run(args)
@@ -4979,7 +4972,7 @@ class _NextChunkRequest:
 class _FakeYoutube:
     """Mimics the chained Discovery client API just enough for upload.py."""
 
-    def __init__(self, *, channels=None, video_id="vid123", set_thumbnail_result=None,
+    def __init__(self, *, channels=None, video_id="vid12345678", set_thumbnail_result=None,
                  insert_raises=None, set_raises=None):
         self._channels = channels or []
         self._video_id = video_id
@@ -5131,10 +5124,10 @@ def test_upload_video_builds_correct_body_and_returns_id(tmp_path):
     from video2yt import upload as up
     video = tmp_path / "v.mp4"
     video.write_bytes(b"x" * 1024)
-    yt = _FakeYoutube(video_id="newvid42")
+    yt = _FakeYoutube(video_id="newvid42000000")
     meta = _meta_dict(video, tmp_path / "thumb.png")
     vid = up.upload_video(yt, meta, video)
-    assert vid == "newvid42"
+    assert vid == "newvid42000000"
     assert yt.insert_body["snippet"]["title"] == "T"
     assert yt.insert_body["snippet"]["tags"] == ["a", "b"]
     assert yt.insert_body["status"]["privacyStatus"] == "private"
@@ -5320,19 +5313,19 @@ def test_upload_cli_run_full_happy_path(tmp_path, monkeypatch):
     build_calls = []
 
     def _fake_build(*a, **kw):
-        fake = _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ")
+        fake = _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ12345")
         build_calls.append(fake)
         return fake
 
     monkeypatch.setattr("video2yt.upload_cli.build", _fake_build)
     args = upload_cli.parse_args(["--metadata", str(meta)])
     result = upload_cli.run(args)
-    assert result["video_id"] == "vidXYZ"
-    assert "youtube.com/watch?v=vidXYZ" in result["video_url"]
-    assert "studio.youtube.com/video/vidXYZ" in result["studio_url"]
+    assert result["video_id"] == "vidXYZ12345"
+    assert "youtube.com/watch?v=vidXYZ12345" in result["video_url"]
+    assert "studio.youtube.com/video/vidXYZ12345" in result["studio_url"]
     # Explicit metadata routes the video to exactly one season playlist.
     fake = build_calls[0]
-    assert ["vidXYZ"] == fake.playlist_store["英雄戰場 S14 流派教學"]["videos"]
+    assert ["vidXYZ12345"] == fake.playlist_store["英雄戰場 S14 流派教學"]["videos"]
     assert len(fake.playlist_store) == 1
 
 
@@ -5353,12 +5346,12 @@ def test_upload_cli_run_playlist_failure_is_swallowed(tmp_path, monkeypatch):
     monkeypatch.setattr("video2yt.upload_cli.upload.get_credentials", lambda s, t: object())
     monkeypatch.setattr(
         "video2yt.upload_cli.build",
-        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ"),
+        lambda *a, **kw: _FakeYoutube(channels=[{"id": "UC_OK"}], video_id="vidXYZ12345"),
     )
     monkeypatch.setattr("video2yt.upload_cli.playlists.add_video", _boom)
     args = upload_cli.parse_args(["--metadata", str(meta)])
     result = upload_cli.run(args)
-    assert result["video_id"] == "vidXYZ"
+    assert result["video_id"] == "vidXYZ12345"
 
 
 def test_upload_cli_run_http_error_on_insert_becomes_runtime_error(tmp_path, monkeypatch):
@@ -5446,12 +5439,12 @@ def test_upload_cli_run_thumbnail_http_error_is_swallowed(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "video2yt.upload_cli.build",
         lambda *a, **kw: _FakeYoutube(
-            channels=[{"id": "UC_OK"}], video_id="vid42", set_raises=err,
+            channels=[{"id": "UC_OK"}], video_id="vid42000000", set_raises=err,
         ),
     )
     args = upload_cli.parse_args(["--metadata", str(meta)])
     result = upload_cli.run(args)
-    assert result["video_id"] == "vid42"
+    assert result["video_id"] == "vid42000000"
     assert result["dry_run"] is False
 
 
