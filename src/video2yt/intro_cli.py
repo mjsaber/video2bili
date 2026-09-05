@@ -1,6 +1,6 @@
 """video2yt-intro — compose a dynamic intro (Option A: single big card spotlight).
 
-Wraps ``intro_compose.render``: a dimmed looped background, the 女老板 mascot
+Wraps ``intro_compose.render``: an anime-sketch background, the 女老板 mascot
 animated as the narrator, the currently-introduced card shown large top-center
 and swapped in time with the SRT, a bottom-left subtitle, and a title band.
 
@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 
 from video2yt import intro_compose, validate
+from video2yt.visual_style import DEFAULT_STYLE, STYLES, default_mascot
 
-_DEFAULT_MASCOT = Path("assets/cta/src/mascot_raw.png")
 _DEFAULT_CARDS_DIR = Path("assets/cards")
 
 
@@ -42,14 +42,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Cards file: '<png> | <中文卡名> [| <start> <end>]' per line, display order")
     p.add_argument("--cards-dir", type=Path, default=_DEFAULT_CARDS_DIR,
                    help=f"Dir for card PNG basenames (default: {_DEFAULT_CARDS_DIR})")
-    p.add_argument("--mascot", type=Path, default=_DEFAULT_MASCOT,
-                   help=f"Mascot PNG with alpha (default: {_DEFAULT_MASCOT})")
+    p.add_argument("--style", choices=STYLES, default=DEFAULT_STYLE,
+                   help="Visual theme (default: anime-sketch)")
+    p.add_argument("--mascot", type=Path,
+                   help="Mascot PNG with alpha (default: matching the selected style)")
     p.add_argument("--title", default="",
                    help="Optional title text in a top band; omit for no title")
     p.add_argument("--font-face", default="Hiragino Sans GB",
                    help="Subtitle font family (default: Hiragino Sans GB)")
     p.add_argument("-o", "--output", type=Path, required=True, help="Output MP4 path")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.mascot is None:
+        args.mascot = default_mascot(args.style)
+    return args
 
 
 def run(args: argparse.Namespace) -> Path:
@@ -76,6 +81,7 @@ def run(args: argparse.Namespace) -> Path:
         title=args.title,
         cards_dir=args.cards_dir,
         font_face=args.font_face,
+        style=args.style,
     )
     _log(f"composing {args.output.name}")
     intro_compose.render(inputs, args.output)

@@ -344,7 +344,8 @@ def test_render_builds_correct_command(tmp_path, monkeypatch):
     assert captured["cwd"] == out_dir
 
 
-def test_render_includes_scrim_when_present(tmp_path, monkeypatch):
+@pytest.mark.parametrize("style,use_scrim", [("warm-tavern", True), ("anime-sketch", False)])
+def test_render_includes_scrim_only_for_legacy_theme(tmp_path, monkeypatch, style, use_scrim):
     for n in ("audio.mp3", "bg.png", "mascot.png", "scrim.png"):
         (tmp_path / n).write_bytes(b"x")
     (tmp_path / "srt.srt").write_text(HANDFISH_SRT, encoding="utf-8")
@@ -367,14 +368,14 @@ def test_render_includes_scrim_when_present(tmp_path, monkeypatch):
         audio=tmp_path / "audio.mp3", bg=tmp_path / "bg.png",
         srt=tmp_path / "srt.srt", cards_file=cards_file,
         mascot=tmp_path / "mascot.png", title="T", cards_dir=tmp_path,
-        scrim=tmp_path / "scrim.png",
+        scrim=tmp_path / "scrim.png", style=style,
     )
     intro_compose.render(inputs, tmp_path / "out" / "intro.mp4")
     cmd = captured["cmd"]
 
     # bg + mascot + 4 cards + scrim = 7 looped image inputs
-    assert cmd.count("-framerate") == 7
+    assert cmd.count("-framerate") == 6 + int(use_scrim)
     fc = cmd[cmd.index("-filter_complex") + 1]
     # scrim (input index 6) overlaid on bg; audio is input index 7
-    assert "[bg0][6:v]overlay=0:0[bgs]" in fc
-    assert f"{2 + len(CARDS) + 1}:a" in cmd
+    assert ("[bg0][6:v]overlay=0:0[bgs]" in fc) == use_scrim
+    assert f"{2 + len(CARDS) + int(use_scrim)}:a" in cmd

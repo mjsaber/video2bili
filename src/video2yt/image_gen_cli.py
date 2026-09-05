@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from video2yt import image_gen
+from video2yt.visual_style import DEFAULT_STYLE, STYLES, style_prompt
 
 
 def _log(msg: str) -> None:
@@ -27,6 +28,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prompt_grp.add_argument("--prompt", help="Inline text prompt.")
     prompt_grp.add_argument("--prompt-file", type=Path, help="UTF-8 file with the prompt.")
     parser.add_argument("-o", "--output", type=Path, required=True)
+    parser.add_argument("--style", choices=(*STYLES, "none"), default=DEFAULT_STYLE,
+                        help="Art direction (default: anime-sketch); none uses the prompt unchanged.")
     parser.add_argument(
         "--backend", choices=["codex", "gemini"], default="codex",
         help="codex (default; uses `codex exec` + image_gen tool) or gemini "
@@ -71,7 +74,8 @@ def run(args: argparse.Namespace) -> Path:
     if not prompt:
         raise ValueError("prompt is empty")
 
-    _log(f"backend={args.backend} prompt_chars={len(prompt)}")
+    prompt = style_prompt(prompt, args.style)
+    _log(f"backend={args.backend} style={args.style} prompt_chars={len(prompt)}")
 
     if args.backend == "gemini":
         api_key = os.environ.get("GEMINI_API_KEY")

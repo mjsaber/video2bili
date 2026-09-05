@@ -1,6 +1,8 @@
 # video2yt
 
-Download a Bilibili video and burn its danmaku (bullet comments) into a YouTube-ready MP4. Supports preview clips, time-range cuts, playback speed, codec selection, and Bilibili-accurate danmaku sizing.
+A local Python CLI toolkit for producing Battlegrounds videos for YouTube: source discovery, Bilibili downloads, danmaku and speech subtitles, replacement music, intros, thumbnails, publishing and measurement.
+
+The main command runs five cached stages: `fetch → stems → subtitle → music-mix → burn`. The final FFmpeg pass combines both subtitle layers, speech and music, cuts, and playback speed. See [CLAUDE.md](CLAUDE.md) for engineering context and [the production workflow](docs/superpowers/specs/2026-04-18-video-production-workflow.md) for the editorial process.
 
 ## Requirements
 
@@ -15,7 +17,9 @@ Download a Bilibili video and burn its danmaku (bullet comments) into a YouTube-
 uv sync
 ```
 
-### Optional: subtitle generation
+### Speech separation and subtitles
+
+The default pipeline uses the external `song-remover` tool for Stage 2. Install it from `~/code/song-remover` with `uv tool install '.[remote]'`, then complete its Modal setup for the default `--device remote`, or use `--device cpu` for local separation. See [CLAUDE.md](CLAUDE.md#external-dependencies) for setup.
 
 Stage 3 (`video2yt-subtitle`) shells out to the external `speech2srt` CLI (Volcengine 火山 Seed-ASR + codex cleanup) since 2026-05-27. Per the speech2srt-integration plan in `docs/superpowers/plans/2026-05-27-speech2srt-integration.md`:
 
@@ -31,10 +35,14 @@ The old `rapidocr-onnxruntime` / `--enable-ocr` flow was removed before the spee
 ## Quick start
 
 ```bash
+# Full pipeline (requires song-remover and speech2srt setup)
 uv run video2yt "https://www.bilibili.com/video/BVxxxxxxxxxx/"
+
+# Danmaku only, retaining source audio
+uv run video2yt "https://www.bilibili.com/video/BVxxxxxxxxxx/" --no-subtitle --no-music-swap
 ```
 
-The tool fetches metadata, downloads the video and raw danmaku XML, converts the danmaku to ASS in-process via `biliass`, and burns the result into an MP4 under `./output/<uploader>：<title>/`.
+The tool downloads the video and raw danmaku XML, converts danmaku to ASS with `biliass`, then runs the enabled audio/subtitle stages and produces `./output/<uploader>：<title>/<bv>_final.mp4`.
 
 ## Usage
 
@@ -46,7 +54,7 @@ uv run video2yt <url> [options]
 |---|---|---|
 | `url` (positional) | — | Bilibili video URL (must contain a `BV...` id) |
 | `-o, --output-dir` | `./output` | Where the final MP4 goes (under a per-video subfolder) |
-| `-t, --temp-dir` | `./temp` | Intermediate files. Raw downloads (video + XML) are always kept here for caching; derived ASS files are removed on success unless `--keep-temp` is set. |
+| `-t, --temp-dir` | `./temp` | Per-stage cache: raw video/XML, ASS, audio stems, subtitle sidecars and music bed. Preserved after success. |
 | `-q, --quality` | `1080` | Max video quality, one of `{480, 720, 1080}` |
 | `-b, --browser` | `chrome` | Browser to read cookies from |
 | `--codec` | `h264` | Video codec preference, one of `{h264, h265, auto}`. `h264` is most compatible / preferred by YouTube; `h265` produces smaller files; `auto` lets yt-dlp pick. |
@@ -55,7 +63,13 @@ uv run video2yt <url> [options]
 | `--preview-seconds` | none | If set, cap the burned output to the first N seconds (`ffmpeg -t N`). Useful for fast style/codec iteration. |
 | `--cut START~END` | none | Remove a time range from the output. Repeatable. See [Time format for `--cut`](#time-format-for---cut). |
 | `--speed FLOAT` | `1.0` | Playback speed multiplier for the output. Range `[0.5, 2.0]`. Common values: `1.1`, `1.25`, `1.5`, `2.0`. Applies to video, audio (pitch preserved via ffmpeg `atempo`), and danmaku together. |
-| `--keep-temp` | off | Also keep derived ASS files after success. Raw downloads (video + danmaku XML) are ALWAYS kept regardless, to enable caching. |
+| `--keep-temp` | off | Compatibility no-op; all stage caches are always preserved. |
+| `--no-subtitle` | off | Skip speech transcription/subtitles, for example when the source already has subtitles. |
+| `--subtitle-context-file PATH` | none | Project-specific streamer/card terminology context for subtitle cleanup (≤2 KB UTF-8). |
+| `--no-music-swap` | off | Retain source audio instead of separated speech and replacement music. |
+| `--no-danmaku` | off | Allow a source with zero danmaku; does not suppress existing comments. |
+| `--device` | `remote` | Separation device: `cpu`, `mps`, `auto`, or Modal `remote`. |
+| `--chunk-min` | `5` | Remote separation chunk length in minutes. |
 
 ## Output layout
 
@@ -64,14 +78,14 @@ For each run video2yt creates a per-video subfolder named `<uploader[:4]>：<tit
 ```
 output/
 └── 哈哈：某个搞笑视频的标题/
-    └── BV1xxxxxxxxx_with_danmaku.mp4
+    └── BV1xxxxxxxxx_final.mp4
 ```
 
 If the uploader is missing the subfolder is just `<title>`; if both are missing it falls back to the BV id.
 
 ## Output filenames
 
-The output MP4 is named `<bv_id>_with_danmaku[_<suffix>].mp4`, where the suffix encodes which non-default options were used. This is a backward-compatible addition: a plain run with no modifiers still produces `<bv_id>_with_danmaku.mp4`, matching pre-feature behavior.
+The output MP4 is named `<bv_id>_final[_<suffix>].mp4`, where the suffix encodes which non-default options were used. The former `_with_danmaku`, `_clean`, and `_subbed` stage suffixes have been replaced by `_final`.
 
 Suffix parts (in fixed order):
 
@@ -83,13 +97,13 @@ Because the order is fixed, a given parameter combination always produces the sa
 
 | `--cut` | `--speed` | `--preview-seconds` | filename |
 |---|---|---|---|
-| no  | 1.0  | no  | `BV_with_danmaku.mp4` |
-| no  | 1.5  | no  | `BV_with_danmaku_1.5x.mp4` |
-| yes | 1.0  | no  | `BV_with_danmaku_cut.mp4` |
-| yes | 1.5  | no  | `BV_with_danmaku_cut_1.5x.mp4` |
-| no  | 1.25 | yes | `BV_with_danmaku_1.25x_preview.mp4` |
-| yes | 1.0  | yes | `BV_with_danmaku_cut_preview.mp4` |
-| yes | 1.5  | yes | `BV_with_danmaku_cut_1.5x_preview.mp4` |
+| no  | 1.0  | no  | `BV_final.mp4` |
+| no  | 1.5  | no  | `BV_final_1.5x.mp4` |
+| yes | 1.0  | no  | `BV_final_cut.mp4` |
+| yes | 1.5  | no  | `BV_final_cut_1.5x.mp4` |
+| no  | 1.25 | yes | `BV_final_1.25x_preview.mp4` |
+| yes | 1.0  | yes | `BV_final_cut_preview.mp4` |
+| yes | 1.5  | yes | `BV_final_cut_1.5x_preview.mp4` |
 
 Note: the preview duration is intentionally NOT encoded in the filename. Preview is for iteration, so different preview lengths overwrite each other by design; if you need to keep multiple previews, rename them manually.
 
@@ -145,13 +159,14 @@ Fractional seconds are allowed in any form. `--cut` is repeatable; ranges are au
 
 video2yt caches raw downloads (the yt-dlp `<bv>.mp4` and `<bv>.danmaku.xml`) in `temp/<title_subfolder>/`. Subsequent runs of the same video reuse the cached mp4 and XML without re-downloading — `download.fetch` checks for both files and, if present, skips yt-dlp entirely and logs `using cached download from …`.
 
-To force a fresh download, delete the cached files manually:
+Each downstream stage also keeps its cache. Use `video2yt-stems --force`,
+`video2yt-subtitle --force-asr`, or `video2yt-music-mix --force` to regenerate one
+stage. To force a new source download, remove only that source's cached MP4/XML;
+never wipe the entire `temp/` or `output/` directory.
 
-```bash
-rm -rf temp/<title_subfolder>/
-```
-
-Only delete the specific subfolder you want to re-fetch; wiping `temp/` wholesale throws away the cache for every other video too.
+After a verified publication, use `video2yt-cleanup --project <project>` to inspect
+its cleanup plan, then `--yes` to apply it. The tool archives lightweight artifacts
+before reclaiming media and keeps the current published output as a buffer.
 
 ## Notes
 
@@ -222,62 +237,64 @@ uv run video2yt-merge \
 | `--label TEXT` | yes (repeatable) | Chapter label for the corresponding segment. |
 | `--title TITLE` | yes | Output filename stem and chapters file prefix. |
 | `-o, --output PATH` | no | Output MP4 path. Default: first segment's parent directory + `<title>.mp4`. |
+| `--chapters-file PATH` | no | Editorial chapter timestamps on the final-video timeline. |
+| `--no-chapters` | no | Disable chapter generation. |
 
 ### Outputs
 
-- `<output_dir>/<title>.mp4` — final merged video, with chapter markers embedded in its metadata
-- `<output_dir>/<title>_chapters.txt` — YouTube-format chapter markers (paste into video description)
-- `<output_dir>/<title>_ffmeta.txt` — the ffmetadata file embedded into the MP4 (kept for inspection)
+- `<output_dir>/<title>.mp4` — final merged video, with chapter markers when enabled and valid
+- `<output_dir>/<title>_chapters.txt` — valid YouTube-format chapter markers, when generated (paste into video description)
+- `<output_dir>/<title>_ffmeta.txt` — chapter metadata embedded into the MP4 when generated (kept for inspection)
 
 ### Behavior
 
-- **Strict input validation**: all segments must be 1920x1080 30fps h264 with an audio stream AND ≥10 seconds long, and there must be at least 3 segments. The duration / segment-count rules mirror YouTube's chapter requirements — anything else and YouTube discards the chapter list. Fail with a list of violations.
+- **Media validation**: one or more positive-length 1920x1080 30fps h264 segments with audio. Short hooks and single-source videos are supported. Chapters are independent: `--chapters-file PATH` accepts final-video timestamp text, `--no-chapters` disables chapters. By default segment boundaries become chapters only if valid (3+, first 00:00, each ≥10s); otherwise the video renders without chapters and stale chapter sidecars are removed.
 - **Per-segment audio normalization**: each segment's audio goes through `loudnorm=I=-14:TP=-1:LRA=11` (YouTube reference loudness) before concatenation.
-- **Chapters**: each segment becomes one chapter. The officially-supported way to get chapters onto YouTube is via the video description, so `<title>_chapters.txt` is written in YouTube's text format (first chapter at `00:00`) — paste it into the description as a single ascending block. The same chapters are also embedded into the output MP4 (`-map_metadata`/`-map_chapters`) as a best-effort extra; this isn't officially documented as supported by YouTube, so don't treat it as a fallback for a missing/broken description block.
+- **Chapters**: valid segment boundaries become automatic chapters, or provide independent editorial timestamps with `--chapters-file`. The officially-supported way to get chapters onto YouTube is via the video description, so `<title>_chapters.txt` is written in YouTube's text format (first chapter at `00:00`) — paste it into the description as a single ascending block. The same chapters are also embedded into the output MP4 (`-map_metadata`/`-map_chapters`) as a best-effort extra; this isn't officially documented as supported by YouTube, so don't treat it as a fallback for a missing/broken description block.
 
-## Replace background music / reduce Content ID risk
+## Replace background music
 
-`video2yt-music-swap` isolates streamer commentary with Demucs, discards the non-vocal mix, gates low-level non-speech residual bleed from the vocals stem, then mixes in royalty-free music.
+Replacement music is enabled by default. Stage 2 invokes `song-remover` and keeps
+all four audio stems; Stage 4 builds a music bed; Stage 5 mixes the speech stem
+with that bed and ducks the bed during speech. Source game effects are discarded
+with the original mix. Use `--no-music-swap` to retain source audio.
 
-```bash
-uv run video2yt-music-swap path/to/BVxxx_with_danmaku.mp4 --seed 1
-```
-
-Useful A/B options:
-
-```bash
-# Disable the post-Demucs vocal gate for comparison
-uv run video2yt-music-swap path/to/input.mp4 --no-vocal-gate -o no_gate.mp4
-
-# More aggressive bleed suppression; may cut quiet speech
-uv run video2yt-music-swap path/to/input.mp4 --vocal-gate-threshold 0.025 -o stronger_gate.mp4
-
-# Softer release, less choppy but leaves more tails
-uv run video2yt-music-swap path/to/input.mp4 --vocal-gate-release-ms 400 -o softer_gate.mp4
-```
-
-Testing a short sample before a full run:
+For an existing fetched source, run the stages independently (this example keeps danmaku and skips speech subtitles):
 
 ```bash
-SRC='path/to/BVxxx_with_danmaku.mp4'
-SAMPLE='/tmp/video2yt_music_swap_probe_60s.mp4'
-ffmpeg -hide_banner -y -ss 00:05:00 -t 60 -i "$SRC" -map 0:v:0 -map 0:a:0 -c copy "$SAMPLE"
-uv run video2yt-music-swap "$SAMPLE" --no-vocal-gate --music-volume 0.0 -o /tmp/no_gate.mp4
-uv run video2yt-music-swap "$SAMPLE" --music-volume 0.0 -o /tmp/gated.mp4
-
-for f in /tmp/no_gate.mp4 /tmp/gated.mp4; do
-  echo "--- $f"
-  ffmpeg -hide_banner -nostats -i "$f" -af volumedetect -vn -f null - 2>&1 | grep -E 'mean_volume|max_volume'
-done
+uv run video2yt-stems 'temp/<source>/<bv>.mp4'
+uv run video2yt-music-mix 'temp/<source>/<bv>.mp4' --seed 1
+uv run video2yt-burn 'temp/<source>/' --bv '<bv>' --no-subtitle -o 'output/<project>/<bv>_final.mp4'
 ```
 
-Whole-file `volumedetect mean_volume` is only a coarse sanity check because loud speech can dominate the average. For better validation, compare per-second RMS: the gated output should have much lower median / low-percentile RMS than the no-gate output while keeping speech-heavy seconds in the same rough range. Always listen to a short A/B clip too: if speech sounds choppy, lower `--vocal-gate-threshold` or increase `--vocal-gate-release-ms`.
-
-Trade-off: the gate mostly helps when the streamer is not speaking. If copyrighted music leaks under active speech, no energy gate can remove it perfectly without damaging the voice. For high-risk clips, compare a 60-second sample before processing the full video.
-
+The former `video2yt-music-swap` CLI is retired. The shipped music manifest
+contains CC BY 3.0 tracks that require attribution: copy the generated
+`<bv>_final_music_credits.txt` into the YouTube description. The current bed-volume
+baseline is 0.12. Listen to a short preview to check speech clarity and residual
+music; separation does not guarantee that a source is free of Content ID claims.
 
 ## Development
 
 ```bash
-uv run pytest    # currently 230 tests; everything mocked at the subprocess boundary
+uv run --extra dev pytest -q
 ```
+
+Most external-service boundaries are mocked. Tests that require FFmpeg/libass
+use local synthetic media and skip when the required tools are unavailable.
+No real upload or OAuth collection is needed to run the suite.
+
+## Publishing reliability and growth workflow
+
+See [the growth workflow](docs/growth-workflow.md) for result-first hooks, decision-led editing, configurable thumbnail experiments, contextual CTA, safe publishing, and 24h/7d/28d review. These defaults supersede the old fixed long intro/title/cover rules.
+
+- `video2yt-upload`: saves `publication.json`, reuses the uploaded ID on retry, and reports unfinished thumbnail/playlist work. Interrupted unknown uploads require verified recovery with `--adopt-video-id`, or `--retry-uncertain` only after checking Studio.
+- `video2yt-cleanup`: metadata-only drafts never qualify; completed receipts are ordered by upload time. Archives small scripts, thumbnails, metadata and experiments under `assets/publications/<video_id>/` before deleting media.
+- `video2yt-topic`: ranks relative views/hour within streamer baselines, exposes unverified evidence/confidence/version, writes a full audit JSON, and preserves existing reports on total fetch failure.
+- `video2yt-cta`: places a contextual subscription message over gameplay at an explicit time, preserving duration and audio.
+- `video2yt-analytics import|collect|report`: stores dated measurements outside caches; optional API collection uses separate read-only authorization. Daily API date buckets and exact publication-relative checkpoints are distinguished.
+
+The tooling prepares experiments and measures results; Studio A/B tests, end screens and actual audience response remain separate verification steps.
+
+### 封面与背景画风
+
+默认使用**日式动漫素描**：铅笔线稿、轻排线、淡彩与纸张质感。图像生成、封面和动态片头统一 `--style anime-sketch`；参考素材与用法见 [画风规范](docs/visual-style.md)。

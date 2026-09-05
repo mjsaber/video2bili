@@ -22,3 +22,11 @@ clause for a plain straight-on smile. Base character design lives in
 The YouTube **avatar** can't be changed via the Data API (that only covers banners) —
 it's a brand-account setting. Upload `channel_avatar.png` in YouTube Studio →
 Customization → Branding → Picture, or in Google Account → brand-account photo.
+
+## Cover and intro style (2026-09-05)
+
+`anime_sketch/tavern_bg.png` is the pale graphite/pencil-wash background reference.
+`anime_sketch/mascot.png` is the completed RGBA overlay, selected automatically for sketch covers/intros. User-authorized local extraction removed the baked checkerboard from `mascot_reference.png`; the original reference and reusable `mascot_alpha.png` are preserved. See [asset provenance and reproduction](anime_sketch/README.md). The original transparent mascot remains the fallback for missing or opaque sketch assets.
+The new art direction is Japanese anime pencil sketch; official card images stay original.
+These files do not replace the avatar or previously rendered CTA clips.
+See [visual style guide](../../docs/visual-style.md) for generation and composition.

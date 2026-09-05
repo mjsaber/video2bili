@@ -282,10 +282,11 @@ class IntroInputs:
     cards_dir: Path
     title: str = ""              # optional top-band title; "" = no title text
     font_face: str = "Hiragino Sans GB"
-    # Soft dark vignette + bottom gradient overlaid on the BACKGROUND so white
-    # subtitles stay legible and the warm-gold mascot/cards pop, independent of
-    # what image-gen produced. None disables it; a missing file is skipped.
+    # Legacy warm-tavern only: dark vignette + bottom gradient on the background.
+    # anime-sketch ignores this scrim and uses dark ink with a paper outline.
+    # None disables it; a missing file is skipped.
     scrim: Path | None = Path("assets/intro/intro_scrim.png")
+    style: str = "anime-sketch"
 
 
 def _build_filter(
@@ -294,6 +295,7 @@ def _build_filter(
     font: str,
     scrim_idx: int | None = None,
     show_title: bool = False,
+    style: str = "anime-sketch",
 ) -> str:
     """Assemble the filter_complex string.
 
@@ -301,11 +303,15 @@ def _build_filter(
     scrim at ``scrim_idx``. drawtext uses ``textfile=`` (basenames, resolved
     against ffmpeg cwd) so the actual text files are written by ``render``.
     """
+    if style not in ("anime-sketch", "warm-tavern"):
+        raise ValueError(f"unknown visual style: {style}")
+    sketch = style == "anime-sketch"
     parts: list[str] = []
-    # background: cover-fit + slight dim
+    # Preserve the paper palette; the legacy theme retains its slight dimming.
+    tone = "" if sketch else ",eq=brightness=-0.04"
     parts.append(
         f"[0:v]scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,"
-        f"crop={CANVAS_W}:{CANVAS_H},setsar=1,eq=brightness=-0.04[bg0]"
+        f"crop={CANVAS_W}:{CANVAS_H},setsar=1{tone}[bg0]"
     )
     # mascot: sway bounded so rotate never clips
     parts.append(
@@ -351,16 +357,23 @@ def _build_filter(
     # optional title band + text (card names are NOT drawn — the card art
     # already carries the name)
     if show_title:
+        band = "0xFCFAF5@0.85" if sketch else "black@0.55"
+        text_color = "0x282C31" if sketch else "white"
+        border = "0xFCFAF5" if sketch else "black"
         parts.append(
-            f"[{cur}]drawbox=x=0:y=0:w={CANVAS_W}:h=96:color=black@0.55:t=fill,"
+            f"[{cur}]drawbox=x=0:y=0:w={CANVAS_W}:h=96:color={band}:t=fill,"
             f"drawtext=fontfile='{font}':textfile='_title.txt':expansion=none:"
-            f"fontcolor=white:fontsize={TITLE_FONT_SIZE}:borderw=4:bordercolor=black:"
+            f"fontcolor={text_color}:fontsize={TITLE_FONT_SIZE}:borderw=4:bordercolor={border}:"
             f"x=(w-text_w)/2:y=26[vt]"
         )
         cur = "vt"
 
     # subtitle last
-    parts.append(f"[{cur}]subtitles=f='_intro.sub.ass'[outv]")
+    subtitle_style = (
+        ":force_style='PrimaryColour=&H00312C28,OutlineColour=&H00F5FAFC,Outline=3,Shadow=0'"
+        if sketch else ""
+    )
+    parts.append(f"[{cur}]subtitles=f='_intro.sub.ass'{subtitle_style}[outv]")
     return ";".join(parts)
 
 
@@ -404,11 +417,12 @@ def render(inputs: IntroInputs, output_path: Path) -> Path:
     if show_title:
         (work_dir / "_title.txt").write_text(inputs.title, encoding="utf-8")
 
-    use_scrim = inputs.scrim is not None and Path(inputs.scrim).exists()
+    use_scrim = (inputs.style == "warm-tavern" and inputs.scrim is not None
+                 and Path(inputs.scrim).exists())
     scrim_idx = 2 + len(cards) if use_scrim else None
     filter_complex = _build_filter(
         cards, n_inputs_before_cards=2, font=font, scrim_idx=scrim_idx,
-        show_title=show_title,
+        show_title=show_title, style=inputs.style,
     )
 
     cmd: list[str] = ["ffmpeg", "-y"]
