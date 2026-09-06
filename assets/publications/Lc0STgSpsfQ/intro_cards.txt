@@ -1,0 +1,6 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG33_823_zhTW_bgs_512.png | 空軍上將羅傑斯
+BG36_344_zhTW_bgs_512.png | 鉤牙
+BG36_523_zhTW_bgs_512.png | 積極的逃脫者
+BG36_520t_zhTW_bgs_512.png | 帶鎖箱 | 27.998 31.586
+BG36_MagicItem_370_zhTW_bgs_512.png | 瑪卓薩斯匕首
