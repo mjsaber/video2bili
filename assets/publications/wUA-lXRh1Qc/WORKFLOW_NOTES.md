@@ -18,3 +18,7 @@ Execution remains in this task; no feature development is required.
 
 Published: https://www.youtube.com/watch?v=wUA-lXRh1Qc
 Public/HD processed; specific end screen saved and reread; no claims shown at verification. Controlled cleanup reclaimed 2.2GB and retained current output. No external comment posted; no live A/B experiment started.
+
+## Metadata optimization — 2026-09-06
+
+The user authorized a search-discovery review and immediate metadata improvements. Current title/description/tags are in `current_metadata.json`; before/after values, search observations and saved-state verification are in `metadata_revision_20260906.json`. The original upload files and publication checksum remain historical records. A fresh Studio page confirmed all 19 tags saved; the public page showed the new title and description. This was a bundled metadata adjustment, not a randomized A/B test.
