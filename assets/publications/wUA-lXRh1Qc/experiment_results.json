@@ -1,0 +1,13 @@
+{
+  "video_id": "wUA-lXRh1Qc",
+  "status": "published_single_variant",
+  "published_variant": "five_hp",
+  "variants": [
+    "five_hp",
+    "decision"
+  ],
+  "studio_experiment_started": false,
+  "metrics": null,
+  "conclusion": "已使用 five_hp 封面發布；尚未啟動平台 A/B，沒有足夠成效數據。",
+  "published_at": "2026-09-06T07:59:47Z"
+}

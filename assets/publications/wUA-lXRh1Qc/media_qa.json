@@ -1,0 +1,141 @@
+{
+  "expected_duration": 1247.8419999999999,
+  "actual_duration": 1248.1,
+  "order": [
+    "intro.mp4",
+    "cta.mp4",
+    "body.mp4",
+    "outro.mp4"
+  ],
+  "joins_seconds": [
+    13.5,
+    18.434,
+    1235.8419999999999
+  ],
+  "decode": "pass (zero errors)",
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": "30/1",
+    "codec": "h264",
+    "pix_fmt": "yuv420p"
+  },
+  "audio": {
+    "codec": "aac",
+    "sample_rate": "48000",
+    "channels": 1
+  },
+  "chapters": [
+    {
+      "id": 0,
+      "time_base": "1/1000",
+      "start": 0,
+      "start_time": "0.000000",
+      "end": 18000,
+      "end_time": "18.000000",
+      "tags": {
+        "title": "五血轉魔像，這局怎麼做"
+      }
+    },
+    {
+      "id": 1,
+      "time_base": "1/1000",
+      "start": 18000,
+      "start_time": "18.000000",
+      "end": 146000,
+      "end_time": "146.000000",
+      "tags": {
+        "title": "Kimmy 開局與成長路線"
+      }
+    },
+    {
+      "id": 2,
+      "time_base": "1/1000",
+      "start": 146000,
+      "start_time": "146.000000",
+      "end": 432000,
+      "end_time": "432.000000",
+      "tags": {
+        "title": "選擇飾品，先穩住戰力"
+      }
+    },
+    {
+      "id": 3,
+      "time_base": "1/1000",
+      "start": 432000,
+      "start_time": "432.000000",
+      "end": 627000,
+      "end_time": "627.000000",
+      "tags": {
+        "title": "卡住之後，重新找方向"
+      }
+    },
+    {
+      "id": 4,
+      "time_base": "1/1000",
+      "start": 627000,
+      "start_time": "627.000000",
+      "end": 937000,
+      "end_time": "937.000000",
+      "tags": {
+        "title": "前期飾品與後期成長的差別"
+      }
+    },
+    {
+      "id": 5,
+      "time_base": "1/1000",
+      "start": 937000,
+      "start_time": "937.000000",
+      "end": 1048000,
+      "end_time": "1048.000000",
+      "tags": {
+        "title": "為轉型準備野獸與空格"
+      }
+    },
+    {
+      "id": 6,
+      "time_base": "1/1000",
+      "start": 1048000,
+      "start_time": "1048.000000",
+      "end": 1115000,
+      "end_time": "1115.000000",
+      "tags": {
+        "title": "決賽圈換陣，招募階段做魔像"
+      }
+    },
+    {
+      "id": 7,
+      "time_base": "1/1000",
+      "start": 1115000,
+      "start_time": "1115.000000",
+      "end": 1211000,
+      "end_time": "1211.000000",
+      "tags": {
+        "title": "比較觸發方式與格子限制"
+      }
+    },
+    {
+      "id": 8,
+      "time_base": "1/1000",
+      "start": 1211000,
+      "start_time": "1211.000000",
+      "end": 1235000,
+      "end_time": "1235.000000",
+      "tags": {
+        "title": "最後一戰"
+      }
+    },
+    {
+      "id": 9,
+      "time_base": "1/1000",
+      "start": 1235000,
+      "start_time": "1235.000000",
+      "end": 1247842,
+      "end_time": "1247.842000",
+      "tags": {
+        "title": "接著看：小動物喝茶流"
+      }
+    }
+  ],
+  "frame_contact": "output/golem_transition_s14/evidence/final_contact.jpg"
+}

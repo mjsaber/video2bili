@@ -1,0 +1,6 @@
+[video2yt-cleanup] current project (kept): output/golem_transition_s14
+[video2yt-cleanup] temp caches to delete (current project):
+[video2yt-cleanup]   - temp/炉石Ki：【210K魔像矩阵】喝烂茶是没前途的 决赛圈转型魔像流  (2.2GB)
+[video2yt-cleanup] previous output folders to delete: none
+[video2yt-cleanup] total reclaimable: 2.2GB
+[video2yt-cleanup] deleted 1 dir(s), reclaimed 2.2GB.

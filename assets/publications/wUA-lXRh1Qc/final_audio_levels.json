@@ -1,0 +1,18 @@
+{
+  "intro": {
+    "mean_volume": -14.6,
+    "max_volume": -1.0
+  },
+  "cta": {
+    "mean_volume": -15.6,
+    "max_volume": -1.0
+  },
+  "body": {
+    "mean_volume": -23.0,
+    "max_volume": -1.0
+  },
+  "outro": {
+    "mean_volume": -28.3,
+    "max_volume": -12.0
+  }
+}

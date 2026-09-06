@@ -1,0 +1,82 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "zC8WrggAUMU2sHi6ixHsGk6YBr4",
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "mlf_TUTiXQK8qe4441flALBrHr4",
+      "id": "S8VysyLfteg",
+      "snippet": {
+        "publishedAt": "2026-08-25T07:57:49Z",
+        "channelId": "UCEgIrCo0pR6DyyrXuSn3wBg",
+        "title": "「爐石戰記：英雄戰場」新賽季小動物喝茶流完整教學 | 郭楓荷 實戰 [彈幕]",
+        "description": "「爐石戰記：英雄戰場」新賽季掛機神陣容——小動物喝茶流完整教學！海洋生物低語者在回合結束自動對兩側隨從施放自然祝福，旁邊的門衛聚合體每被施放一個法術就跟著施放放錯的茶具組，給每個類型的隨從+4/+4；再配上多層盾牌，場上種族越多、每一發旅店法術的加成疊得越高，發光的水晶同步按種族數量產金幣。隨從全程不用出手，掛機喝茶，12回合全場數值暴漲到五千，黃金賽同款、晉級率拉滿。\n\n時間軸：\n00:00 開場：小動物喝茶流\n00:39 郭楓荷：阮大師 12回合五千\n17:56 郭楓荷：飆翼 黃金賽實戰\n\n原片來源：\n郭楓荷（12回合干拔五千）：https://www.bilibili.com/video/BV19D8F6AEA9\n郭楓荷（黃金賽晉級率最高）：https://www.bilibili.com/video/BV1FF8m6CEZH\n\n🎵 背景音樂（CC BY 3.0）：\n\"Air Prelude\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Ascending the Vale\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Angels We Have Heard (piano)\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Atlantean Twilight\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Autumn Day\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Bass Walker\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Aces High\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"BlipStream\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Bathed in the Light\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Blue Feather\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\n#英雄戰場教學 #英雄戰場 #爐石戰記 #小動物喝茶流 #海洋生物低語者 #戰棋 #Hearthstone #Battlegrounds\n\n简体摘要：酒馆战棋新赛季挂机神阵容「小动物喝茶流」：动物低语者回合结束自动施放自然祝福，守门融合怪吃到法术就放乱放的茶具，配多层护盾按种族叠法术加成，闪光水晶同步产币，随从全程不用出手，12回合全场数值五千。",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/S8VysyLfteg/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/S8VysyLfteg/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/S8VysyLfteg/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          },
+          "standard": {
+            "url": "https://i.ytimg.com/vi/S8VysyLfteg/sddefault.jpg",
+            "width": 640,
+            "height": 480
+          },
+          "maxres": {
+            "url": "https://i.ytimg.com/vi/S8VysyLfteg/maxresdefault.jpg",
+            "width": 1280,
+            "height": 720
+          }
+        },
+        "channelTitle": "马哥炉石复盘",
+        "tags": [
+          "Battlegrounds",
+          "Hearthstone",
+          "小動物喝茶流",
+          "戰棋",
+          "掛機流",
+          "海洋生物低語者",
+          "炉石传说",
+          "爐石戰記",
+          "英雄戰場",
+          "郭楓荷",
+          "酒馆战棋",
+          "門衛聚合體",
+          "阮大師",
+          "飆翼"
+        ],
+        "categoryId": "20",
+        "liveBroadcastContent": "none",
+        "defaultLanguage": "zh-Hant",
+        "localized": {
+          "title": "「爐石戰記：英雄戰場」新賽季小動物喝茶流完整教學 | 郭楓荷 實戰 [彈幕]",
+          "description": "「爐石戰記：英雄戰場」新賽季掛機神陣容——小動物喝茶流完整教學！海洋生物低語者在回合結束自動對兩側隨從施放自然祝福，旁邊的門衛聚合體每被施放一個法術就跟著施放放錯的茶具組，給每個類型的隨從+4/+4；再配上多層盾牌，場上種族越多、每一發旅店法術的加成疊得越高，發光的水晶同步按種族數量產金幣。隨從全程不用出手，掛機喝茶，12回合全場數值暴漲到五千，黃金賽同款、晉級率拉滿。\n\n時間軸：\n00:00 開場：小動物喝茶流\n00:39 郭楓荷：阮大師 12回合五千\n17:56 郭楓荷：飆翼 黃金賽實戰\n\n原片來源：\n郭楓荷（12回合干拔五千）：https://www.bilibili.com/video/BV19D8F6AEA9\n郭楓荷（黃金賽晉級率最高）：https://www.bilibili.com/video/BV1FF8m6CEZH\n\n🎵 背景音樂（CC BY 3.0）：\n\"Air Prelude\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Ascending the Vale\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Angels We Have Heard (piano)\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Atlantean Twilight\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Autumn Day\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Bass Walker\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Aces High\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"BlipStream\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Bathed in the Light\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\"Blue Feather\" by Kevin MacLeod (incompetech.com), licensed under Creative Commons Attribution 3.0 (https://creativecommons.org/licenses/by/3.0/)\n\n#英雄戰場教學 #英雄戰場 #爐石戰記 #小動物喝茶流 #海洋生物低語者 #戰棋 #Hearthstone #Battlegrounds\n\n简体摘要：酒馆战棋新赛季挂机神阵容「小动物喝茶流」：动物低语者回合结束自动施放自然祝福，守门融合怪吃到法术就放乱放的茶具，配多层护盾按种族叠法术加成，闪光水晶同步产币，随从全程不用出手，12回合全场数值五千。"
+        },
+        "defaultAudioLanguage": "zh-Hant"
+      },
+      "status": {
+        "uploadStatus": "processed",
+        "privacyStatus": "public",
+        "license": "youtube",
+        "embeddable": true,
+        "publicStatsViewable": true,
+        "madeForKids": false,
+        "selfDeclaredMadeForKids": false
+      }
+    }
+  ],
+  "pageInfo": {
+    "totalResults": 1,
+    "resultsPerPage": 1
+  }
+}

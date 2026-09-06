@@ -1,0 +1,36 @@
+{
+  "id": "decision",
+  "title": "只剩五血，怎麼把喝茶陣容轉成魔像？｜英雄戰場 Kimmy 實戰",
+  "hypothesis": "只改封面副標比較決策承諾與翻盤結果；本地備選，未啟動平台實驗。",
+  "layout": "payoff",
+  "style": "anime-sketch",
+  "texts": {
+    "primary": "魔像轉型",
+    "secondary": "何時換陣",
+    "tertiary": null
+  },
+  "assets": {
+    "background": {
+      "path": "/Users/jun/code/video2yt/output/golem_transition_s14/intro_bg.png",
+      "sha256": "f102c1b584457e7ef4acb8406194c8ce83a246829b9abe32515add859f5a4f4f"
+    },
+    "card": {
+      "path": "/Users/jun/code/video2yt/output/golem_transition_s14/cards/BG36_MidGameEffect_000t61.png",
+      "sha256": "b4da194007ef8dcd2a2a0101d0c84f06c6eecc88b9992bb48c5d21ef9321809c"
+    },
+    "card2": null,
+    "logo": {
+      "path": "/Users/jun/code/video2yt/assets/hsbg_logo.png",
+      "sha256": "dbc0a6322ae31e8c27e56a9f1182bfc1ab6983f41d7852c94f903e16d6e52f2b"
+    },
+    "mascot": {
+      "path": "/Users/jun/code/video2yt/assets/branding/anime_sketch/mascot.png",
+      "sha256": "b877c270ff3134227265dfa04213770ae5d35c7412571f5c065eda7e7adf1819"
+    }
+  },
+  "thumbnail_path": "/Users/jun/code/video2yt/output/golem_transition_s14/thumbnail_decision.png",
+  "thumbnail_sha256": "e150d2d27097aef4b3f042f54e01c1c5ed2f0c1dd1284447dc97377eb4edf8c3",
+  "mobile_preview_path": "/Users/jun/code/video2yt/output/golem_transition_s14/thumbnail_decision_mobile.png",
+  "created_at": "2026-09-06T07:28:19.461730+00:00",
+  "status": "pending_manual_studio_experiment"
+}
