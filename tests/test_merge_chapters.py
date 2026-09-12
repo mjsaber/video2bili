@@ -118,20 +118,24 @@ def test_chapter_options_are_mutually_exclusive():
 
 
 @pytest.mark.skipif(not shutil.which('ffmpeg') or not shutil.which('ffprobe'), reason='ffmpeg unavailable')
-def test_real_ffmpeg_short_single_segment(tmp_path):
+@pytest.mark.parametrize('sample_rate', [48000, 96000])
+def test_real_ffmpeg_short_single_segment(tmp_path, sample_rate):
     source = tmp_path / 'source.mp4'
     subprocess.run([
         'ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=1920x1080:r=30',
-        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '0.5',
+        '-f', 'lavfi', '-i', f'sine=frequency=440:sample_rate={sample_rate}', '-t', '0.5',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', str(source),
     ], check=True, capture_output=True)
     output = tmp_path / 'merged.mp4'
     assert merge_cli.run(merge_cli.parse_args([
         '--segment', str(source), '--label', 'Hook', '--title', 'Smoke', '-o', str(output),
     ])) == output
-    result = subprocess.run(['ffprobe', '-v', 'error', '-show_chapters', '-of', 'json', str(output)],
+    result = subprocess.run(['ffprobe', '-v', 'error', '-show_chapters', '-show_streams', '-of', 'json', str(output)],
                             check=True, capture_output=True, text=True)
-    assert json.loads(result.stdout)['chapters'] == []
+    media = json.loads(result.stdout)
+    assert media['chapters'] == []
+    audio = next(stream for stream in media['streams'] if stream['codec_type'] == 'audio')
+    assert audio['sample_rate'] == '48000'
 
 
 def test_explicit_labels_escape_ffmetadata_syntax_only(tmp_path, monkeypatch):

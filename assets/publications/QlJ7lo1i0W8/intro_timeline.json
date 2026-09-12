@@ -1,0 +1,18 @@
+{
+  "hook": {
+    "start": 0,
+    "duration": 5.266666666666667,
+    "source_start": 1198.2
+  },
+  "quote": {
+    "start": 5.266666666666667,
+    "duration": 2.9,
+    "source_start": 836.47
+  },
+  "explain": {
+    "start": 8.166666666666666,
+    "duration": 9.266666666666667,
+    "picture_switch_at": 2.7
+  },
+  "duration": 17.466667
+}

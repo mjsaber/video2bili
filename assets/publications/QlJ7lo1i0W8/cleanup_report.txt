@@ -1,0 +1,10 @@
+[video2yt-cleanup] current project (kept): output/self_damage_demons_s14
+[video2yt-cleanup] temp caches to delete (current project):
+[video2yt-cleanup]   - temp/炉石传说：【炉石瓦莉拉】虚假的自残恶魔  (1.7GB)
+[video2yt-cleanup]   - temp/炉石郭枫：推荐血魔玩恶魔，轻松易上手！  (2.0GB)
+[video2yt-cleanup] previous output folders to delete:
+[video2yt-cleanup]   - output/golem_transition_s14  (2.0GB)
+[video2yt-cleanup] total reclaimable: 5.7GB
+[video2yt-cleanup] deleted 3 dir(s), reclaimed 5.7GB.
+
+Commit-time dry-run: no temp caches or previous shipped output remain eligible; nothing to delete.

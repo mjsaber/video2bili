@@ -1,0 +1,19 @@
+{
+  "variant_id": "manga_v3_infinite_economy_question",
+  "status": "user_requested_copy_rendered",
+  "generator": "ChatGPT built-in image_gen",
+  "actual_model_id": "not_exposed_by_tool",
+  "text": [
+    "英雄戰場",
+    "自傷惡魔",
+    "無限經濟？"
+  ],
+  "file": "thumbnail_manga_v3.png",
+  "upload_file": "thumbnail.jpg",
+  "mobile_preview": "thumbnail_mobile.png",
+  "prompt_file": "thumbnail_manga_v3.prompt.txt",
+  "style": "Japanese color manga poster",
+  "hypothesis": "Short question and bold lettering may improve mobile readability; performance not measured",
+  "experiment_status": "not_started",
+  "sha256": "972d521708d44511440abc5983d3674e900b188302b5a789871ed7469fd35978"
+}

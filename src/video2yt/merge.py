@@ -252,10 +252,11 @@ def _build_filter_complex(segments: list[Segment]) -> str:
     for i in range(n):
         parts.append(f"[{i}:v]fps=30,setpts=PTS-STARTPTS[v{i}n]")
 
-    # Per-segment audio: resample to 48k, loudnorm to -14 LUFS
+    # loudnorm may upsample internally; resample AFTER it so concat and the
+    # encoded delivery remain at 48 kHz even with a 96 kHz intro input.
     for i in range(n):
         parts.append(
-            f"[{i}:a]aresample=48000,loudnorm=I=-14:TP=-1:LRA=11[a{i}n]"
+            f"[{i}:a]loudnorm=I=-14:TP=-1:LRA=11,aresample=48000[a{i}n]"
         )
 
     # Concat: interleave the normalized video + loudnorm'd audio streams
@@ -310,6 +311,7 @@ def render(inputs: MergeInputs, output_path: Path) -> Path:
         "-pix_fmt", "yuv420p",
         "-r", "30",
         "-c:a", "aac",
+        "-ar", "48000",
         "-b:a", "192k",
         "-shortest",
         str(output_path.resolve()),

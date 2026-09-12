@@ -1,0 +1,73 @@
+{
+  "intro.mp4": {
+    "duration": 17.466667,
+    "bytes": 9817968,
+    "video_codec": "h264",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "fps": "30/1",
+    "audio_codec": "aac",
+    "audio_sample_rate": "96000"
+  },
+  "guo_final.mp4": {
+    "duration": 1324.4,
+    "bytes": 681957831,
+    "video_codec": "h264",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "fps": "30/1",
+    "audio_codec": "aac",
+    "audio_sample_rate": "48000"
+  },
+  "val_final.mp4": {
+    "duration": 1020.01,
+    "bytes": 743061504,
+    "video_codec": "h264",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "fps": "30/1",
+    "audio_codec": "aac",
+    "audio_sample_rate": "48000"
+  },
+  "final.mp4": {
+    "duration": 2343.95,
+    "bytes": 1426693394,
+    "video_codec": "h264",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "fps": "30/1",
+    "audio_codec": "aac",
+    "audio_sample_rate": "48000"
+  },
+  "chapter_and_metadata_validation": "passed",
+  "complete_decode": "passed",
+  "visual_review": "intro at 0.7/3.5/6.6/9.3/12/16 seconds; subtitle and CTA samples; thumbnail at 320x180; final join frames reviewed separately",
+  "limitations": [
+    "Not a real-time listening review of the whole video.",
+    "Uncertain ASR fragments omitted; raw transcript preserved.",
+    "Local media QA does not establish publication status; see online_verification.json. No Studio experiment performed."
+  ],
+  "final_join_review": {
+    "frame_seconds": [
+      17.3,
+      17.8,
+      1326.7,
+      1327.6,
+      2342.5
+    ],
+    "result": "passed; hook connects to hero selection, second game connects directly to gameplay, tail preserved"
+  },
+  "source_prefixes_removed_seconds": {
+    "guo": 14.666666666666666,
+    "val": 3.5
+  },
+  "verification_stage": "Local media QA before upload; publication evidence is stored separately."
+}

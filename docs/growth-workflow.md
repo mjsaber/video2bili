@@ -19,6 +19,10 @@
 
 输入段仍须 1920×1080、30fps、h264、有音频和正时长。可只有一个或两个片段，短 hook 与 CTA 均可成为剪辑片段。默认仅在片段自然满足章节规则时生成章节；否则省略。
 
+合并前检查每条来源的开头，删除无关短片和重复的原作者片头，保留选英雄、经济与阵容上下文。裁掉前缀后，按最终时间线重算章节和 CTA，不能继续使用源片时间。合并后至少抽查每个接点的前后画面及片尾；本期自傷惡魔的实例见 [制作总结](../assets/publications/QlJ7lo1i0W8/README.md)。
+
+最终交付音频为 AAC 48 kHz。`loudnorm` 会内部升采样，因此必须在它之后重采样，并显式设置输出采样率；输入中间件可有不同采样率。发布前用 `ffprobe` 核对实际输出，并对完整文件执行 `ffmpeg -v error -xerror -i final.mp4 -f null -` 解码检查。
+
 ```bash
 uv run video2yt-merge \
   --segment output/demo/hook.mp4 --label '結果預覽' \
@@ -77,6 +81,8 @@ uv run video2yt-upload --metadata output/demo/youtube_metadata.json
 
 上传元数据必须包含正整数 `season`。`publication.json` 的 `complete` 才代表上传和所选后续步骤完成；退出码 1 表示仍需处理。重复命令会复用视频 ID，继续失败的封面/播放列表步骤。只有封面变化时可在同一视频重试；已上传的视频文件或上传元数据变化会拒绝，以免悄悄重复发布。
 
+上传回执完成后，另行确认 YouTube 转码成功、公开视频实际可播放、线上封面正确，以及 Studio 片尾元素保存成功。描述保留各首音乐的署名及许可链接，删除“把这些行粘贴到描述”等内部操作说明。若发布后润色描述，保留原上传元数据及其哈希，另存核验后的线上描述，避免破坏恢复依据。
+
 上传中断且没有 ID 时，先检查 Studio。如果视频已存在，以准确的同频道同标题视频恢复；该命令会继续本地封面与播放列表设置：
 
 ```bash
@@ -91,6 +97,8 @@ uv run video2yt-cleanup --project demo --yes
 ```
 
 先查看 dry-run。工具先归档当前和待清理项目，再回收媒体；归档出错则停止删除。`output/` 和 `temp/` 是大文件工作区，`assets/publications/` 与 `assets/analytics/` 不属于清理范围。
+
+来源缓存按项目内文件名中的 BV 号或同名片段目录关联。正文使用 `guo_final.mp4` 等短名称时，保存真实来源记录 `source_BVxxxxxxxxxx.json`，写明来源 URL、实际缓存路径及对应成片；仅在正文说明里写 BV 号不足以被清理工具识别。归档前更新最终状态，保留原始 ASR、字幕审计、封面变体、线上验收及清理结果。
 
 ## 24 小时、7 天、28 天复盘
 

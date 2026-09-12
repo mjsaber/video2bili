@@ -1,0 +1,7 @@
+{
+  "raw_blocks": 73,
+  "display_blocks": 37,
+  "audit_indices_and_timestamps_preserved": true,
+  "omissions": "lyrics, repeated game voice, or uncertain ASR fragments; raw preserved",
+  "guo": "source already has burnt-in speech captions; new ASS contains editorial notes only"
+}

@@ -1,0 +1,18 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Hiragino Sans GB,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,1,2,80,80,24,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 3,0:00:00.00,0:00:06.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}第一局｜血魔：死亡之聲補法術
+Dialogue: 3,0:04:15.00,0:04:22.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}轉型惡魔：先把資源來源接起來
+Dialogue: 3,0:10:54.00,0:10:59.00,Default,,0,0,0,,{\an7\pos(360,92)\fs36\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}訂閱馬哥，每期拆解陣容取捨
+Dialogue: 3,0:14:27.00,0:14:34.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}法術開始爆手牌：留意使用順序
+Dialogue: 3,0:18:10.00,0:18:17.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}有序瘋狂：吞噬屬性值與額外關鍵字

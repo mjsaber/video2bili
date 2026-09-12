@@ -1,0 +1,22 @@
+{
+  "variant_id": "manga_v1",
+  "status": "superseded_copy",
+  "generator": "ChatGPT built-in image_gen",
+  "actual_model_id": "not_exposed_by_tool",
+  "requested_model": "latest ChatGPT image generation",
+  "source_file": "/Users/jun/.codex/generated_images/01a09431-a241-7373-ba98-1926cce1a932/exec-7d9bebb7-a0a6-4f0a-b094-08d2528fd689.png",
+  "file": "output/self_damage_demons_s14/thumbnail_manga_v1.png",
+  "size": [
+    1672,
+    941
+  ],
+  "text": [
+    "英雄戰場",
+    "自傷惡魔",
+    "越打越富？"
+  ],
+  "copy_status": "provisional_pending_ASR_review",
+  "style": "Japanese color manga poster",
+  "hypothesis": "Bold lettering and a coherent demon/cupcake subject may improve thumbnail recognition over the pastel sketch layout; not measured",
+  "prompt_file": "thumbnail_manga_v1.prompt.txt"
+}

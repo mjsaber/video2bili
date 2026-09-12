@@ -1,0 +1,55 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Hiragino Sans GB,46,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,4,2,2,80,80,80,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:04.48,0:00:06.68,Default,,0,0,0,,這個可以抓這個，這已經很不錯了。
+Dialogue: 0,0:00:07.48,0:00:08.64,Default,,0,0,0,,算了，還是捏吧。
+Dialogue: 0,0:00:34.91,0:00:35.15,Default,,0,0,0,,難打。
+Dialogue: 0,0:00:51.36,0:00:52.16,Default,,0,0,0,,這個也行啊。
+Dialogue: 0,0:00:59.89,0:01:01.33,Default,,0,0,0,,這把還有復生嗎？
+Dialogue: 0,0:01:01.93,0:01:04.21,Default,,0,0,0,,我發現復生這個關鍵字好少啊，兄弟們。
+Dialogue: 0,0:01:04.93,0:01:06.85,Default,,0,0,0,,你們看，復生這個關鍵字好少啊。
+Dialogue: 0,0:02:09.51,0:02:10.71,Default,,0,0,0,,嗯，你是對的。
+Dialogue: 0,0:02:14.57,0:02:16.65,Default,,0,0,0,,你說我這把打得有點後悔了，我不應該這麼玩。
+Dialogue: 0,0:02:18.79,0:02:21.03,Default,,0,0,0,,我感覺打錯，應該升五本的。
+Dialogue: 0,0:02:21.63,0:02:23.55,Default,,0,0,0,,這樣不升五本的話，節奏有點慢啊。
+Dialogue: 0,0:02:24.19,0:02:26.31,Default,,0,0,0,,他不是碰幾的問題，而是應該升五本。
+Dialogue: 0,0:02:27.03,0:02:28.87,Default,,0,0,0,,沒升五本的話，節奏有點慢。
+Dialogue: 0,0:03:44.16,0:03:44.68,Default,,0,0,0,,什麼玩意？
+Dialogue: 0,0:03:44.72,0:03:45.88,Default,,0,0,0,,這東西怎麼又來了？
+Dialogue: 0,0:03:45.88,0:03:47.84,Default,,0,0,0,,我他媽受不了了，這麼坑爹貨！
+Dialogue: 0,0:03:50.73,0:03:52.53,Default,,0,0,0,,喔，我上次都給我坑傻了，這個牌。
+Dialogue: 0,0:04:34.86,0:04:36.02,Default,,0,0,0,,我牌都不認識啊。
+Dialogue: 0,0:04:41.18,0:04:42.10,Default,,0,0,0,,這個我買了。
+Dialogue: 0,0:04:50.63,0:04:52.79,Default,,0,0,0,,啊，不行啊，怎麼做啊？
+Dialogue: 0,0:05:11.84,0:05:12.72,Default,,0,0,0,,對面怎麼這麼菜啊？
+Dialogue: 0,0:05:13.32,0:05:14.56,Default,,0,0,0,,媽的，第一就這啊？
+Dialogue: 0,0:06:03.37,0:06:08.41,Default,,0,0,0,,要的牌一直沒有來。我要的是五本惡魔干擾者，\N和這個五本的大母豬。
+Dialogue: 0,0:06:09.09,0:06:12.09,Default,,0,0,0,,六本的自傷大惡魔也沒來啊，挺奇怪的。
+Dialogue: 0,0:09:04.56,0:09:05.20,Default,,0,0,0,,什麼東西啊？
+Dialogue: 0,0:09:07.34,0:09:08.46,Default,,0,0,0,,果凍沒啊，我就喝了一個啊。
+Dialogue: 0,0:09:41.49,0:09:44.69,Default,,0,0,0,,我只能買惡魔，靠這個小粉刷這逃脫大師。
+Dialogue: 0,0:09:44.97,0:09:48.69,Default,,0,0,0,,薩格拉斯之眼，他說金銅鬚、金巴琳達刷薩格拉斯之眼。
+Dialogue: 0,0:09:49.37,0:09:51.53,Default,,0,0,0,,這樣應該是可以，我這個不行。
+Dialogue: 0,0:09:54.71,0:09:56.39,Default,,0,0,0,,對，沒薩格拉斯之眼太拉了。
+Dialogue: 0,0:11:09.34,0:11:09.94,Default,,0,0,0,,哎呀，打錯了。
+Dialogue: 0,0:13:54.53,0:13:55.41,Default,,0,0,0,,有毒了。
+Dialogue: 0,0:13:56.65,0:13:59.01,Default,,0,0,0,,逃脫大師現在最大的問題是格子不夠。
+Dialogue: 0,0:13:59.29,0:14:04.05,Default,,0,0,0,,你們仔細看，這格子是非常……如果這個逃脫大師金了，\N再空一個格子。
+Dialogue: 0,0:14:04.41,0:14:09.49,Default,,0,0,0,,放個金銅鬚，或者乾脆把我那個大王夥伴放在這裡，\N就還好。
+Dialogue: 0,0:14:15.26,0:14:20.90,Default,,0,0,0,,那他沒帶小粉。他相當於金銅鬚、金巴琳達、薩格拉斯之眼，\N這個干擾者加了。
+Dialogue: 0,0:14:22.37,0:14:25.21,Default,,0,0,0,,這樣的話，他依靠薩格拉斯之眼無限觸發。
+Dialogue: 3,0:00:00.00,0:00:06.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}第二局｜自傷拿蛋糕，格子怎麼留？
+Dialogue: 3,0:02:14.00,0:02:21.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}先看升本節奏：缺核心時，啟動會變慢
+Dialogue: 3,0:09:40.00,0:09:48.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}本局靠買惡魔觸發；之眼是對照方案
+Dialogue: 3,0:13:56.00,0:14:03.00,Default,,0,0,0,,{\an7\pos(360,92)\fs38\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}雙逃脫者佔格：合金可騰出一格
+Dialogue: 3,0:16:49.00,0:16:59.00,Default,,0,0,0,,{\an7\pos(360,92)\fs32\bord9\shad0\3c&H33223D&\1c&HEEFFFF&\fad(120,180)}原片未展示最終名次；本期重點為資源與卡位
