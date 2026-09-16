@@ -254,3 +254,12 @@ def test_rename_playlist_preserves_id_and_members():
     playlists.rename_playlist(yt, "PL13", "new title", "new description")
 
     assert yt.store["new title"] == {"id": "PL13", "videos": ["one"]}
+
+
+def test_shorts_go_only_to_the_season_shorts_playlist():
+    title = "一回合翻 12 倍！郭神這手牌序｜龍蝦野獸 爐石戰記 英雄戰場 #Shorts"
+    assert classify_names(title, 14) == ["英雄戰場 S14 Shorts"]
+    assert playlists.playlist_definitions(title, 14) == [
+        ("英雄戰場 S14 Shorts", playlists.shorts_playlist_description(14)),
+    ]
+    assert classify_names("一回合翻 12 倍｜郭楓荷 實戰", 14) == [S14, GUO]

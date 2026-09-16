@@ -35,6 +35,19 @@ def season_playlist_title(season: int) -> str:
     return f"英雄戰場 S{season} 流派教學"
 
 
+def shorts_playlist_title(season: int) -> str:
+    return f"英雄戰場 S{season} Shorts"
+
+
+def shorts_playlist_description(season: int) -> str:
+    return f"爐石戰記：英雄戰場第 {season} 賽季實戰高光 Shorts，每條連到完整教學。#英雄戰場 #爐石戰記 #Shorts"
+
+
+def is_short_title(title: str) -> bool:
+    """Shorts carry ``#Shorts`` in the title (upload convention since 2026-09-14)."""
+    return "#shorts" in title.lower()
+
+
 def season_playlist_description(season: int) -> str:
     suffix = "，持續更新" if season == 14 else ""
     return f"爐石戰記：英雄戰場第 {season} 賽季流派完整教學與實戰{suffix}。#英雄戰場教學"
@@ -46,7 +59,13 @@ def classify_topic(title: str) -> list[str]:
 
 
 def classify(title: str, season: int) -> list[str]:
-    """Return one explicit season playlist followed by topical matches."""
+    """Return one explicit season playlist followed by topical matches.
+
+    Shorts go ONLY to the season Shorts playlist: a vertical clip inside the
+    long-form 流派教學 / topical lists breaks playlist autoplay (user 2026-09-15).
+    """
+    if is_short_title(title):
+        return [shorts_playlist_title(season)]
     return [season_playlist_title(season), *classify_topic(title)]
 
 
@@ -54,6 +73,7 @@ def playlist_definitions(title: str, season: int) -> list[tuple[str, str]]:
     """Return ordered ``(title, description)`` targets for one upload."""
     matched = set(classify(title, season))
     definitions = [
+        (shorts_playlist_title(season), shorts_playlist_description(season)),
         (season_playlist_title(season), season_playlist_description(season)),
         *((name, desc) for name, desc, _match in PLAYLIST_RULES),
     ]

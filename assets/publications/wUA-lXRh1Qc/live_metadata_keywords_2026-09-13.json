@@ -1,0 +1,50 @@
+{
+  "video_id": "wUA-lXRh1Qc",
+  "changed_at": "2026-09-14T02:50:54.597142+00:00",
+  "before": {
+    "title": "【爐石戰記：英雄戰場】魔像術轉型實戰｜喝茶轉出兩隻七千攻魔像！Kimmy 五血翻盤",
+    "tags": [
+      "Golemancy",
+      "Hearthstone Battlegrounds",
+      "Kimmy",
+      "喝茶流",
+      "喝茶轉型",
+      "死亡陸行鷹",
+      "炉石Ki",
+      "炉石传说",
+      "爐石戰記",
+      "英雄战场",
+      "英雄戰場",
+      "英雄戰場教學",
+      "酒館戰棋",
+      "酒馆战棋",
+      "魔像术",
+      "魔像流",
+      "魔像術",
+      "魔像轉型",
+      "魔像转型"
+    ]
+  },
+  "after": {
+    "title": "【爐石戰記：英雄戰場】魔像術轉型實戰｜喝茶轉出兩隻七千攻魔像！Kimmy 五血翻盤",
+    "tags": [
+      "Golemancy",
+      "Hearthstone Battlegrounds",
+      "Kimmy",
+      "喝茶流",
+      "喝茶轉型",
+      "死亡陸行鷹",
+      "爐石戰記",
+      "英雄戰場",
+      "英雄戰場教學",
+      "魔像流",
+      "魔像術",
+      "魔像轉型"
+    ]
+  },
+  "warnings": [
+    "title has no tribe word (野獸/海盜/惡魔/機械/龍/魚人/元素/亡靈/不死族/娜迦/納迦/野豬人); tribe words are the only intent-bearing autocomplete layer"
+  ],
+  "applied": true,
+  "note": "before = live snippet read at the first API call on 2026-09-13; later re-runs were idempotent"
+}

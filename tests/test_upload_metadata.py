@@ -9,9 +9,9 @@ def valid_meta() -> dict:
     return {
         "video_path": "video.mp4",
         "thumbnail_path": "thumbnail.png",
-        "title": "title",
+        "title": "鉤牙破萬｜爐石戰記 英雄戰場 海盜",
         "description": "description",
-        "tags": [],
+        "tags": ["爐石戰記", "英雄戰場", "英雄戰場教學", "Hearthstone Battlegrounds", "海盜"],
         "category_id": "20",
         "default_language": "zh-Hant",
         "default_audio_language": "zh-Hant",

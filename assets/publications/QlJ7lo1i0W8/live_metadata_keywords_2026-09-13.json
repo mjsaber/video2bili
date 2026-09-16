@@ -1,0 +1,37 @@
+{
+  "video_id": "QlJ7lo1i0W8",
+  "changed_at": "2026-09-14T02:50:54.331178+00:00",
+  "before": {
+    "title": "2 血養出萬攻惡魔！死亡之聲與自傷，資源怎麼接？｜英雄戰場",
+    "tags": [
+      "Battlegrounds",
+      "Hearthstone",
+      "爐石戰記",
+      "瓦莉拉",
+      "自傷惡魔",
+      "英雄戰場",
+      "血魔",
+      "逃脫者",
+      "郭楓荷"
+    ]
+  },
+  "after": {
+    "title": "2 血養出萬攻惡魔！死亡之聲與自傷，資源怎麼接？｜爐石戰記 英雄戰場",
+    "tags": [
+      "Battlegrounds",
+      "Hearthstone",
+      "Hearthstone Battlegrounds",
+      "爐石戰記",
+      "瓦莉拉",
+      "自傷惡魔",
+      "英雄戰場",
+      "英雄戰場教學",
+      "血魔",
+      "逃脫者",
+      "郭楓荷"
+    ]
+  },
+  "warnings": [],
+  "applied": true,
+  "note": "before = live snippet read at the first API call on 2026-09-13; later re-runs were idempotent"
+}

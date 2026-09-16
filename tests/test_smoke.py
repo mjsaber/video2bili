@@ -5063,9 +5063,9 @@ class _FakeYoutube:
 
 def _meta_dict(video_path: Path, thumb_path: Path, *, channel="UC_TEST"):
     return {
-        "title": "T",
+        "title": "T｜爐石戰記 英雄戰場 海盜",
         "description": "D",
-        "tags": ["a", "b"],
+        "tags": ["爐石戰記", "英雄戰場", "英雄戰場教學", "Hearthstone Battlegrounds", "海盜"],
         "category_id": "20",
         "default_language": "zh",
         "default_audio_language": "zh",
@@ -5128,8 +5128,8 @@ def test_upload_video_builds_correct_body_and_returns_id(tmp_path):
     meta = _meta_dict(video, tmp_path / "thumb.png")
     vid = up.upload_video(yt, meta, video)
     assert vid == "newvid42000000"
-    assert yt.insert_body["snippet"]["title"] == "T"
-    assert yt.insert_body["snippet"]["tags"] == ["a", "b"]
+    assert yt.insert_body["snippet"]["title"] == "T｜爐石戰記 英雄戰場 海盜"
+    assert yt.insert_body["snippet"]["tags"] == ["爐石戰記", "英雄戰場", "英雄戰場教學", "Hearthstone Battlegrounds", "海盜"]
     assert yt.insert_body["status"]["privacyStatus"] == "private"
     assert yt.insert_body["status"]["embeddable"] is True
 

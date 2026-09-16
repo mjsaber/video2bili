@@ -156,7 +156,7 @@ def test_adoption_uses_verified_remote_timestamp(publishing, monkeypatch):
         def videos(self): return self
         def list(self, **kw): return self
         def execute(self):
-            return {'items': [{'snippet': {'channelId': 'channel', 'title': 'title',
+            return {'items': [{'snippet': {'channelId': 'channel', 'title': valid_meta()['title'],
                 'publishedAt': '2025-01-01T00:00:00Z'}, 'status': {'privacyStatus': 'public'}}]}
     monkeypatch.setattr(upload_cli, 'build', lambda *a, **k: Remote())
     args.adopt_video_id = 'abcdefghijk'
@@ -203,3 +203,25 @@ def test_external_thumbnail_archived_with_custom_manifest_name(publishing):
     archive = project.parent.parent / 'assets/publications/abcdefghijk'
     assert (archive / 'uploaded_thumbnail.png').read_bytes() == b'external uploaded cover'
     assert json.loads((archive / 'uploaded_metadata.json').read_text()) == manifest
+
+
+def test_upload_refuses_title_without_search_terms(publishing):
+    project, args, calls = publishing
+    manifest = project / 'youtube_metadata.json'
+    meta = json.loads(manifest.read_text())
+    meta['title'] = '鉤牙破萬｜英雄戰場'
+    manifest.write_text(json.dumps(meta))
+    with pytest.raises(ValueError, match='search-keyword'):
+        upload_cli.run(args)
+    assert calls['video'] == 0
+
+
+def test_allow_keyword_issues_downgrades_to_warning(publishing):
+    project, args, calls = publishing
+    manifest = project / 'youtube_metadata.json'
+    meta = json.loads(manifest.read_text())
+    meta['tags'] = ['酒馆战棋']
+    manifest.write_text(json.dumps(meta))
+    args = upload_cli.parse_args(['--metadata', str(manifest), '--allow-keyword-issues'])
+    assert upload_cli.run(args)['complete']
+    assert calls['video'] == 1

@@ -8,7 +8,7 @@ from pathlib import Path
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from video2yt import playlists, upload, publication
+from video2yt import packaging, playlists, upload, publication
 
 
 def _log(msg: str) -> None:
@@ -35,6 +35,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run", action="store_true",
         help="Authenticate and verify channel only, no upload.",
     )
+    parser.add_argument(
+        "--allow-keyword-issues", action="store_true",
+        help="Downgrade search-keyword rule violations (title/tags) from errors to warnings.",
+    )
     return parser.parse_args(argv)
 
 
@@ -45,6 +49,24 @@ def run(args: argparse.Namespace) -> dict:
         return _run_locked(args)
 
 
+def _check_search_keywords(meta: dict, *, allow: bool) -> None:
+    """Enforce the zhTW search-keyword rules on title/tags before any upload.
+
+    Errors block the upload unless ``allow`` is set; warnings only log.
+    Rules and evidence: video2yt.packaging.
+    """
+    errors, warnings = packaging.search_keyword_issues(meta)
+    for w in warnings:
+        _log(f"WARNING keyword: {w}")
+    for e in errors:
+        _log(f"{'WARNING' if allow else 'ERROR'} keyword: {e}")
+    if errors and not allow:
+        raise ValueError(
+            "title/tags violate search-keyword rules (see log); fix youtube_metadata.json "
+            "or pass --allow-keyword-issues"
+        )
+
+
 def _run_locked(args: argparse.Namespace) -> dict:
     if not args.metadata.exists():
         raise FileNotFoundError(f"metadata not found: {args.metadata}")
@@ -53,6 +75,7 @@ def _run_locked(args: argparse.Namespace) -> dict:
     except json.JSONDecodeError as e:
         raise ValueError(f"malformed metadata JSON {args.metadata}: {e}")
     upload.validate_meta(meta)
+    _check_search_keywords(meta, allow=args.allow_keyword_issues)
     video_path = Path(meta["video_path"])
     thumbnail_path = Path(meta["thumbnail_path"])
 
