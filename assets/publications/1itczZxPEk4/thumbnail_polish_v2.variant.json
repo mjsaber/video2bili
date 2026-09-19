@@ -1,0 +1,36 @@
+{
+  "id": "polish_v2_balinda_small",
+  "title": "一次回合結束疊一萬攻！自動擋不如手動擋｜機械巴琳達 爐石戰記 英雄戰場",
+  "hypothesis": "v1 figure scaled to 68% so the face sits below the payoff row",
+  "layout": "brand",
+  "style": "anime-sketch",
+  "texts": {
+    "primary": "機械巴琳達",
+    "secondary": "完整教學",
+    "tertiary": null
+  },
+  "assets": {
+    "background": {
+      "path": "/Users/jun/code/video2yt/output/balinda_mech/thumbnail_bg_v2.png",
+      "sha256": "f9d128668c67b961a9569863764197cad163c2a1ef61ee9ae9ae4a35bb0c4726"
+    },
+    "card": {
+      "path": "/Users/jun/code/video2yt/assets/cards/BG35_883_zhTW_bgs_512.png",
+      "sha256": "fb9703bbd234cff0f1fa92d522d285b20f5908c07f3118e14ef489a4608027a8"
+    },
+    "card2": null,
+    "logo": {
+      "path": "/Users/jun/code/video2yt/assets/hsbg_logo.png",
+      "sha256": "dbc0a6322ae31e8c27e56a9f1182bfc1ab6983f41d7852c94f903e16d6e52f2b"
+    },
+    "mascot": {
+      "path": "/Users/jun/code/video2yt/assets/branding/anime_sketch/mascot.png",
+      "sha256": "b877c270ff3134227265dfa04213770ae5d35c7412571f5c065eda7e7adf1819"
+    }
+  },
+  "thumbnail_path": "/Users/jun/code/video2yt/output/balinda_mech/thumbnail_polish_v2.png",
+  "thumbnail_sha256": "44e2f812db801fd72342fa1a0122344e6fb25fe5cfe562d5fb69f922737f7edc",
+  "mobile_preview_path": "/Users/jun/code/video2yt/output/balinda_mech/thumbnail_polish_v2_mobile.png",
+  "created_at": "2026-09-18T05:16:03.953332+00:00",
+  "status": "pending_manual_studio_experiment"
+}

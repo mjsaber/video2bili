@@ -1,0 +1,6 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG35_883_zhTW_bgs_512.png | 巴琳達‧石爐
+BG36_MagicItem_211_zhTW_bgs_512.png | 愛心墜盒
+BG36_853_zhTW_bgs_512.png | 華麗機器人
+BG26_152_zhTW_bgs_512.png | 通用無人機
+BG36_506_zhTW_bgs_512.png | 無人機複製器

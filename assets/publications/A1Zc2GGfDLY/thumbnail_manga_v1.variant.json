@@ -1,0 +1,22 @@
+{
+  "variant_id": "manga_v1_escapist_core",
+  "status": "local_candidate",
+  "generator": "video2yt-image --backend gemini (gemini-2.5-flash-image) art + PIL lettering",
+  "art_prompt_file": "thumbnail_art_prompt.txt",
+  "text": [
+    "英雄戰場",
+    "逃脫者 才是核心",
+    "惡魔養到一萬五"
+  ],
+  "file": "thumbnail_manga_v1.png",
+  "upload_file": "thumbnail.jpg",
+  "mobile_preview": "thumbnail_mobile.png",
+  "style": "Japanese color manga poster (reference: QlJ7lo1i0W8 manga_v3)",
+  "evidence": {
+    "一萬五": "郭楓荷 BV1Wsew6eEfW 21:33 自己場上 13K/15K（17K 是對手隨從，已修正）",
+    "核心": "兩局標題與 ASR 均以逃脫者為主引擎"
+  },
+  "hypothesis": "Same manga style as the previous demon video keeps series recognition; number payoff line tests whether a concrete stat beats a question",
+  "experiment_status": "not_started",
+  "sha256": "a84792ec4675dfa93f2027b5c9667f05d58e9e258d0e8e2bd406469e7008aa51"
+}

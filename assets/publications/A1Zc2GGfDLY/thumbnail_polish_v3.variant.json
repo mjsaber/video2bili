@@ -1,0 +1,38 @@
+{
+  "id": "polish_v3_escapist_card",
+  "title": "逃脫者才是核心！惡魔養到一萬五｜自傷惡魔 爐石戰記 英雄戰場",
+  "hypothesis": "channel-standard layout with a small manga demon bottom-left",
+  "layout": "brand",
+  "style": "anime-sketch",
+  "texts": {
+    "primary": "埃雷達爾逃脫者",
+    "secondary": "完整教學",
+    "tertiary": null
+  },
+  "assets": {
+    "background": {
+      "path": "/Users/jun/code/video2yt/output/escapist_core/thumbnail_bg_v3.png",
+      "sha256": "10e5adf48f186f790b320165d552321e4212ba03e9f2fc53eb7ad78bc9c22c59"
+    },
+    "card": {
+      "path": "/Users/jun/code/video2yt/assets/cards/BG36_733_zhTW_bgs_512.png",
+      "sha256": "7e1c4078965360d22c4b284788c6addb2b723dfb967496beaecaaf6c31018968"
+    },
+    "card2": null,
+    "logo": {
+      "path": "/Users/jun/code/video2yt/assets/hsbg_logo.png",
+      "sha256": "dbc0a6322ae31e8c27e56a9f1182bfc1ab6983f41d7852c94f903e16d6e52f2b"
+    },
+    "mascot": {
+      "path": "/Users/jun/code/video2yt/assets/branding/anime_sketch/mascot.png",
+      "sha256": "b877c270ff3134227265dfa04213770ae5d35c7412571f5c065eda7e7adf1819"
+    }
+  },
+  "thumbnail_path": "/Users/jun/code/video2yt/output/escapist_core/thumbnail_polish_v3.png",
+  "thumbnail_sha256": "251309a6de42e2b208cb79181a7fbe59084dbb0c76fceeb0acb1a9da566cc20a",
+  "mobile_preview_path": "/Users/jun/code/video2yt/output/escapist_core/thumbnail_polish_v3_mobile.png",
+  "created_at": "2026-09-17T02:59:42.523783+00:00",
+  "status": "user_approved_for_upload",
+  "upload_file": "thumbnail.jpg",
+  "sha256": "d78ae627a14e898ae4ec8b6b79f2cd1693607e04572e5187dc07efccedbc5d80"
+}

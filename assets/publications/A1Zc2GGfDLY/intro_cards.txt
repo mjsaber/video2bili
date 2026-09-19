@@ -1,0 +1,4 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG36_733_zhTW_bgs_512.png | 埃雷達爾逃脫者
+BG28_607_zhTW_bgs_512.png | 腐化的杯子蛋糕
+BG30_MagicItem_701_zhTW_bgs_512.png | 薩格拉斯之眼
