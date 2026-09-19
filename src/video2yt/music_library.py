@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import sys
 from dataclasses import dataclass
@@ -20,11 +21,12 @@ from pathlib import Path
 
 import requests
 
-from video2yt import validate
+from video2yt import loudness, validate
 
 MANIFEST_PATH = Path(__file__).parent / "data" / "music_library.json"
 CACHE_DIR = Path.home() / ".cache" / "video2yt" / "music"
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".opus"}
+LOUDNESS_SIDECAR = ".loudness.json"   # per-track integrated LUFS, keyed by "name:size"
 
 
 def _log(msg: str) -> None:
@@ -115,6 +117,35 @@ def scan_cache(cache_dir: Path) -> list[Track]:
         info = validate.probe(f)
         pool.append(Track(name=f.name, path=f, duration=info.duration))
     return pool
+
+
+def track_loudness(path: Path, cache_dir: Path | None = None) -> float | None:
+    """Integrated loudness (LUFS, EBU R128) of the whole track, or None when ffmpeg
+    cannot measure it. Cached in ``<cache_dir>/.loudness.json`` keyed by
+    ``"<name>:<size>"`` so the 30-track pool is only scanned once."""
+    cache_dir = cache_dir or path.parent
+    sidecar = cache_dir / LOUDNESS_SIDECAR
+    key = f"{path.name}:{path.stat().st_size}"
+    cache: dict = {}
+    if sidecar.is_file():
+        try:
+            cache = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cache = {}
+    if key in cache:
+        return cache[key]
+    lufs = loudness.measure_lufs(path)
+    if lufs is None:
+        _log(f"could not measure loudness of {path.name}; using it unnormalized")
+        return None
+    cache[key] = lufs
+    try:
+        tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
+        tmp.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, sidecar)
+    except OSError:
+        pass
+    return lufs
 
 
 def select_sequence(

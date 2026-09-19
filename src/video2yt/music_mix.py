@@ -28,6 +28,12 @@ from video2yt import meta, music_library, validate
 
 
 META_FILENAME_SUFFIX = ".music_bed_meta.json"
+# Every library track is gain-matched to this integrated loudness before the
+# bed is stitched, so burn.py's fixed bed volume means the same thing whatever
+# track the shuffle picks (the raw pool spans -29..-9 LUFS; viewer complaint
+# 2026-09-18 「音樂真的太吵了」).
+TRACK_TARGET_LUFS = -23.0
+_MAX_TRACK_GAIN_DB = 20.0
 BED_FILENAME_SUFFIX = ".music_bed.wav"
 CREDITS_FILENAME_SUFFIX = ".music_credits.txt"
 
@@ -105,40 +111,55 @@ def _write_credits(credits_path: Path, credit_lines: list[str]) -> None:
     os.replace(tmp, credits_path)
 
 
+def track_gain_db(loudness_lufs: float | None) -> float:
+    """Gain that brings a track of ``loudness_lufs`` to ``TRACK_TARGET_LUFS``
+    (0 dB when unmeasured; clamped to ±_MAX_TRACK_GAIN_DB)."""
+    if loudness_lufs is None:
+        return 0.0
+    gain = TRACK_TARGET_LUFS - loudness_lufs
+    return max(-_MAX_TRACK_GAIN_DB, min(_MAX_TRACK_GAIN_DB, gain))
+
+
 def _build_music_bed(
     tracks: list[music_library.Track],
     target_duration: float,
     bed_path: Path,
     crossfade: float = 2.0,
+    gains_db: list[float] | None = None,
 ) -> None:
     """Stitch ``tracks`` into a single music bed of exactly ``target_duration``.
 
     Inlined from the old ``music_swap.build_music_bed`` so this module
-    stands alone post-step6-restructure. Consecutive tracks are joined
-    with an ``acrossfade`` of ``crossfade`` seconds. The
-    result is trimmed to the target with ``-t`` and a ``crossfade``-second
-    ``afade`` out is applied at the tail.
+    stands alone post-step6-restructure. Each input is first gain-matched
+    with ``volume=<gains_db[i]>dB`` (see ``TRACK_TARGET_LUFS``), then
+    consecutive tracks are joined with an ``acrossfade`` of ``crossfade``
+    seconds. The result is trimmed to the target with ``-t`` and a
+    ``crossfade``-second ``afade`` out is applied at the tail.
     """
     if not tracks:
         raise ValueError("cannot build a music bed from an empty track list")
+    gains_db = gains_db or [0.0] * len(tracks)
+    if len(gains_db) != len(tracks):
+        raise ValueError("gains_db must have one entry per track")
 
     cmd = ["ffmpeg", "-y"]
     for t in tracks:
         cmd += ["-i", str(t.path)]
 
     fade_start = max(0.0, target_duration - crossfade)
+    norm = [f"[{i}:a]volume={g:+.1f}dB[n{i}]" for i, g in enumerate(gains_db)]
     if len(tracks) == 1:
         filtergraph = (
-            f"[0:a]aloop=loop=-1:size=2e9,"
+            f"{norm[0]};[n0]aloop=loop=-1:size=2e9,"
             f"afade=t=out:st={fade_start:.3f}:d={crossfade:.3f}[out]"
         )
     else:
-        steps = []
-        prev = "[0:a]"
+        steps = list(norm)
+        prev = "[n0]"
         for idx in range(1, len(tracks)):
             label = "[out]" if idx == len(tracks) - 1 else f"[a{idx}]"
             steps.append(
-                f"{prev}[{idx}:a]acrossfade=d={crossfade:.3f}:c1=tri:c2=tri{label}"
+                f"{prev}[n{idx}]acrossfade=d={crossfade:.3f}:c1=tri:c2=tri{label}"
             )
             prev = label
         joined = ";".join(steps)
@@ -211,11 +232,13 @@ def render(
         crossfade=crossfade,
         seed=seed,
     )
+    gains = [track_gain_db(music_library.track_loudness(t.path)) for t in tracks]
     _build_music_bed(
         tracks=tracks,
         target_duration=info.duration,
         bed_path=bed_path,
         crossfade=crossfade,
+        gains_db=gains,
     )
     _write_credits(
         credits_path,

@@ -22,13 +22,14 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from video2yt import validate
-from video2yt.burn import _MUSIC_BED_VOLUME, _SIDECHAIN_PARAMS
+from video2yt import loudness, validate
+from video2yt.burn import _SIDECHAIN_PARAMS
 from video2yt.compose import srt_to_ass
 from video2yt.cuts import _format_ass_time, _parse_ass_time
 from video2yt.fetch import compute_font_size
@@ -47,8 +48,9 @@ SUB_FONT_SIZE = 54
 SUB_TOP_Y = TOP_H + 24       # subtitles sit at the top of the face/mascot panel (clear of the face);
                              # blocks are pushed past the hook window so they never overlap the claim
 CLAIM_Y = TOP_H + 32
-CONTEXT_Y = TOP_H + 250      # 語境行 (turn / HP / board state), hook window only
-PROMISE_Y = TOP_H + 316      # 預期行 (what the viewer will see), hook window only
+CONTEXT_Y = TOP_H + 250      # 語境行 (turn / HP / board state), hook window only (1-line claim)
+PROMISE_Y = TOP_H + 316      # 預期行 (what the viewer will see), hook window only (1-line claim)
+CLAIM_LINE_SHIFT = 96        # context/promise move down this much per extra claim line
 MAX_BIG_CHARS = 12           # 84px glyphs: 12 × 84 = 1008 < 1080
 MAX_SMALL_CHARS = 20         # 46px glyphs: 20 × 46 = 920 < 1080
 MAX_STAGE_CHARS = 6
@@ -214,11 +216,13 @@ def build_filter_complex(
     bottom_inputs: tuple[int, int] | None,
     with_context: bool = False,
     with_promise: bool = False,
+    claim_lines: int = 1,
     stages: list[tuple[float, float]] | None = None,
     danmaku_on: str | None = None,
     caption_band: int = 0,
     audio_input: int = 0,
     bed_input: int | None = None,
+    bed_gain_db: float = loudness.LEGACY_BED_GAIN_DB,
 ) -> str:
     """Filter graph. Input [0] is the source seeked to the first range start; ``ranges``
     are (start, end) RELATIVE to it and are trimmed + concatenated in order (recruit
@@ -242,14 +246,14 @@ def build_filter_complex(
     parts.append("".join(f"[t{i}v][t{i}a]" for i in range(n)) + f"concat=n={n}:v=1:a=1[clipv][clipa0]")
     if bed_input is not None:
         # same trims on the music bed, then the long-form recipe (burn.py A2):
-        # bed at _MUSIC_BED_VOLUME, sidechain-ducked by the voice, amix
+        # bed at bed_gain_db (voice-relative, see loudness.py), sidechain-ducked by the voice, amix
         parts.append(f"[{bed_input}:a]aresample=48000,aformat=channel_layouts=stereo,asplit={n}"
                      + "".join(f"[b{i}]" for i in range(n)))
         for i, (rs, re_) in enumerate(ranges):
             parts.append(f"[b{i}]atrim=start={rs:.3f}:end={re_:.3f},asetpts=PTS-STARTPTS[tb{i}]")
         parts.append("".join(f"[tb{i}]" for i in range(n)) + f"concat=n={n}:v=0:a=1,afade=t=in:d=1.0[clipbed]")
         parts.append("[clipa0]aresample=48000,aformat=channel_layouts=stereo,asplit=2[sp_a][sp_b]")
-        parts.append(f"[clipbed]volume={_MUSIC_BED_VOLUME}[bed_scaled]")
+        parts.append(f"[clipbed]volume={bed_gain_db:+.1f}dB[bed_scaled]")
         parts.append(f"[bed_scaled][sp_a]sidechaincompress={_SIDECHAIN_PARAMS}[bed_ducked]")
         parts.append("[sp_b][bed_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[clipa]")
     else:
@@ -286,10 +290,11 @@ def build_filter_complex(
                                enable=f"gte(t,{ss:.3f})*lt(t,{se:.3f})"))
     gate = f"lt(t,{hook_seconds:.3f})" if hook_seconds > 0 else None
     chain.append(_drawtext("claim.txt", size=84, x="(w-text_w)/2", y=_slide_y(CLAIM_Y, 0.0), style="box", enable=gate))
+    shift = max(0, claim_lines - 1) * CLAIM_LINE_SHIFT   # keep the rows below a 2-line claim
     if with_context:
-        chain.append(_drawtext("context.txt", size=46, x="(w-text_w)/2", y=_slide_y(CONTEXT_Y, 0.15), style="box", enable=gate))
+        chain.append(_drawtext("context.txt", size=46, x="(w-text_w)/2", y=_slide_y(CONTEXT_Y + shift, 0.15), style="box", enable=gate))
     if with_promise:
-        chain.append(_drawtext("promise.txt", size=46, x="(w-text_w)/2", y=_slide_y(PROMISE_Y, 0.30), style="box", enable=gate))
+        chain.append(_drawtext("promise.txt", size=46, x="(w-text_w)/2", y=_slide_y(PROMISE_Y + shift, 0.30), style="box", enable=gate))
     if with_subs:
         chain.append("subtitles=f='subs.ass'")
     chain.append("format=yuv420p")
@@ -512,10 +517,16 @@ def render(
             audio_input = n_inputs
             n_inputs += 1
         bed_input = None
+        bed_gain = loudness.LEGACY_BED_GAIN_DB
         if bed is not None:
             cmd += ["-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(bed.resolve())]
             bed_input = n_inputs
             n_inputs += 1
+            voice_lufs = loudness.voice_reference_lufs(audio if audio is not None else source_path)
+            bed_lufs = loudness.measure_lufs(bed)
+            bed_gain = loudness.bed_gain_db(voice_lufs, bed_lufs)
+            print(f"[video2yt-short] music bed gain {bed_gain:+.1f} dB (voice P{loudness.VOICE_PERCENTILE} {voice_lufs} LUFS, bed {bed_lufs} LUFS)",
+                  file=sys.stderr)
         outro_inputs = None
         if outro > 0:
             cmd += ["-framerate", "30", "-loop", "1", "-t", f"{outro:.3f}", "-i", str(bg_path),
@@ -533,9 +544,10 @@ def render(
         graph = build_filter_complex(board=board, face=face, ranges=rel, hook_seconds=hook_seconds,
                                      with_subs=bool(blocks), outro_inputs=outro_inputs,
                                      bottom_inputs=bottom_inputs, with_context=context is not None,
-                                     with_promise=promise is not None, stages=stage_windows,
+                                     with_promise=promise is not None, claim_lines=claim.count("\n") + 1,
+                                     stages=stage_windows,
                                      danmaku_on=danmaku_on, caption_band=caption_band,
-                                     audio_input=audio_input, bed_input=bed_input)
+                                     audio_input=audio_input, bed_input=bed_input, bed_gain_db=bed_gain)
         staged = work / "rendered.mp4"
         cmd += ["-filter_complex", graph, "-map", "[v]", "-map", "[a]",
                 "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",

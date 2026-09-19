@@ -16,8 +16,11 @@ best-effort addition, NOT a substitute for the description block.
 import math
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from video2yt import loudness
 
 
 @dataclass
@@ -229,17 +232,22 @@ def generate_ffmetadata(segments: list[Segment]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_filter_complex(segments: list[Segment]) -> str:
-    """Build the ffmpeg filter_complex for per-segment loudnorm + concat.
+def _build_filter_complex(segments: list[Segment],
+                          gains_db: list[float | None] | None = None) -> str:
+    """Build the ffmpeg filter_complex for per-segment level alignment + concat.
 
     Inputs (by index, in the ffmpeg command line order):
     - 0..N-1: each segment (``-i seg0.mp4 -i seg1.mp4 ...``)
+    - ``gains_db``: per-segment constant gain (``loudness.align_gain_db``: puts the
+      segment's voice P85 on ``TARGET_P85_LUFS``), followed by a −1 dBTP limiter;
+      None keeps the legacy single-pass dynamic loudnorm for that segment.
 
     Output labels:
     - ``[outv]``: concatenated video
-    - ``[outa]``: concatenated audio after per-segment loudnorm
+    - ``[outa]``: concatenated audio after per-segment alignment
     """
     n = len(segments)
+    gains_db = gains_db or [None] * n
     parts: list[str] = []
 
     # Per-segment VIDEO: force CFR 30fps + rebase PTS to 0 BEFORE concat.
@@ -252,12 +260,24 @@ def _build_filter_complex(segments: list[Segment]) -> str:
     for i in range(n):
         parts.append(f"[{i}:v]fps=30,setpts=PTS-STARTPTS[v{i}n]")
 
+    # Per-segment constant gain (2026-09-18, user rule): intro TTS and every
+    # streamer segment get their voice-P85 aligned to the same level, then a
+    # −1 dBTP limiter. The old single-pass dynamic loudnorm rode the gain (lifted
+    # bed-only gaps ~5 dB more than speech, viewer: 音樂太吵) and let true peaks
+    # reach +2 dBTP; it survives only as the fallback for an unmeasurable segment.
     # loudnorm may upsample internally; resample AFTER it so concat and the
     # encoded delivery remain at 48 kHz even with a 96 kHz intro input.
+    # Every branch ends in aformat=stereo: concat adopts the FIRST input's layout,
+    # so a mono intro.mp4 silently made the whole delivery mono and the stereo
+    # streamer segments got summed to mono (+3 dB, true peak +2 dBTP past the
+    # limiter) — found 2026-09-18 on balinda_mech.
     for i in range(n):
-        parts.append(
-            f"[{i}:a]loudnorm=I=-14:TP=-1:LRA=11,aresample=48000[a{i}n]"
-        )
+        if gains_db[i] is None:
+            parts.append(f"[{i}:a]loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,"
+                         f"aformat=channel_layouts=stereo[a{i}n]")
+        else:
+            parts.append(f"[{i}:a]volume={gains_db[i]:+.1f}dB,aformat=channel_layouts=stereo,"
+                         f"alimiter=limit=0.891:level=false,aresample=48000[a{i}n]")
 
     # Concat: interleave the normalized video + loudnorm'd audio streams
     concat_inputs = "".join(f"[v{i}n][a{i}n]" for i in range(n))
@@ -298,7 +318,17 @@ def render(inputs: MergeInputs, output_path: Path) -> Path:
         cmd.extend(["-i", str(ffmeta_path.resolve())])
         ffmeta_input_idx = len(inputs.segments)
 
-    filter_complex = _build_filter_complex(inputs.segments)
+    gains: list[float | None] = []
+    for seg in inputs.segments:
+        p85 = loudness.voice_reference_lufs(seg.path)
+        gain = loudness.align_gain_db(p85)
+        gains.append(gain)
+        if gain is None:
+            print(f"[video2yt-merge] loudnorm dynamic fallback for {seg.path.name}", file=sys.stderr)
+        else:
+            print(f"[video2yt-merge] align {seg.path.name}: voice P{loudness.VOICE_PERCENTILE}={p85:.1f} LUFS "
+                  f"→ gain {gain:+.1f} dB (target {loudness.TARGET_P85_LUFS:g})", file=sys.stderr)
+    filter_complex = _build_filter_complex(inputs.segments, gains)
     cmd.extend([
         "-filter_complex", filter_complex,
         "-map", "[outv]",

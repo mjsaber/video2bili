@@ -20,6 +20,23 @@ def probe_result(duration):
     }))
 
 
+@pytest.fixture(autouse=True)
+def _no_loudnorm_probe(monkeypatch):
+    """Fake segments can't be measured → dynamic loudnorm fallback (tests that
+    exercise the linear path patch this themselves)."""
+    monkeypatch.setattr("video2yt.loudness.voice_reference_lufs", lambda path, percentile=85: None)
+
+
+def test_render_aligns_each_segment_voice_p85_with_constant_gain(tmp_path, monkeypatch):
+    monkeypatch.setattr("video2yt.loudness.voice_reference_lufs", lambda path, percentile=85: -17.5)
+    commands = []
+    monkeypatch.setattr(merge.subprocess, 'run', lambda cmd, **kw: commands.append(cmd))
+    merge.render(merge.MergeInputs([merge.Segment(Path('source.mp4'), 'source', 30)], 'T', no_chapters=True),
+                 tmp_path / 'out.mp4')
+    fc = commands[0][commands[0].index('-filter_complex') + 1]
+    assert "[0:a]volume=+4.5dB,aformat=channel_layouts=stereo,alimiter=limit=0.891:level=false,aresample=48000[a0n]" in fc   # −13 − (−17.5)
+
+
 @pytest.mark.parametrize('duration', [0, -1, float('nan'), float('inf')])
 def test_nonpositive_or_nonfinite_media_duration_rejected(tmp_path, monkeypatch, duration):
     source = tmp_path / 'source.mp4'

@@ -69,6 +69,9 @@ def _patch_music_library(monkeypatch, tracks: list, attribution: list[str],
         "video2yt.music_mix.music_library.attribution_lines",
         lambda tracks, manifest: attribution,
     )
+    # every fake track "measures" at the target → +0.0dB unless a test overrides it
+    monkeypatch.setattr("video2yt.music_mix.music_library.track_loudness",
+                       lambda path, cache_dir=None: music_mix.TRACK_TARGET_LUFS)
 
 
 def _fake_ffmpeg(captured: list):
@@ -305,6 +308,8 @@ def test_render_forwards_seed_and_crossfade_to_select_sequence(
                        fake_select)
     monkeypatch.setattr("video2yt.music_mix.music_library.attribution_lines",
                        lambda t, m: [])
+    monkeypatch.setattr("video2yt.music_mix.music_library.track_loudness",
+                       lambda path, cache_dir=None: music_mix.TRACK_TARGET_LUFS)
     monkeypatch.setattr("video2yt.music_mix.subprocess.run", _fake_ffmpeg([]))
 
     music_mix.render(mp4, crossfade=3.5, seed=42)
@@ -334,6 +339,42 @@ def test_render_forwards_crossfade_to_build_music_bed(tmp_path, monkeypatch):
     # And the tail afade also uses 4.000.
     assert "afade=t=out:" in fc_string
     assert "d=4.000" in fc_string
+
+
+def test_tracks_are_gain_matched_to_target_loudness(tmp_path, monkeypatch):
+    """A loud track gets attenuated and a quiet one boosted so the bed sits at
+    TRACK_TARGET_LUFS regardless of which library track the shuffle picked."""
+    mp4 = _setup_mp4(tmp_path)
+    monkeypatch.setattr("video2yt.music_mix.validate.probe", _fake_probe(60.0))
+    tracks = [_track(tmp_path, "loud", 30.0), _track(tmp_path, "quiet", 35.0)]
+    _patch_music_library(monkeypatch, tracks, [])
+    measured = {"loud.mp3": -12.0, "quiet.mp3": -29.3, "silent.mp3": None}
+    monkeypatch.setattr("video2yt.music_mix.music_library.track_loudness",
+                       lambda path, cache_dir=None: measured[path.name])
+    ffmpeg_calls = []
+    monkeypatch.setattr("video2yt.music_mix.subprocess.run", _fake_ffmpeg(ffmpeg_calls))
+
+    music_mix.render(mp4)
+    fc = ffmpeg_calls[0][ffmpeg_calls[0].index("-filter_complex") + 1]
+    assert "[0:a]volume=-11.0dB[n0]" in fc and "[1:a]volume=+6.3dB[n1]" in fc
+    assert "[n0][n1]acrossfade=" in fc
+
+
+def test_track_gain_db_clamps_and_handles_unmeasured():
+    assert music_mix.track_gain_db(None) == 0.0
+    assert music_mix.track_gain_db(music_mix.TRACK_TARGET_LUFS) == 0.0
+    assert music_mix.track_gain_db(-60.0) == music_mix._MAX_TRACK_GAIN_DB
+
+
+def test_single_track_bed_is_gain_matched_before_loop(tmp_path):
+    calls = []
+    def _run(cmd, **kw):
+        calls.append(cmd); Path(cmd[-1]).write_bytes(b"x"); return MagicMock(returncode=0)
+    import unittest.mock as um
+    with um.patch("video2yt.music_mix.subprocess.run", _run):
+        music_mix._build_music_bed([_track(tmp_path, "solo", 30.0)], 45.0, tmp_path / "bed.wav", gains_db=[-4.0])
+    fc = calls[0][calls[0].index("-filter_complex") + 1]
+    assert fc.startswith("[0:a]volume=-4.0dB[n0];[n0]aloop=")
 
 
 # ---------- CLI ----------

@@ -47,6 +47,13 @@ def test_rect_must_fit_source():
         short.Rect.parse("1000:0:1000:100").check_within(1920, 1080, "board")
 
 
+@pytest.fixture(autouse=True)
+def _no_loudness_probe(monkeypatch):
+    """Fake media can't be measured; tests that care set explicit levels."""
+    monkeypatch.setattr("video2yt.loudness.measure_lufs", lambda path: None)
+    monkeypatch.setattr("video2yt.loudness.voice_reference_lufs", lambda path, percentile=85: None)
+
+
 @pytest.fixture
 def fake_media(tmp_path, monkeypatch):
     video = tmp_path / "src 中文.mp4"; video.write_bytes(b"v")
@@ -277,6 +284,42 @@ def test_context_promise_and_stages_are_textfiles_with_gates(fake_media, tmp_pat
     assert "enable='gte(t,8.000)*lt(t,11.000)'" in graph and "enable='gte(t,11.000)*lt(t,15.000)'" in graph
     assert "textfile=context.txt" in graph and "textfile=promise.txt" in graph
     assert f"{short.CLAIM_Y}+60*max(0\\,1-max(0\\,t-0.00)/0.3)" in graph
+    assert f"y={short.CONTEXT_Y}+60" in graph and f"y={short.PROMISE_Y}+60" in graph
+
+
+def test_bed_gain_is_voice_relative(fake_media, tmp_path, monkeypatch):
+    video, bg, mascot, font, clip_plus_outro = fake_media
+    stem_dir = video.with_suffix(""); stem_dir.mkdir()
+    (stem_dir / "no_music.wav").write_bytes(b"w")
+    bed = video.with_name(video.stem + ".music_bed.wav"); bed.write_bytes(b"b")
+    monkeypatch.setattr("video2yt.loudness.voice_reference_lufs", lambda path, percentile=85: -19.0)   # no_music.wav P85
+    monkeypatch.setattr("video2yt.loudness.measure_lufs", lambda path: -23.0)                          # bed integrated
+    captured = {}
+    def fake_run(cmd, cwd, **kw):
+        captured["cmd"] = cmd
+        (Path(cwd) / "rendered.mp4").write_bytes(b"out")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(short.subprocess, "run", fake_run)
+    clip_plus_outro[0] = 2.0 + 4.0
+    short.render(video, [(10.0, 12.0)], tmp_path / "s.mp4", **_kw(bg, mascot, font))
+    graph = captured["cmd"][captured["cmd"].index("-filter_complex") + 1]
+    assert "volume=-26.0dB[bed_scaled]" in graph   # −19 − 30 − (−23)
+
+
+def test_two_line_claim_pushes_context_and_promise_down(fake_media, tmp_path, monkeypatch):
+    video, bg, mascot, font, clip_plus_outro = fake_media
+    captured = {}
+    def fake_run(cmd, cwd, **kw):
+        captured["cmd"] = cmd
+        (Path(cwd) / "rendered.mp4").write_bytes(b"out")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(short.subprocess, "run", fake_run)
+    clip_plus_outro[0] = 10.0 + 4.0
+    short.render(video, [(10.0, 20.0)], tmp_path / "s.mp4", context="第14回合", promise="90秒後破萬",
+                 **_kw(bg, mascot, font, claim="一次回合結束\n6900變17000"))
+    graph = captured["cmd"][captured["cmd"].index("-filter_complex") + 1]
+    assert f"y={short.CONTEXT_Y + short.CLAIM_LINE_SHIFT}+60" in graph
+    assert f"y={short.PROMISE_Y + short.CLAIM_LINE_SHIFT}+60" in graph
 
 
 @pytest.mark.parametrize("kw", [
@@ -450,7 +493,7 @@ def test_sibling_music_bed_is_ducked_under_voice_and_credits_copied(fake_media, 
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "[1:a]aresample=48000,aformat=channel_layouts=stereo,asplit=2[b0][b1]" in graph
     assert "[tb0][tb1]concat=n=2:v=0:a=1,afade=t=in:d=1.0[clipbed]" in graph
-    assert f"volume={short._MUSIC_BED_VOLUME}[bed_scaled]" in graph and "sidechaincompress=" in graph
+    assert "volume=-18.4dB[bed_scaled]" in graph and "sidechaincompress=" in graph   # unmeasurable → legacy gain
     assert "amix=inputs=2:duration=first:dropout_transition=0:normalize=0[clipa]" in graph
     assert (tmp_path / "s_music_credits.txt").read_text(encoding="utf-8").startswith("Track by X")
     clip_plus_outro[0] = 2.0 + 4.0

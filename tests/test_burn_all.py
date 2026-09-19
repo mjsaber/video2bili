@@ -245,6 +245,30 @@ def _capture_ffmpeg(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def _no_loudness_probe(monkeypatch):
+    monkeypatch.setattr("video2yt.loudness.measure_lufs", lambda path: None)
+    monkeypatch.setattr("video2yt.loudness.voice_reference_lufs", lambda path, percentile=85: None)
+
+
+def test_render_music_swap_bed_gain_is_voice_relative(fake_seg, monkeypatch):
+    monkeypatch.setattr("video2yt.loudness.voice_reference_lufs", lambda path, percentile=85: -17.5)   # speech P85
+    monkeypatch.setattr("video2yt.loudness.measure_lufs", lambda path: -23.0)                          # bed integrated
+    calls = _capture_ffmpeg(monkeypatch)
+    burn.render(video_path=fake_seg["video"], ass_path=fake_seg["danmaku"], output_path=fake_seg["output"],
+                speech_wav=fake_seg["speech"], music_bed_wav=fake_seg["bed"], apply_music_swap=True)
+    fc = calls[0][0][calls[0][0].index("-filter_complex") + 1]
+    assert "[cbed]volume=-24.5dB[bed_scaled]" in fc   # −17.5 − 30 − (−23)
+
+
+def test_render_music_swap_falls_back_to_legacy_gain_when_unmeasurable(fake_seg, monkeypatch):
+    calls = _capture_ffmpeg(monkeypatch)
+    burn.render(video_path=fake_seg["video"], ass_path=fake_seg["danmaku"], output_path=fake_seg["output"],
+                speech_wav=fake_seg["speech"], music_bed_wav=fake_seg["bed"], apply_music_swap=True)
+    fc = calls[0][0][calls[0][0].index("-filter_complex") + 1]
+    assert "[cbed]volume=-18.4dB[bed_scaled]" in fc
+
+
 def test_render_legacy_simple_path_keeps_audio_copy(fake_seg, monkeypatch):
     calls = _capture_ffmpeg(monkeypatch)
     burn.render(

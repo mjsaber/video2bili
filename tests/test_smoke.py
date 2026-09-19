@@ -3989,6 +3989,15 @@ def test_merge_render_embeds_chapter_metadata(tmp_path, monkeypatch):
     assert cmd[cmd.index("-map_chapters") + 1] == ffmeta_idx
 
 
+def test_build_filter_complex_constant_gain_per_measured_segment():
+    from video2yt.merge import _build_filter_complex, Segment
+    from pathlib import Path as P
+    segs = [Segment(P("a.mp4"), "Intro", duration=25.0), Segment(P("b.mp4"), "Main", duration=300.0)]
+    fc = _build_filter_complex(segs, [-3.5, None])
+    assert "[0:a]volume=-3.5dB,aformat=channel_layouts=stereo,alimiter=limit=0.891:level=false,aresample=48000[a0n]" in fc
+    assert "[1:a]loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=channel_layouts=stereo[a1n]" in fc   # unmeasured → dynamic fallback
+
+
 def test_build_filter_complex_has_concat_and_loudnorm():
     from video2yt.merge import _build_filter_complex, Segment
     from pathlib import Path as P
@@ -3999,6 +4008,7 @@ def test_build_filter_complex_has_concat_and_loudnorm():
     fc = _build_filter_complex(segs)
     # loudnorm applied to each audio input
     assert fc.count("loudnorm=I=-14:TP=-1:LRA=11") == 2
+    assert fc.count("aformat=channel_layouts=stereo") == 2   # a mono intro must not make the delivery mono
     # each VIDEO input normalized to CFR 30fps + zeroed PTS before concat, so a
     # segment with timestamp discontinuities (e.g. a stream-copy CTA clip) can't
     # make the concat filter drop frames

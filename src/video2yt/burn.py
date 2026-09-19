@@ -19,18 +19,18 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-from video2yt import cuts
+from video2yt import cuts, loudness
 
 
 # Audio constants ported from music_swap.mix(): the known-good ducking
 # config when mixing CC0 bed under speech. See spec §6 note 6.
 _SIDECHAIN_PARAMS = "threshold=0.05:ratio=8:attack=5:release=300"
-_MUSIC_BED_VOLUME = 0.12  # was 0.18; lowered 2026-07-03 after viewer
-# feedback that the BGM bed was too loud under speech. (Originally 0.25
-# in music_swap; Bandit-v2 speech.wav has higher relative loudness than
-# Demucs vocals.)
+# Bed level is voice-relative since 2026-09-18 (loudness.bed_gain_db: voice LUFS −
+# BED_BELOW_VOICE_DB). History: fixed volume 0.25 (music_swap) → 0.18 → 0.12
+# (2026-07-03, viewer feedback) → measured per segment (viewer feedback again).
 
 
 def _build_filter_complex(
@@ -40,6 +40,7 @@ def _build_filter_complex(
     cleaned_ass_filename: str | None = None,
     speech_input_index: int | None = None,
     music_bed_input_index: int | None = None,
+    bed_gain_db: float = loudness.LEGACY_BED_GAIN_DB,
 ) -> str:
     """Build an ffmpeg ``-filter_complex`` string.
 
@@ -160,7 +161,7 @@ def _build_filter_complex(
 
         # A2: sidechain-duck the bed against the speech, then amix.
         parts.append("[csp]asplit=2[sp_a][sp_b]")
-        parts.append(f"[cbed]volume={_MUSIC_BED_VOLUME}[bed_scaled]")
+        parts.append(f"[cbed]volume={bed_gain_db:+.1f}dB[bed_scaled]")
         parts.append(
             f"[bed_scaled][sp_a]sidechaincompress={_SIDECHAIN_PARAMS}[bed_ducked]"
         )
@@ -336,8 +337,14 @@ def render(
         cmd.extend(["-i", str(speech_wav.resolve())])
         cmd.extend(["-i", str(music_bed_wav.resolve())])
         speech_idx, bed_idx = 1, 2
+        voice_lufs = loudness.voice_reference_lufs(speech_wav)
+        bed_lufs = loudness.measure_lufs(music_bed_wav)
+        bed_gain = loudness.bed_gain_db(voice_lufs, bed_lufs)
+        print(f"[video2yt-burn] music bed gain {bed_gain:+.1f} dB (voice P{loudness.VOICE_PERCENTILE} {voice_lufs} LUFS, bed {bed_lufs} LUFS, "
+              f"target voice−{loudness.BED_BELOW_VOICE_DB:g} dB)", file=sys.stderr)
     else:
         speech_idx = bed_idx = None
+        bed_gain = loudness.LEGACY_BED_GAIN_DB
     if max_duration is not None:
         cmd.extend(["-t", str(max_duration)])
 
@@ -350,6 +357,7 @@ def render(
                 cleaned_ass_filename=cleaned_ass_for_burn_basename,
                 speech_input_index=speech_idx,
                 music_bed_input_index=bed_idx,
+                bed_gain_db=bed_gain,
             )
             cmd.extend([
                 "-filter_complex", filter_complex,

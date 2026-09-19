@@ -448,7 +448,7 @@ def render(inputs: IntroInputs, output_path: Path) -> Path:
         "-r", str(FPS),
         "-pix_fmt", "yuv420p",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-        "-c:a", "aac", "-ar", "48000", "-b:a", "192k",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k",   # TTS is mono; deliver stereo so merge's concat never goes mono
         "-t", f"{duration:.3f}",
         str(output_path.resolve()),
     ]
