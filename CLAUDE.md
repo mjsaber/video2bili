@@ -32,6 +32,7 @@ uv run video2yt-compose --audio a.mp3 --image bg.jpg --srt subs.srt --title "T" 
 uv run video2yt-intro --audio intro.mp3 --bg intro_bg.png --srt intro.srt --cards intro_cards.txt -o output/<project>/intro.mp4   # dynamic intro: 女老板 narrator + per-card spotlight + scrim
 uv run video2yt-cta --video battle.mp4 --text "訂閱馬哥，每期拆解轉型決策" --at 90 -o battle_cta.mp4  # choose a value-delivered moment
 uv run video2yt-merge --segment a.mp4 --label "A" --segment b.mp4 --label "B" --segment c.mp4 --label "C" --title "T"   # concat + loudnorm + chapters
+#   order for a channel video: intro.mp4 → cta.mp4 → <segment 1> → <segment 2> → assets/branding/outro_subscribe.mp4 (7.5 s 片尾小鈴鐺 CTA, LONG videos only — never on Shorts; see assets/cta/outro/README.md)
 uv run video2yt-short --video temp/<dir>/<bv>.mp4 --start 12:34 --end 13:40 --claim "第9回合\n全隊破萬" --comp 海盜倒轉 --rank 這局第1名 --srt <name>.cleaned.srt [--face X:Y:W:H] -o output/<project>/short_1.mp4   # 1080x1920 Short: board crop on top, face/mascot below, claim+label, outro CTA + link
 uv run video2yt-cleanup --project <project>                            # LAST step after upload: DRY-RUN plan — purge current project's temp/ + delete previous shipped project's whole output/ folder
 uv run video2yt-cleanup --project <project> --yes                      # actually delete (reclaim disk; current output/<project>/ kept as a one-period buffer)

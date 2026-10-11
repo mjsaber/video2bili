@@ -14,7 +14,7 @@ REQUIRED_TAGS: tuple[str, ...] = ("爐石戰記", "英雄戰場", "英雄戰場�
 SIMPLIFIED_TAGS: tuple[str, ...] = ("酒馆战棋", "炉石传说", "炉石", "战棋", "酒馆")
 TRIBE_TERMS: tuple[str, ...] = (
     "野獸", "海盜", "惡魔", "機械", "龍", "魚人", "元素",
-    "亡靈", "不死族", "娜迦", "納迦", "野豬人",
+    "亡靈", "不死族", "娜迦", "納迦", "野豬人", "變異怪",
 )
 # official zhTW name -> colloquial spelling searchers actually type
 TRIBE_ALIASES: dict[str, str] = {"亡靈": "不死族", "娜迦": "納迦"}
