@@ -1,0 +1,5 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG24_004_zhTW_bgs_512.png | 躍翼攻擊時免疫
+BG29_810_zhTW_bgs_512.png | 千紙龍
+BG29_813_zhTW_bgs_512.png | 堅持的吟詩龍
+BG33_823_zhTW_bgs_512.png | 空軍上將羅傑斯

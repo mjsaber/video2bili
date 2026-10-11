@@ -1,0 +1,5 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG36_MagicItem_370_zhTW_bgs_512.png | 瑪卓薩斯匕首改成每兩回合
+BG34_444_zhTW_bgs_512.png | 東來之風餵野火元素
+BG36_640_zhTW_bgs_512.png | 門衛聚合體什麼種族都能喝茶
+BG36_MidGameEffect_000t89_zhTW_bgs_512.png | 黑暗贈禮信奉直接拿神的體質

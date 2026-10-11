@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "complete",
+  "channel_id": "UCEgIrCo0pR6DyyrXuSn3wBg",
+  "video_sha256": "862343aa6aefa94989086ebe77eda0098e113cd3624cdde01645b2f45be57df3",
+  "metadata_sha256": "adaca4233e513e99e6d8d474f5fec44ed5b7b31c8598b2638f5db1ec25535eb2",
+  "attempted_at": "2026-09-29T03:17:10.917312+00:00",
+  "metadata_filename": "youtube_metadata.json",
+  "video_id": "qvCvG8U3GMY",
+  "uploaded_at": "2026-09-29T03:24:38.358983+00:00",
+  "thumbnail_status": "complete",
+  "thumbnail_sha256": "f48829ef90ce38019584df6d2b6a4343d9e80c0796a3f53badd2ac20777246cd",
+  "playlist_status": "complete",
+  "errors": []
+}

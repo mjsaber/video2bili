@@ -1,0 +1,5 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG28_707_zhTW_bgs_512.png | 活化的艾澤萊晶岩
+BG30_MagicItem_544t_zhTW_bgs_512.png | 糯米貼紙
+BG30_MagicItem_431_zhTW_bgs_512.png | 艾澤萊晶岩頭像
+BGS_126_zhTW_bgs_512.png | 野火元素殺一隻

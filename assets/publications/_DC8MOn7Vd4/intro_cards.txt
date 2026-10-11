@@ -1,0 +1,5 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG28_633_zhTW_bgs_512.png | 惡魔野豬喝茶
+BG26_817_zhTW_bgs_512.png | 刀劍收藏家
+BG36_640_zhTW_bgs_512.png | 門衛聚合體
+BG35_883_zhTW_bgs_512.png | 巴琳達

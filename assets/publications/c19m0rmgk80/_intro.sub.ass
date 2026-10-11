@@ -1,0 +1,27 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Hiragino Sans GB,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,2,80,680,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.84,Default,,0,0,0,,你敢相信？
+Dialogue: 0,0:00:00.84,0:00:03.56,Default,,0,0,0,,巴琳達的多次觸發被修掉之後，
+Dialogue: 0,0:00:03.56,0:00:07.11,Default,,0,0,0,,屠殺亡靈照樣把一隻手下養到二十二萬！
+Dialogue: 0,0:00:07.11,0:00:10.04,Default,,0,0,0,,屠殺花兩塊摧毀一隻友方不死族，
+Dialogue: 0,0:00:10.04,0:00:12.55,Default,,0,0,0,,全隊不死族這局永久加五攻；
+Dialogue: 0,0:00:12.55,0:00:14.64,Default,,0,0,0,,時髦魅影在手下重生後，
+Dialogue: 0,0:00:14.64,0:00:18.41,Default,,0,0,0,,把牠的攻擊力當體質灌給最右邊的不死族；
+Dialogue: 0,0:00:18.41,0:00:21.97,Default,,0,0,0,,淵喉施法者頭像每摧毀一隻就退你兩塊，
+Dialogue: 0,0:00:21.97,0:00:23.22,Default,,0,0,0,,屠殺等於免費。
+Dialogue: 0,0:00:23.22,0:00:27.20,Default,,0,0,0,,問題是怎麼讓手下死：郭楓荷的老鼠王走肉裝，
+Dialogue: 0,0:00:27.20,0:00:28.66,Default,,0,0,0,,手下太肉死不掉、
+Dialogue: 0,0:00:28.66,0:00:29.92,Default,,0,0,0,,重生觸發不了；
+Dialogue: 0,0:00:29.92,0:00:33.05,Default,,0,0,0,,瓦莉拉專挑適合去死的小怪送重生。
+Dialogue: 0,0:00:33.05,0:00:34.73,Default,,0,0,0,,我們從這兩局看起。

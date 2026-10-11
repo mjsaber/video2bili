@@ -1,0 +1,5 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BGFYM_011_zhTW_bgs_512.png | 亞煞拉懼配臨時主宰
+BG36_MagicItem_417_zhTW_bgs_512.png | 臨時主宰是造法
+BG36_640_zhTW_bgs_512.png | 門衛聚合體
+BG30_121_zhTW_bgs_512.png | 熱氣勘測員

@@ -1,0 +1,33 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Hiragino Sans GB,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,2,80,680,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.38,0:00:01.26,Default,,0,0,0,,你敢相信？
+Dialogue: 0,0:00:01.26,0:00:03.69,Default,,0,0,0,,惡魔野豬喝茶，一隻七萬六。
+Dialogue: 0,0:00:03.69,0:00:05.45,Default,,0,0,0,,郭楓荷戴納瑟斯王，
+Dialogue: 0,0:00:05.45,0:00:07.87,Default,,0,0,0,,第十五回合兩隻惡魔野豬，
+Dialogue: 0,0:00:07.87,0:00:09.19,Default,,0,0,0,,二十一K七十六K、
+Dialogue: 0,0:00:09.19,0:00:10.29,Default,,0,0,0,,十七K六十二K，
+Dialogue: 0,0:00:10.29,0:00:10.95,Default,,0,0,0,,第一名；
+Dialogue: 0,0:00:10.95,0:00:12.49,Default,,0,0,0,,瓦莉拉瑪里苟斯，
+Dialogue: 0,0:00:12.49,0:00:14.69,Default,,0,0,0,,開局買豬被打到十六血，
+Dialogue: 0,0:00:14.69,0:00:19.76,Default,,0,0,0,,第十六回合卻是一隻八萬六的金刀劍收藏家順\N劈收尾。
+Dialogue: 0,0:00:19.76,0:00:22.18,Default,,0,0,0,,為什麼強：鮮血寶石是法術，
+Dialogue: 0,0:00:22.18,0:00:27.24,Default,,0,0,0,,惡魔野豬每施放三個法術就吞噬旅店一個手下\N拿體質；
+Dialogue: 0,0:00:27.24,0:00:30.98,Default,,0,0,0,,門衛聚合體每被施法就讓旅店手下變大，
+Dialogue: 0,0:00:30.98,0:00:33.40,Default,,0,0,0,,巴琳達‧石爐讓法術放兩次，
+Dialogue: 0,0:00:33.40,0:00:34.50,Default,,0,0,0,,豬越吃越肥。
+Dialogue: 0,0:00:34.50,0:00:38.24,Default,,0,0,0,,怎麼玩：先找聚合體和巴琳達把旅店養肥，
+Dialogue: 0,0:00:38.24,0:00:39.57,Default,,0,0,0,,再找惡魔野豬；
+Dialogue: 0,0:00:39.57,0:00:41.55,Default,,0,0,0,,最後聚合體可以賣掉，
+Dialogue: 0,0:00:41.55,0:00:43.09,Default,,0,0,0,,純惡魔野豬上場。
+Dialogue: 0,0:00:43.09,0:00:43.97,Default,,0,0,0,,看這兩局。

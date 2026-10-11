@@ -1,0 +1,4 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BGFYM_000_zhTW_bgs_512.png | 克蘇恩養塔瑞克苟莎
+BG21_015_zhTW_bgs_512.png | 塔瑞克苟莎永久保留
+BG36_MagicItem_602_zhTW_bgs_512.png | 古神面具讓克蘇恩變金卡

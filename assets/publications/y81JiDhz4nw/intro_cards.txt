@@ -1,0 +1,4 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG26_ICC_901_zhTW_bgs_512.png | 德拉克瑞附魔師
+BG36_320_zhTW_bgs_512.png | 神秘的克西爾
+BG36_MagicItem_430_zhTW_bgs_512.png | 淤泥頭像

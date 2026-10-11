@@ -1,0 +1,4 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG33_318_zhTW_bgs_512.png | 膽汁噴吐者
+BG34_145_zhTW_bgs_512.png | 未來鰭
+BG26_354_zhTW_bgs_512.png | 魚人合唱團

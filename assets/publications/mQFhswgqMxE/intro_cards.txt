@@ -1,0 +1,3 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG28_633_zhTW_bgs_512.png | 惡魔野豬每施放
+BGFYM_000_zhTW_bgs_512.png | 克蘇恩

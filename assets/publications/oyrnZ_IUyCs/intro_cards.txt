@@ -1,0 +1,6 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG20_GEM_zhTW_bgs_512.png | 鮮血寶石又給錢
+BG35_434_zhTW_bgs_512.png | 雇用的祭儀師每回合
+BG30_121_zhTW_bgs_512.png | 熱氣勘測員讓手中
+BG35_883_zhTW_bgs_512.png | 巴琳達讓對友方
+BG36_640_zhTW_bgs_512.png | 門衛聚合體每被施

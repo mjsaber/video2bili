@@ -1,0 +1,5 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG36_849_zhTW_bgs_512.png | 英勇育母配黑暗贈禮
+BG36_MidGameEffect_000t13_zhTW_bgs_512.png | 鷹身人之爪再給聖盾加風怒
+BG36_MidGameEffect_000t61_zhTW_bgs_512.png | 魔像術給她死亡之聲
+BG36_208_zhTW_bgs_512.png | 金死亡陸行鷹讓奮戰手下

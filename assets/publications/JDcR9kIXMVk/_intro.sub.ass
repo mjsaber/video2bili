@@ -1,0 +1,32 @@
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Hiragino Sans GB,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,2,80,680,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:00.89,Default,,0,0,0,,你敢相信？
+Dialogue: 0,0:00:00.89,0:00:02.90,Default,,0,0,0,,克蘇恩養塔瑞克苟莎，
+Dialogue: 0,0:00:02.90,0:00:06.25,Default,,0,0,0,,郭楓荷一隻龍從一百多滾到四千五，
+Dialogue: 0,0:00:06.25,0:00:08.04,Default,,0,0,0,,第十三回合第一名；
+Dialogue: 0,0:00:08.04,0:00:10.05,Default,,0,0,0,,瓦莉拉戴上古神面具，
+Dialogue: 0,0:00:10.05,0:00:12.06,Default,,0,0,0,,克蘇恩一死全隊破千，
+Dialogue: 0,0:00:12.06,0:00:13.62,Default,,0,0,0,,一回合加一千四！
+Dialogue: 0,0:00:13.62,0:00:18.31,Default,,0,0,0,,為什麼強：克蘇恩甦醒後把體質平均分給其他\N手下，
+Dialogue: 0,0:00:18.31,0:00:22.10,Default,,0,0,0,,塔瑞克苟莎永久保留戰鬥中獲得的體質，
+Dialogue: 0,0:00:22.10,0:00:24.34,Default,,0,0,0,,分到的每一口都存下來，
+Dialogue: 0,0:00:24.34,0:00:25.68,Default,,0,0,0,,一場比一場大。
+Dialogue: 0,0:00:25.68,0:00:28.13,Default,,0,0,0,,古神面具讓克蘇恩變金卡，
+Dialogue: 0,0:00:28.13,0:00:30.36,Default,,0,0,0,,分出去的體質直接翻倍。
+Dialogue: 0,0:00:30.36,0:00:34.16,Default,,0,0,0,,怎麼玩：郭楓荷貿易親王一隻手下兩塊錢，
+Dialogue: 0,0:00:34.16,0:00:35.95,Default,,0,0,0,,只養克蘇恩配泰蕾，
+Dialogue: 0,0:00:35.95,0:00:37.51,Default,,0,0,0,,火車王也擋不住；
+Dialogue: 0,0:00:37.51,0:00:41.08,Default,,0,0,0,,瓦莉拉先拿古神面具再湊三個變異怪，
+Dialogue: 0,0:00:41.08,0:00:43.32,Default,,0,0,0,,等克蘇恩醒來一波起飛。
+Dialogue: 0,0:00:43.32,0:00:44.21,Default,,0,0,0,,看這兩局。

@@ -1,0 +1,4 @@
+# <png in assets/cards> | <中文卡名 matched in intro.srt>
+BG28_604_zhTW_bgs_512.png | 屠殺花兩塊
+BG36_515_zhTW_bgs_512.png | 時髦魅影
+BG32_MagicItem_205_zhTW_bgs_512.png | 淵喉施法者頭像
